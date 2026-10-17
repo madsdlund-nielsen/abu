@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { toggleAdvisorActiveAction } from "@/app/actions/admin";
+import { savePriceBoundsAction, toggleAdvisorActiveAction } from "@/app/actions/admin";
+import { getPriceBounds } from "@/lib/advisor-price";
 import { ResendInviteButton } from "@/components/admin/advisor-invite";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { ReadinessList } from "@/components/admin/readiness";
@@ -13,8 +14,9 @@ export const metadata: Metadata = { title: "Rådgivere" };
 export default async function AdminAdvisors({ searchParams }: { searchParams: SP }) {
   const { ok, err } = await flashFrom(searchParams);
   const advisors = await prisma.advisorProfile.findMany({ include: { user: true, tags: { include: { tag: true } } }, orderBy: { user: { name: "asc" } } });
+  const bounds = await getPriceBounds();
   const [readiness, boardRows] = await Promise.all([
-    loadReadiness(advisors.map((a) => a.userId)),
+    loadReadiness(advisors.map((a) => a.userId), bounds),
     prisma.subscriptionAdvisor.findMany({
       where: { advisorId: { in: advisors.map((a) => a.userId) }, subscription: { status: { in: ["ACTIVE", "PAST_DUE", "PENDING"] } } },
       select: { advisorId: true, subscription: { select: { customer: { select: { companyName: true } } } } },
@@ -28,6 +30,23 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
         <Link href="/admin/advisors/new" className="btn">Opret rådgiver</Link>
       </div>
       <Flash ok={ok} err={err} />
+      <details className="card" data-testid="price-bounds">
+        <summary className="text-sm">
+          <span className="font-semibold text-navy">Tilladt pris pr. møde:</span> {formatDkk(bounds.min)} – {formatDkk(bounds.max)} <span className="text-muted">(ret)</span>
+        </summary>
+        <form action={savePriceBoundsAction} className="mt-space-3 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="label" htmlFor="pb-min">Mindst (kr.)</label>
+            <input className="input !w-36" id="pb-min" name="min" inputMode="numeric" defaultValue={bounds.min} required />
+          </div>
+          <div>
+            <label className="label" htmlFor="pb-max">Højst (kr.)</label>
+            <input className="input !w-36" id="pb-max" name="max" inputMode="numeric" defaultValue={bounds.max} required />
+          </div>
+          <button className="btn-secondary" type="submit">Gem interval</button>
+          <p className="w-full text-xs text-muted">Beskytter mod fejlindtastninger (fx 0 kr.) og dermed abonnementer på 0 kr. hos betalingsudbyderen.</p>
+        </form>
+      </details>
       <div className="table-wrap">
         <table className="table">
           <thead>

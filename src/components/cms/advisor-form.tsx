@@ -15,6 +15,7 @@ export function AdvisorForm({
   activeSubscriptions,
   readiness,
   boards,
+  priceBounds,
 }: {
   userId: string;
   initial: { priceDkk: number; active: boolean; tagIds: string[] };
@@ -23,6 +24,7 @@ export function AdvisorForm({
   readiness: ReadinessItem[];
   /** Kunder, hvis aktive boards rådgiveren sidder i */
   boards: string[];
+  priceBounds: { min: number; max: number };
 }) {
   const [price, setPrice] = useState(String(initial.priceDkk));
   const [active, setActive] = useState(initial.active);
@@ -33,7 +35,7 @@ export function AdvisorForm({
   const saver = useSaver();
 
   const priceNum = Number(price.replace(/[^\d]/g, ""));
-  const priceValid = price.trim() !== "" && Number.isInteger(priceNum) && priceNum >= 0 && priceNum <= 20000;
+  const priceValid = price.trim() !== "" && Number.isInteger(priceNum) && priceNum >= priceBounds.min && priceNum <= priceBounds.max;
   const dirty = priceNum !== saved.priceDkk || active !== saved.active || [...tagIds].sort().join() !== [...saved.tagIds].sort().join();
   const visible = tags.filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase()));
   // Tag-punktet følger de valgte (endnu ikke gemte) tags
@@ -72,7 +74,7 @@ export function AdvisorForm({
             />
             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">kr.</span>
           </div>
-          <p className="mt-1 text-sm text-navy">{priceValid ? formatDkk(priceNum) + " pr. møde" : <span className="text-danger">Angiv et helt antal kroner (0-20.000).</span>}</p>
+          <p className="mt-1 text-sm text-navy" id="price-help">{priceValid ? formatDkk(priceNum) + " pr. møde" : <span className="text-danger" role="alert">Prisen skal ligge mellem {formatDkk(priceBounds.min)} og {formatDkk(priceBounds.max)} pr. møde.</span>}</p>
           <p id="price-note" className="callout mt-space-3 text-sm">
             Ændringer gælder kun <strong>nye abonnementer og planskift</strong>. Eksisterende abonnementer ({activeSubscriptions} aktive med denne rådgiver) beholder den pris, der var gældende ved køb.
           </p>

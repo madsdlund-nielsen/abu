@@ -6,6 +6,7 @@ import { audit } from "@/lib/audit";
 import { createPasswordToken, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
+import { getPriceBounds, savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
 import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
 import { getEnv } from "@/lib/env";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
@@ -97,7 +98,7 @@ export async function toggleAdvisorActiveAction(formData: FormData) {
   await audit(admin.id, activate ? "advisor.activate" : "advisor.deactivate", "User", id);
   revalidatePath("/admin/advisors");
   if (activate) {
-    const missing = missingReadiness((await loadReadiness([id])).get(id) ?? []);
+    const missing = missingReadiness((await loadReadiness([id], await getPriceBounds())).get(id) ?? []);
     redirectWith("/admin/advisors", "ok", `${profile.user.name} er aktiveret og kan nu vælges af kunder.${missing.length ? ` Bemærk: mangler ${missing.join(", ")}.` : ""}`);
   }
   const boards = await boardsWithAdvisor(id);
@@ -125,4 +126,15 @@ export async function processDeletionAction(formData: FormData) {
   const r = await eraseUser(id, admin.id);
   if (!r.ok) redirectWith("/admin/customers", "err", r.error);
   redirectWith("/admin/customers", "ok", "Brugeren og tilhørende data er slettet, og abonnementet er opsagt.");
+}
+
+/** Prisinterval for rådgivere (plan #20). */
+export async function savePriceBoundsAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const b = { min: Number(String(formData.get("min") ?? "").replace(/\D/g, "")), max: Number(String(formData.get("max") ?? "").replace(/\D/g, "")) };
+  const problem = validatePriceBounds(b);
+  if (problem) redirectWith("/admin/advisors", "err", problem);
+  await savePriceBounds(b);
+  await audit(admin.id, "advisor.price_bounds", "AppSetting", "advisor.price", `${b.min}-${b.max}`);
+  redirectWith("/admin/advisors", "ok", "Prisintervallet er gemt. Det gælder for nye prisændringer.");
 }

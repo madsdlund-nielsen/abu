@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AdvisorForm } from "@/components/cms/advisor-form";
+import { getPriceBounds } from "@/lib/advisor-price";
 import { boardsWithAdvisor, loadReadiness } from "@/lib/advisor-readiness";
 import { prisma } from "@/lib/db";
 
@@ -14,7 +15,8 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
     prisma.subscriptionAdvisor.count({ where: { advisorId: id, subscription: { status: { in: ["ACTIVE", "PAST_DUE"] } } } }),
   ]);
   if (!profile) notFound();
-  const [readiness, boards] = await Promise.all([loadReadiness([id]), boardsWithAdvisor(id)]);
+  const bounds = await getPriceBounds();
+  const [readiness, boards] = await Promise.all([loadReadiness([id], bounds), boardsWithAdvisor(id)]);
   return (
     <div>
       <span className="eyebrow">Admin · Rådgiver</span>
@@ -27,6 +29,7 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
         activeSubscriptions={activeSubscriptions}
         readiness={readiness.get(id) ?? []}
         boards={boards.map((b) => b.companyName)}
+        priceBounds={bounds}
       />
     </div>
   );

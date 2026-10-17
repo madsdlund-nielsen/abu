@@ -5,6 +5,7 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getPriceBounds, validateAdvisorPrice } from "@/lib/advisor-price";
 import { isDuplicateTagName } from "@/lib/tag-name";
 import type { ActionResult } from "@/lib/onboarding/cms-types";
 
@@ -200,12 +201,14 @@ export async function updateAdvisorAction(userId: string, input: { priceDkk: num
   return guard(async (adminId) => {
     const p = z
       .object({
-        priceDkk: z.number().int("Prisen skal være et helt antal kroner.").min(0, "Prisen kan ikke være negativ.").max(20000, "Prisen er urealistisk høj."),
+        priceDkk: z.number().int("Prisen skal være et helt antal kroner."),
         active: z.boolean(),
         tagIds: z.array(z.string()).max(30),
       })
       .safeParse(input);
     if (!p.success) return err(p.error.issues[0].message);
+    const priceProblem = validateAdvisorPrice(p.data.priceDkk, await getPriceBounds());
+    if (priceProblem) return err(priceProblem);
     const exists = await prisma.advisorProfile.findUnique({ where: { userId } });
     if (!exists) return err("Rådgiveren findes ikke.");
     const tagCount = await prisma.tag.count({ where: { id: { in: p.data.tagIds } } });
@@ -216,6 +219,7 @@ export async function updateAdvisorAction(userId: string, input: { priceDkk: num
       prisma.advisorTag.createMany({ data: [...new Set(p.data.tagIds)].map((tagId) => ({ advisorId: userId, tagId })), skipDuplicates: true }),
     ]);
     await audit(adminId, "advisor.update", "User", userId);
+    if (exists.active !== p.data.active) await audit(adminId, p.data.active ? "advisor.activate" : "advisor.deactivate", "User", userId);
     refresh();
     revalidatePath(`/admin/advisors/${userId}`);
     return { ok: true };
