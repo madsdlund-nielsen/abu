@@ -553,3 +553,12 @@ model RateLimit {
 
   @@index([resetAt])
 }
+
+/// Fælles cache for CVR-opslag (M-4/L-2), også for "ikke fundet". Fejl caches ikke.
+model CvrLookupCache {
+  cvr       String   @id
+  result    Json
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}

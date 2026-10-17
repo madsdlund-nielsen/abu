@@ -51,7 +51,8 @@ export function setRateLimitStore(s: RateLimitStore) {
   store = s;
 }
 
-const storeKey = (key: string) => sha256(`rl:${key}`);
+/** Nøglen, som den gemmes i lageret (SHA-256). */
+export const storeKey = (key: string) => sha256(`rl:${key}`);
 
 /** true = tilladt. Tæller altid forsøget (også når grænsen er nået). */
 export async function rateLimit(key: string, max = 8, windowMs = 15 * 60_000, now = new Date()): Promise<boolean> {

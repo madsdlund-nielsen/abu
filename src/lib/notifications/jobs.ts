@@ -1,4 +1,5 @@
 import { registerJobHandler } from "../jobs";
+import { cleanupCvrCache } from "../cvr";
 import { cleanupWebhookPayloads } from "../erasure";
 import { cleanupRateLimits } from "../rate-limit";
 import { cleanupLeads } from "../leads";
@@ -25,6 +26,7 @@ registerJobHandler("cleanup_webhook_payloads", async () => {
 
 registerJobHandler("cleanup_rate_limits", async () => {
   await cleanupRateLimits();
+  await cleanupCvrCache();
 });
 
 /** Kaldes hvert minut af jobprocessoren: finder ufærdige tilmeldinger, sender forfaldne beskeder og planlægger daglig oprydning. */

@@ -44,6 +44,8 @@ const schema = z.object({
   CVR_VIRK_PASSWORD: z.string().default(""),
   CVR_VIRK_URL: z.string().default("http://distribution.virk.dk/cvr-permanent/virksomhed/_search"),
   CVR_USER_AGENT: z.string().default("Advisory Board Unlimited - onboarding (kontakt: support@example.dk)"),
+  /** Højst så mange eksterne CVR-opslag pr. døgn i alt (beskytter den fælles gratis kvote). Derefter manuel indtastning. */
+  CVR_DAILY_BUDGET: z.coerce.number().int().min(1).max(100000).default(300),
 
   VIDEO_PROVIDER: z.enum(["mock", "whereby"]).default("mock"),
   WHEREBY_API_KEY: z.string().default(""),
