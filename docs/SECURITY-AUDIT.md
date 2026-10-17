@@ -182,3 +182,33 @@ Counts include only numbered findings below.
 - **Secrets management:** generate strong random `APP_SECRET`, `CRON_SECRET`, DB password and all provider keys; never derive secrets from each other (M-8); rotate the inMobile URL secret.
 - **CI security checks:** `npm audit --omit=dev --audit-level=high` (blocking), `npm ci` only, lint/typecheck, and a check that no production env resolves to a mock/console/local provider. Add secret-scanning on the repo.
 - **Data protection:** complete the DPA/retention work in `docs/OPEN_ITEMS.md`; ensure erasure removes storage objects and webhook payloads; keep transcript-access auditing (already present).
+
+---
+
+## Remediation status (2026-10-18)
+
+Original findings above are unchanged. Branch `claude/advisory-board-unlimited-app-iwswih`; verified with lint, `tsc`, 293 unit/DB tests, `next build`, `npm audit --omit=dev --audit-level=high` (0), a production-like boot, Docker image build/run and Chromium re-tests (details in the commit messages and `docs/PRODUKTIONSPLAN.md`).
+
+| Finding | Status | Commit(s) | Note |
+|---|---|---|---|
+| C-1 | Fixed | `16314de` | Fail-closed boot guard (`instrumentation.ts`): production refuses mock/console/local providers, missing secrets/keys, non-https `APP_URL`, unknown env values; logs the provider set without secrets. Mock activation only via POST on an internal test checkout, never in production. Re-tested: standalone build and Docker image with mock config exit 1 with "Appen starter ikke". |
+| H-1 | Fixed | `3fc0474` | `npm run create-admin` (one-time 7-day link, no password in code/logs); seed refuses `NODE_ENV/APP_ENV=production`; compose `migrate` runs with `NODE_ENV=production`; README updated. |
+| H-2 | Fixed | `e9ac0af` | Client IP from `TRUSTED_PROXY_HOPS` (right-most trusted XFF entry; required ≥1 in prod); per-account lockout in DB (5 → 15 min, escalating, max 24 h); Postgres `RateLimit` store replaces the in-memory Map everywhere. Re-tested: 5 wrong logins with rotating XFF lock the account, even for the correct password. |
+| H-3 | Fixed | `abfd648` | Console adapters redact links/tokens, addresses and numbers; sensitive messages (reset/invite) are never logged. Console adapters are also forbidden in production (C-1). |
+| H-4 | Fixed (scheme to confirm) | `64f4a68` | HMAC-SHA256 over the raw body + signed timestamp (≤5 min), verified before `JSON.parse`, then zod shape check; idempotency kept. Header format is one constant to adapt once Frisbii/Alunta is chosen. |
+| H-5 | Fixed | `c8b6e31`, `23afefd` | No server-action upload: presigned POST direct to S3 (size enforced by storage) or streamed local PUT; magic-byte validation from the first 64 bytes; concurrency caps; `bodySizeLimit` 10 MB; transcription reads a disk-backed Blob. Re-tested: 400 MB upload raised server RSS by ~24 MB. |
+| H-6 | Fixed | `c1e8e52` | next 16.4.2 (bundles patched postcss) and prisma 7.10.1 (no vulnerable deepmerge-ts); exact pins; lockfile regenerated with npm. `npm audit --omit=dev`: 0. Remaining dev-only findings (Tailwind 3 / eslint plugins) documented in OPEN_ITEMS. |
+| M-1 | Fixed (step 1); residual at step 6 | `4640815` | Step 1 response identical for existing/new e-mail (re-tested), owner gets a neutral "you already have an account" mail via `after()`. Step 6 can still distinguish; full fix needs e-mail verification before account creation (OPEN_ITEMS). |
+| M-2 | Fixed | `724adc2` | Export uses explicit selects; re-tested: no `hostRoomUrl`, room URLs or provider ids. |
+| M-3 | Fixed | `c938957` | Erasure cancels at the payment provider first (aborts if that fails), deletes recording objects and related WebhookEvent rows, then user data; webhook payloads redacted after 30 days. |
+| M-4 | Fixed (no CAPTCHA) | `91fea95` | Trusted-IP + per-session limits, global daily budget for external lookups, shared DB cache incl. "not found". CAPTCHA (Friendly Captcha) left as TODO. |
+| M-5 | Fixed | `268ebd3` | SMS country allow-list (default DK, editable in CMS), per-number and daily caps, `[ALERT]` log + admin dashboard alert on hits. |
+| M-6 | Fixed | `27330b2` | CSP with per-request nonce (`strict-dynamic`), `frame-src` only Whereby (`'self'` in mock), HSTS in production, Permissions-Policy allowing camera/mic/display-capture only on `/meetings/<id>`, cookie always Secure in production. Re-tested with curl and Chromium (no CSP violations). |
+| M-7 | Partially fixed | `b2a85c9` | Secret via header or query, rotation, body cap, rate limit, only recent known messages updated, STOP only for known numbers. Real signature pending inMobile docs. |
+| M-8 | Fixed | `29d30c4` | Full 256-bit HMAC with `APP_SECRET` only (required in prod), 1-year expiry. Re-tested: tokens forged with the old derived key are rejected. |
+| M-9 | Fixed | `c1e8e52`, `ab7ed4a` | Exact pins, `npm ci` only, CI with blocking `npm audit`, Renovate (weekly, grouped, review). |
+| L-1 | Fixed | `16314de` | `/subscribe/success` has no side effects. |
+| L-2 | Fixed | `e9ac0af`, `91fea95` | Rate limits and CVR cache in Postgres. |
+| L-3 | Mitigated | `740bc1b` | Audit-write failures raise an alert (`[ALERT] audit_write_failed` + admin dashboard). Not tamper-evident (no hash chain). |
+| L-4 | Fixed | `c8b6e31` | Magic-byte validation; `application/octet-stream` no longer accepted. |
+| L-5 | Fixed | `64f4a68` | Strict `t=`/`v1=` parsing and 5-minute freshness for Whereby. |

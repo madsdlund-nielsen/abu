@@ -31,11 +31,16 @@ Seed-brugere:
 | Kunde (aktivt abonnement: 3 rådgivere, hver 8. uge) | `kunde@abu.local` | `Kunde12345!` |
 | Rådgivere (8 stk., fx `mette.lindberg@abu.local`) | se `prisma/seed-data.ts` | `Raadgiver123!` |
 
-Seed opretter også danske standardtekster og -regler til notifikationer (20 skabeloner, 20 regler).
+Seed opretter også danske standardtekster og -regler til notifikationer (21 skabeloner, 21 regler).
 
-Hele flowet virker i mock-tilstand: onboarding (`/kom-i-gang`) → "betaling" → book → åbn mødet → upload optagelse (som
-rådgiver/admin) → transskription og resumé vises på mødesiden. Mails (inkl. invitationslinks) skrives til serverloggen,
-og invitationslinket vises også for admin i UI'et under *Admin → Rådgivere*.
+Hele flowet virker i mock-tilstand: onboarding (`/kom-i-gang`) → testbetaling (`/subscribe/mock-betaling`, ét klik) → book → åbn
+mødet → upload optagelse (som rådgiver/admin) → transskription og resumé vises på mødesiden. Mails og SMS skrives **redigeret**
+til serverloggen (links uden tokens, maskerede adresser og numre); beskeder med engangslinks (invitation, nulstilling) logges
+slet ikke. Invitationslinket vises i stedet for admin i UI'et, når e-mail kører i konsol-tilstand.
+
+Stakken er Next.js 16 (App Router, `src/proxy.ts`), React 19 og Prisma 7 med driver-adapteren `@prisma/adapter-pg`
+(forbindelsen konfigureres i `prisma.config.ts`; Prisma læser ikke længere `.env` af sig selv – det gør `prisma.config.ts`).
+Alle versioner er låst i `package.json`; installér med `npm ci`.
 
 Seed er **kun til udvikling**: det afvises, når `NODE_ENV=production` eller `APP_ENV=production` (H-1).
 
@@ -55,7 +60,7 @@ docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   
 | `npm run build` / `npm start` | Produktionsbuild (Next `standalone`) |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Enhedstests (vitest): pris (pr. rådgiver), matching, CVR, onboarding-validering og -tekster, slots, kvoteperioder, webhook-signaturer, mødevindue (`meetingJoinState`, sommertid), notifikationer (timing, stille timer, planlægning/idempotens/flytning/aflysning, skabeloner, SMS-segmenter, afmelding, inMobile-adapter), kandidatsortering, boardændring |
+| `npm test` | Enheds- og integrationstests (vitest). DB-tests kører kun med `TEST_DATABASE_URL` (en separat testdatabase, migreret med `prisma migrate deploy`); ellers springes de over |
 | `npm run db:migrate` | Ny migration under udvikling |
 | `npm run db:deploy` | Anvend migrationer (produktion) |
 | `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) |
@@ -152,7 +157,9 @@ src/
     notifications/     Udløsere, regler, skabeloner, planlægning (ren), udsendelse, afmelding, log
     content/           Redigerbare onboarding-tekster (standarder + ContentBlock)
     meeting-join.ts, meeting-admin.ts, board-admin.ts, substitutes.ts, leads.ts   Mødevindue, admin-ændringer, leads
-  middleware.ts        Letvægts-gate (kræver session-cookie); rollekontrol sker i layouts/sider
+  proxy.ts             Letvægts-gate (kræver session-cookie, ?next= til login) + sikkerhedsheaders (CSP med nonce, HSTS,
+                       Permissions-Policy); rollekontrol sker i layouts/sider
+  instrumentation.ts   Fail-closed opstartstjek af konfigurationen (C-1) og planlæggeren
 prisma/                schema, migrationer, seed
 ```
 
@@ -161,22 +168,32 @@ prisma/                schema, migrationer, seed
 Eksterne API'er kaldes med almindelig `fetch` – ingen leverandør-SDK'er.
 
 **Auth.** Ingen ekstern IdP. Adgangskoder hashes med bcrypt (cost 12). Sessioner ligger i databasen; cookien indeholder et
-tilfældigt token, og databasen gemmer kun dets SHA-256. Cookien er `httpOnly`, `sameSite=lax` og `secure` bag HTTPS.
-Rådgivere inviteres af admin og vælger selv adgangskode via et engangslink (7 dage).
+tilfældigt token, og databasen gemmer kun dets SHA-256. Cookien er `httpOnly`, `sameSite=lax` og altid `secure` i produktion.
+Rådgivere inviteres af admin og vælger selv adgangskode via et engangslink (7 dage). Login spærres pr. konto i databasen efter
+5 forkerte forsøg (15 min, derefter fordoblet, højst 24 t) uanset IP; derudover er der rate limits pr. betroet klient-IP
+(`TRUSTED_PROXY_HOPS`). Alle rate limits ligger i Postgres-tabellen `RateLimit`, så de overlever genstart og deles mellem instanser.
+Booking og «opret rådgiver» er idempotente (formular-nøgle), så dobbeltklik giver samme resultat. Rådgivere oprettes inaktive og
+aktiveres manuelt af admin (tjekliste: invitation accepteret, tags, tilgængelighed, bio, pris 500-25.000 kr.).
 
 **Booking.** Et tidspunkt tilbydes kun, hvis *alle* rådgivere i boardet er ledige (inden for en ugentlig regel, ingen blokering,
 intet andet møde inkl. 30 min buffer). Vindue: 2 dage – 16 uger frem. Kvote: ét møde pr. periode (frekvens i uger regnet fra
 abonnementets start), kun aktuel og næste periode kan bookes. Aflysning ≥ 48 t før start frigiver kvoten. Ved booking
-tages advisory locks på abonnement og rådgivere, og alt valideres igen i transaktionen.
+tages advisory locks på abonnement og rådgivere, og alt valideres igen i transaktionen. Danske helligdage (også påskeafhængige;
+Store bededag kun til og med 2023) samt juleaftens- og nytårsaftensdag spærres; admin kan slå enkelte datoer til og fra under
+*Admin → Helligdage*. Fravær kan slutte kl. 24:00.
 
 **Møder og transskription.** Mødesiden viser videorummet kun til deltagere (kunden, boardets rådgivere, admin) efter at
-optagelsesnotits er accepteret. Optagelser (webhook fra videoudbyder eller manuel upload) går i jobkøen →
+optagelsesnotits er accepteret. Manuel upload går aldrig gennem en server action: med S3 uploader browseren direkte til bucketten
+(presigned POST, højst 500 MB håndhævet af lageret), lokalt streames filen til disk. Formatet tjekkes ud fra filens første bytes
+(magic bytes), og antallet af samtidige uploads er begrænset. Optagelser (webhook fra videoudbyder eller manuel upload) går i jobkøen →
 `transcribe()` → `summarize()` → vises på mødesiden. Optagelsen slettes efter transskription
 (`DELETE_RECORDINGS_AFTER_TRANSCRIPTION`). Jobs behandles i processen og kan samles op via `GET/POST /api/cron/process-jobs`
 med `Authorization: Bearer $CRON_SECRET` (kald fra fx cron hvert minut).
 
-**GDPR.** Dataeksport (JSON, inkl. notifikationslog, samtykker og fravalg) og sletningsanmodning under *Konto*; sletning fjerner også notifikationslog, leads og samtykker; audit-log over admin-handlinger og adgang til
-transskriptioner; samtykke ved tilmelding (vilkår, optagelse, evt. markedsføring med ordret tekst og version); afmelding via link/STOP/Konto; notifikationsloggen (standard 12 mdr.) og leads med samtykke (24 mdr.) ryddes af jobkøen; ingen tredjeparts-analytics eller eksterne fonte.
+**GDPR.** Dataeksport (JSON med udvalgte felter – fx aldrig værtens mødelink eller udbyder-id'er) og sletningsanmodning under *Konto*; sletning
+opsiger abonnementet hos betalingsudbyderen, sletter optagelser i lageret og webhook-data med kundens oplysninger og fjerner notifikationslog,
+leads og samtykker; webhook-payloads ryddes efter 30 dage; audit-log over admin-handlinger og adgang til transskriptioner (fejl i audit-loggen
+giver en driftsalarm); samtykke ved tilmelding (vilkår, optagelse, evt. markedsføring med ordret tekst og version); afmelding via link/STOP/Konto; notifikationsloggen (standard 12 mdr.) og leads med samtykke (24 mdr.) ryddes af jobkøen; ingen tredjeparts-analytics eller eksterne fonte.
 
 ## Leverandører og hvorfor
 
@@ -197,33 +214,69 @@ Valget er drevet af, at ingen amerikanske selskaber er databehandlere. Se `docs/
    ved oprettelse (beløbs-override i øre, ekskl. moms) ud fra de valgte rådgivere; planskift sender det nye beløb. Feltnavnene til override skal
    verificeres mod Frisbii (se `docs/OPEN_ITEMS.md`). Sæt
    `PAYMENT_PROVIDER=frisbii`, `FRISBII_PRIVATE_KEY`, `FRISBII_WEBHOOK_SECRET`, og peg webhook til `{APP_URL}/api/webhooks/payments`.
+   Webhooken verificeres med HMAC-SHA256 over den rå body og et tidsstempel (højst 5 min). Headerformatet er en antagelse samlet i
+   `src/lib/payments/frisbii-signature.ts` og skal rettes til udbyderens dokumentation (Frisbii eller Alunta er ikke valgt endnu).
 2. **Whereby:** `VIDEO_PROVIDER=whereby`, `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET`, optagelses-bucket (`WHEREBY_RECORDING_*`);
    webhook til `{APP_URL}/api/webhooks/video`.
 3. **Storage:** `STORAGE_PROVIDER=s3` med `S3_*` (Hetzner Object Storage-endpoint, fx `https://fsn1.your-objectstorage.com`).
+   Bucketten skal have en CORS-regel, der tillader `POST` fra `APP_URL` (direkte upload fra browseren). Endpointet tilføjes automatisk
+   til CSP'ens `connect-src`.
 4. **Mistral:** `TRANSCRIPTION_PROVIDER=mistral`, `MISTRAL_API_KEY`.
-5. **inMobile (SMS og e-mail):** `SMS_PROVIDER=inmobile`, `EMAIL_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `SMS_SENDER`, `EMAIL_FROM`; peg inMobile-webhook til `{APP_URL}/api/webhooks/inmobile?secret=…`. Sæt også `APP_SECRET` (signerede afmeldingslinks). API-felterne er skrevet efter bedste viden og skal verificeres (se `docs/OPEN_ITEMS.md`). Alternativ til e-mail: `EMAIL_PROVIDER=smtp` + `SMTP_*`.
+5. **inMobile (SMS og e-mail):** `SMS_PROVIDER=inmobile`, `EMAIL_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `SMS_SENDER`, `EMAIL_FROM`; peg inMobile-webhook til `{APP_URL}/api/webhooks/inmobile` med hemmeligheden i headeren `x-webhook-secret` (eller `?secret=…`, hvis inMobile ikke kan sende headers). Rotation: sæt den gamle i `INMOBILE_WEBHOOK_SECRET_PREVIOUS`. SMS sendes kun til lande på tilladt-listen (standard Danmark) og med lofter pr. nummer og døgn (*Admin → Notifikationer → Indstillinger*). Sæt også `APP_SECRET` (signerede afmeldingslinks). API-felterne er skrevet efter bedste viden og skal verificeres (se `docs/OPEN_ITEMS.md`). Alternativ til e-mail: `EMAIL_PROVIDER=smtp` + `SMTP_*`.
 6. **CVR:** `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` (standard i produktion), eller `virk` + `CVR_VIRK_USERNAME`/`CVR_VIRK_PASSWORD`.
 
 ## Deployment til Hetzner / Simply.com
 
+Produktionen er **fail-closed**: med `NODE_ENV=production` (Docker-imaget og `next start`) nægter appen at starte, hvis konfigurationen ikke
+er klar (mock/console/local-udbydere, manglende hemmeligheder, http-adresse, ukendte værdier). Loggen viser `[config] Appen starter ikke`
+og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en gyldig opstart logges de valgte udbydere.
+
 1. Opret en Linux-VPS (Hetzner Cloud CX22 eller Simply.com VPS) i EU, installér Docker + Compose plugin.
-2. Peg et domæne (A-record) på serveren; kør en reverse proxy med automatisk TLS (fx Caddy:
-   `abu.example.dk { reverse_proxy localhost:3000 }`).
-3. Klon repoet, `cp .env.example .env`, og sæt som minimum `APP_URL=https://abu.example.dk`, en stærk `POSTGRES_PASSWORD`,
-   `CRON_SECRET` og de rigtige providers (se ovenfor).
-4. `docker compose up -d --build` – `migrate`-servicen kører `prisma migrate deploy`, derefter starter appen.
+2. Peg et domæne (A-record) på serveren; kør en reverse proxy med automatisk TLS foran appen, fx Caddy:
+   `abu.example.dk { reverse_proxy localhost:3000 }`. Caddy sætter `X-Forwarded-For`, så sæt **`TRUSTED_PROXY_HOPS=1`**
+   (antallet af proxies foran appen; med en CDN foran Caddy: 2). Appen må ikke kunne nås uden om proxyen (luk port 3000 i firewallen),
+   ellers kan klienten forfalske sin IP. Begræns gerne body-størrelsen i proxyen (fx 20 MB – store optagelser går direkte til S3).
+3. Klon repoet, `cp .env.example .env`, og sæt alle **påkrævede variabler**:
+
+   | Variabel | Krav i produktion |
+   |---|---|
+   | `APP_URL` | `https://…` (ikke localhost) |
+   | `DATABASE_URL` / `POSTGRES_PASSWORD` | sat eksplicit; stærk adgangskode |
+   | `APP_SECRET`, `CRON_SECRET` | mindst 32 tilfældige tegn hver (`openssl rand -base64 48`) |
+   | `TRUSTED_PROXY_HOPS` | ≥ 1 |
+   | `PAYMENT_PROVIDER=frisbii` + `FRISBII_PRIVATE_KEY`, `FRISBII_WEBHOOK_SECRET` | betaling |
+   | `VIDEO_PROVIDER=whereby` + `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET` | video |
+   | `TRANSCRIPTION_PROVIDER=mistral` + `MISTRAL_API_KEY` | transskription |
+   | `EMAIL_PROVIDER=inmobile` eller `smtp` (+ `SMTP_HOST`), `SMS_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `EMAIL_FROM` | beskeder |
+   | `STORAGE_PROVIDER=s3` + `S3_ENDPOINT` (https), `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | lager |
+   | `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` med jeres kontaktadresse (eller `virk` + login) | CVR |
+   | `APP_ENV` | tom (eller `production`) – sæt **aldrig** `development` i drift |
+
+4. `docker compose up -d --build` – `migrate`-servicen kører `prisma migrate deploy` (med `NODE_ENV=production`), derefter starter appen.
 5. Opret den første administrator (kør **aldrig** seed i produktion – det afvises):
    `docker compose run --rm migrate npm run create-admin -- --email admin@firma.dk --name "Fornavn Efternavn"`.
    Scriptet udskriver et engangslink (7 dage) i terminalen; åbn det og vælg adgangskode. Der står ingen adgangskode i koden eller loggen.
    Nyt link til en eksisterende admin: `npm run create-admin -- --email admin@firma.dk --reset`.
 6. Cron (kun hvis `IN_PROCESS_SCHEDULER=false`; ellers kører jobkøen og notifikationerne hvert minut i appen): `* * * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://abu.example.dk/api/cron/process-jobs`.
-7. Backup: `pg_dump` af Postgres-volumen dagligt (fx til Hetzner Object Storage) samt backup af `uploads`-volumen, hvis `local`-storage bruges.
+7. Backup: `pg_dump` af Postgres-volumen dagligt (fx til Hetzner Storage Box) med testet gendannelse.
+8. Overvågning: alle driftsalarmer står i loggen med præfikset `[ALERT]` (SMS-lofter, blokerede SMS-lande, fejl i audit-loggen) og under
+   *Driftsalarmer* på admin-forsiden. Sæt log-overvågningen til at alarmere på `[ALERT]` og `[config] Appen starter ikke`.
+
+**Sikkerhedsheaders** sættes af `src/proxy.ts`: CSP med nonce pr. request (scripts kun med nonce, `frame-src` kun Whereby), HSTS (2 år,
+`includeSubDomains`; overvej `preload`, når domænet er endeligt), Permissions-Policy (kamera/mikrofon/skærmdeling kun på mødesiderne),
+`X-Frame-Options`, `Referrer-Policy` og `nosniff`. Alle sider renderes dynamisk, fordi noncen skal være ny pr. request.
 
 Hvis Postgres og app kører på to servere, sæt `DATABASE_URL` direkte i `.env` og fjern `postgres`-servicen fra compose-filen.
+
+**CI** (`.github/workflows/ci.yml`): `npm ci`, `npm audit --omit=dev --audit-level=high`, lint, typetjek, tests mod en Postgres-service,
+build, et tjek af at produktionsbuildet nægter at starte med mock-konfiguration, og `docker build`. Afhængigheder opdateres ugentligt og
+grupperet af Renovate (`renovate.json`) med review.
 
 ## Test
 
 ```bash
-npm test          # pris, matching, CVR, onboarding-validering, slots, kvote, webhook-signaturer
+npm test                                                     # enhedstests; DB-tests springes over
+TEST_DATABASE_URL=postgresql://abu:abu@localhost:5432/abu_test npm test   # også DB-tests (testdatabasen migreres først)
 npm run lint && npm run typecheck && npm run build
+npm audit --omit=dev --audit-level=high
 ```
