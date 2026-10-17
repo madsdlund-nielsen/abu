@@ -787,12 +787,15 @@ export async function applyUnsubscribe(channel: NotificationChannel, address: st
 }
 
 /** Statusopdatering fra udbyderen (webhook): matcher på udbyderens besked-id eller vores eget id. */
-export async function applyDeliveryStatus(events: { messageId: string; status: "DELIVERED" | "FAILED"; error?: string }[]): Promise<number> {
+export async function applyDeliveryStatus(events: { messageId: string; status: "DELIVERED" | "FAILED"; error?: string }[], now = new Date()): Promise<number> {
   let n = 0;
+  // Kun beskeder, vi selv har sendt inden for 30 dage (M-7)
+  const since = new Date(now.getTime() - 30 * 86_400_000);
   for (const e of events) {
+    if (e.messageId.length > 200) continue;
     const r = await prisma.notificationLog.updateMany({
-      where: { OR: [{ providerMessageId: e.messageId }, { id: e.messageId }], status: { in: ["SENT", "DELIVERED"] } },
-      data: e.status === "DELIVERED" ? { status: "DELIVERED" } : { status: "FAILED", error: e.error ?? "Leveringen mislykkedes" },
+      where: { OR: [{ providerMessageId: e.messageId }, { id: e.messageId }], status: { in: ["SENT", "DELIVERED"] }, sentAt: { gte: since } },
+      data: e.status === "DELIVERED" ? { status: "DELIVERED" } : { status: "FAILED", error: (e.error ?? "Leveringen mislykkedes").slice(0, 300) },
     });
     n += r.count;
   }

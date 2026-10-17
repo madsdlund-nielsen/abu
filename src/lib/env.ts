@@ -78,6 +78,8 @@ const schema = z.object({
   INMOBILE_API_URL: z.string().default("https://api.inmobile.com"),
   /** Delt hemmelighed i webhook-URL'en (?secret=...) til /api/webhooks/inmobile. */
   INMOBILE_WEBHOOK_SECRET: z.string().default(""),
+  /** Forrige hemmelighed under rotation (accepteres også, indtil inMobile er opdateret). Tom = ingen. */
+  INMOBILE_WEBHOOK_SECRET_PREVIOUS: z.string().default(""),
   /** Hvor længe notifikationsloggen gemmes (måneder). Kan overstyres i CMS'et. */
   NOTIFICATION_LOG_RETENTION_MONTHS: z.coerce.number().int().min(1).max(60).default(12),
 
