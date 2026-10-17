@@ -1,0 +1,28 @@
+ADVISORY BOARD UNLIMITED — VEKTORFILER
+signup academy · CVR DK-38913557
+
+Alle filer er SVG med tekst konverteret til outline-kurver.
+Ingen skrift skal installeres. Transparent baggrund.
+Skalér frit — vektorer mister ikke skarphed.
+
+FARVER
+  Navy      #263753
+  Charcoal  #1A2528
+  Guld      #B4965D
+  Hvid      #FFFFFF
+
+  _hvid.svg  → til mørke flader (charcoal / navy)
+  _navy.svg  → til lyse flader (hvid / #EEEEEE)
+
+MAPPER
+  ordmaerke-vandret/      Lockup 22 "advisory board | unlimited". Primært ordmærke.
+  ordmaerke-tight/        Lockup 03 "Open tracking".
+  kvadratisk/             Mærke 01 "ab | u". Brug fra 80 px og op.
+  kvadratisk-med-navn/    Mærke 05 "ab | u" + fuldt navn. Brug fra 366 px og op.
+  ikon-lille-skala/       Optisk korrigeret "ab | u" (SemiBold, kraftig pipe).
+                          Til favicon / app-ikon i 32, 48, 180, 192 og 512 px.
+                          16 px frarådes.
+
+REGLER
+  Ingen radius, skygge, gradient eller gennemsigtighed.
+  Guld bruges på ét element. Ændr ikke proportioner eller farver.
