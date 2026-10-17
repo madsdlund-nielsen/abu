@@ -65,7 +65,7 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
                     {a.tags.map((t) => (
                       <li key={t.tagId} className={`badge ${t.tag.active ? "badge-muted" : "badge-outline opacity-60"}`}>{t.tag.name}</li>
                     ))}
-                    {a.tags.length === 0 && <li className="text-xs text-gold-dark">Ingen tags</li>}
+                    {a.tags.length === 0 && <li className="text-xs text-gold-ink">Ingen tags</li>}
                   </ul>
                 </td>
                 <td className="text-right tabular-nums">{formatDkk(a.pricePerMeetingDkk)}</td>

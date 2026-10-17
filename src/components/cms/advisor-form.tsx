@@ -131,7 +131,7 @@ export function AdvisorForm({
           })}
           {visible.length === 0 && <li className="text-sm text-muted">Ingen tags matcher «{q}».</li>}
         </ul>
-        {tagIds.length === 0 && <p className="mt-space-3 text-sm text-gold-dark">Uden tags kan rådgiveren ikke foreslås i onboarding-testen.</p>}
+        {tagIds.length === 0 && <p className="mt-space-3 text-sm text-gold-ink">Uden tags kan rådgiveren ikke foreslås i onboarding-testen.</p>}
       </section>
 
       <div className="flex flex-wrap items-center gap-4 lg:col-span-2">

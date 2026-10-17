@@ -292,7 +292,7 @@ function TemplateEditor({
               <span><span className="font-semibold text-navy">{smsRaw.length}</span> tegn i skabelonen</span>
               <span>
                 Eksempel udfyldt: <span className="font-semibold text-navy">{smsRendered.length}</span> tegn ·{" "}
-                <span className={`font-semibold ${smsRendered.segments > 1 ? "text-gold-dark" : "text-navy"}`}>{smsRendered.segments} {smsRendered.segments === 1 ? "SMS" : "SMS-dele"}</span> ({smsRendered.encoding}, {smsRendered.remaining} tegn tilbage i sidste del)
+                <span className={`font-semibold ${smsRendered.segments > 1 ? "text-gold-ink" : "text-navy"}`}>{smsRendered.segments} {smsRendered.segments === 1 ? "SMS" : "SMS-dele"}</span> ({smsRendered.encoding}, {smsRendered.remaining} tegn tilbage i sidste del)
               </span>
             </p>
           )}

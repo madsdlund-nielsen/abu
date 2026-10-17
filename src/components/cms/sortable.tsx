@@ -112,7 +112,7 @@ function Row({ id, label, children }: { id: string; label: string; children: (h:
             {...attributes}
             {...listeners}
             aria-label={`Flyt ${label}`}
-            className="flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center text-slate hover:text-gold-dark focus-visible:text-gold-dark active:cursor-grabbing"
+            className="flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center text-slate hover:text-gold-ink focus-visible:text-gold-ink active:cursor-grabbing"
           >
             <GripIcon />
           </button>

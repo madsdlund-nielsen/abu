@@ -48,7 +48,7 @@ export default async function Samtykke({ searchParams }: { searchParams: SP }) {
             </form>
             <form action={logoutAction} className="mt-space-4 border-t border-grey-bg pt-space-3 text-sm text-muted">
               <p>Vil du ikke give samtykke nu? Du kan stadig bruge resten af tjenesten, men ikke deltage i møder.</p>
-              <button type="submit" className="mt-2 underline hover:text-gold-dark">Log ud</button>
+              <button type="submit" className="mt-2 underline hover:text-gold-ink">Log ud</button>
             </form>
           </div>
         </div>

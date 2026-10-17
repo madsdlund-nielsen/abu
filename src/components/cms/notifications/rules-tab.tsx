@@ -79,7 +79,7 @@ export function RulesTab({
                               <span className="text-muted"> · til {AUDIENCE_LABEL[r.audience].toLowerCase()}</span>
                               {r.quietHours && quietEnabled && <span className="ml-2 badge badge-muted">Stille timer</span>}
                             </span>
-                            <button type="button" className="max-w-[16rem] truncate text-sm underline underline-offset-2 hover:text-gold-dark" onClick={() => onOpenTemplate(r.templateId)} title="Åbn skabelonen">
+                            <button type="button" className="max-w-[16rem] truncate text-sm underline underline-offset-2 hover:text-gold-ink" onClick={() => onOpenTemplate(r.templateId)} title="Åbn skabelonen">
                               {tpl.get(r.templateId)?.name ?? "Skabelon"}
                               {tpl.get(r.templateId)?.active === false && " (slået fra)"}
                             </button>

@@ -256,7 +256,7 @@ function WarningSummary({
           return (
             <li key={`${w.scope}-${w.id}-${i}`}>
               {q ? (
-                <button type="button" className="text-left underline underline-offset-2 hover:text-gold-dark" onClick={() => onSelect(q.id)}>
+                <button type="button" className="text-left underline underline-offset-2 hover:text-gold-ink" onClick={() => onSelect(q.id)}>
                   {w.message}
                 </button>
               ) : (
@@ -519,7 +519,7 @@ function AnswerRow({
                   title={uncoverable ? "Ingen aktive rådgivere har dette tag" : !tag.active ? "Tagget er deaktiveret" : undefined}
                 >
                   {tag.name}
-                  {(uncoverable || !tag.active) && <span className="ml-1 text-gold-dark" aria-label="Advarsel">!</span>}
+                  {(uncoverable || !tag.active) && <span className="ml-1 text-gold-ink" aria-label="Advarsel">!</span>}
                 </span>
                 <span role="radiogroup" aria-label={`Vægt for ${tag.name}`} className="flex items-center gap-[3px] border-l border-slate/50 px-1.5">
                   {[1, 2, 3, 4, 5].map((n) => (
@@ -551,7 +551,7 @@ function AnswerRow({
           </li>
         </ul>
         {warnings.map((w) => (
-          <p key={w.message} className="mt-2 text-xs font-semibold text-gold-dark" role="note">
+          <p key={w.message} className="mt-2 text-xs font-semibold text-gold-ink" role="note">
             <span aria-hidden="true">! </span>{w.message}
           </p>
         ))}
@@ -600,7 +600,7 @@ function TagPicker({ tags, onPick }: { tags: CmsTag[]; onPick: (id: string) => v
                   onClick={() => { onPick(t.id); setOpen(false); }}
                 >
                   <span>{t.name}</span>
-                  {t.advisors === 0 && <span className="text-xs text-gold-dark" title="Ingen aktive rådgivere har dette tag">0 rådgivere</span>}
+                  {t.advisors === 0 && <span className="text-xs text-gold-ink" title="Ingen aktive rådgivere har dette tag">0 rådgivere</span>}
                 </button>
               </li>
             ))}
