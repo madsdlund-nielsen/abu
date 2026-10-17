@@ -29,7 +29,7 @@ The marketing pages show "from" prices, i.e. the table below with everyone at th
 | Video meetings | Whereby Embedded | NO (EEA) | REST API creates rooms, cloud recording to own S3 bucket |
 | Recording storage | Hetzner Object Storage (S3 API) | DE | |
 | Transcription + summary | Mistral AI (Voxtral + chat models) | FR | Adapter makes self-hosted Whisper possible |
-| Transactional email | SMTP – Simply.com mail or Brevo | DK / FR | nodemailer, any SMTP |
+| SMS and e-mail (reminders, notifications) | inMobile (API v4 via fetch); SMTP (Simply.com / Brevo) as e-mail alternative | DK / DK-FR | adapters `EMAIL_PROVIDER`, `SMS_PROVIDER` |
 Everything has a `mock` mode so the app runs end-to-end locally with no accounts.
 
 ## Tech stack (open-source libraries only, no SaaS)
@@ -56,7 +56,11 @@ Everything has a `mock` mode so the app runs end-to-end locally with no accounts
 - Recording(id, meetingId, storageKey, source WEBHOOK|UPLOAD, status RECEIVED|TRANSCRIBING|DONE|FAILED, error)
 - Transcript(id, meetingId unique, text, segments Json?, summary text?, language, createdAt)
 - WebhookEvent(id, provider, externalId unique, payload Json, processedAt) – idempotency
-- AuditLog(id, userId?, action, entity, entityId, createdAt) – GDPR traceability
+- AuditLog(id, userId?, action, entity, entityId, detail?, createdAt) – GDPR traceability
+- User adds recordingConsentAt/Version, emailOptOutAt, smsOptOutAt. MeetingParticipant adds addedAt, pricePerMeetingDkk (honorarium basis per actual participant).
+- NotificationTemplate / NotificationRule / NotificationLog / AppSetting – CMS-managed e-mail and SMS (see `docs/PLAN-notifikationer-admin.md`); unique log key (rule, entity, recipient, dedupe) for idempotency.
+- Lead / MarketingConsent (consent text snapshot + version, withdrawal per channel) and OnboardingSession.leadId – lead box in onboarding step 1.
+- ContentBlock(key, value, version) – editable onboarding texts with typed defaults in code.
 
 ## Booking rules
 - Meeting length: env `MEETING_DURATION_MINUTES` (default 120). Slot step 30 min. Bookable window: 2 days to 16 weeks ahead.
@@ -84,12 +88,13 @@ Everything has a `mock` mode so the app runs end-to-end locally with no accounts
 Public: / (landing with "from" price calculator), /priser, /login, /kom-i-gang (onboarding; /signup redirects), /set-password?token=, /reset-password, /privatliv (privacy policy template), /vilkaar (terms template).
 Customer: /dashboard, /subscribe (board builder for customers without an active subscription), /account/subscription (board builder to change board and frequency), /book, /meetings, /meetings/[id], /account.
 Advisor: /dashboard, /availability, /profile, /meetings, /meetings/[id].
-Admin: /admin, /admin/advisors (+new, invite, [id] price/tags/active), /admin/onboarding (test CMS + preview), /admin/tags, /admin/customers (+[id] CVR data and test answers), /admin/meetings, /admin/subscriptions.
+Admin: /admin, /admin/advisors (+new, invite, [id] price/tags/active), /admin/onboarding (test CMS + preview) and /admin/onboarding/tekster (all onboarding copy), /admin/tags, /admin/customers (+[id] CVR data and test answers; filter "ikke verificeret"), /admin/leads (+CSV), /admin/notifikationer (rules, templates, log, settings), /admin/meetings (+[id] substitute/add/remove advisor, move, cancel), /admin/subscriptions (+[id] fixed board in admin mode).
+Other: /samtykke (one-time recording consent), /afmeld (unsubscribe), /api/webhooks/inmobile.
 
 ## GDPR basics in the code
 - Data export (JSON, incl. CVR data, test answers and onboarding sessions) and account deletion request on /account; deletion also removes OnboardingSession data. Expired onboarding sessions are deleted by the job queue.
 - Recordings are deleted from storage once transcription is done (configurable `DELETE_RECORDINGS_AFTER_TRANSCRIPTION=true`).
-- Consent text at signup + recording notice before joining.
+- Explicit recording/transcription consent at account creation / invitation (one-time accept for existing users); meeting page shows only an info line and a join window (`MEETING_JOIN_EARLY_MINUTES`). Marketing consent stored with text + version; unsubscribe via link/STOP/account page; notification log (12 months) and lead (24 months with consent) retention jobs; export and deletion cover logs, consents and leads.
 - AuditLog for admin actions and transcript access.
 - No third-party analytics, no external fonts/CDNs (self-host fonts with next/font local or system fonts).
 

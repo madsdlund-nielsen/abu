@@ -1,6 +1,6 @@
 # Skærmbilleder
 
-Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboarding-test, board builder og CMS). Desktop 1440x900, mobil 390 px. Optaget mod en frisk seedet database med mock-leverandører. Ældre materiale ligger i `docs/legacy/`.
+Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboarding-test, board builder, CMS, mødeside med tidsvindue og samtykke, notifikations-CMS, leads, redigerbare onboarding-tekster samt admins styring af boards og enkeltmøder). Desktop 1440x900, mobil 390 px. Optaget mod en frisk seedet database med mock-leverandører. Ældre materiale ligger i `docs/legacy/`.
 
 ## Offentlige sider
 
@@ -11,6 +11,8 @@ Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboa
 - [`offentlig/05-nulstil-adgangskode.png`](offentlig/05-nulstil-adgangskode.png) – Nulstil adgangskode (anmod om link).
 - [`offentlig/06-vaelg-adgangskode-ugyldigt-link.png`](offentlig/06-vaelg-adgangskode-ugyldigt-link.png) – Vælg adgangskode med ugyldigt eller udløbet link.
 - [`offentlig/07-vaelg-adgangskode.png`](offentlig/07-vaelg-adgangskode.png) – Vælg adgangskode via invitationslink.
+
+- [`offentlig/08-afmeld.png`](offentlig/08-afmeld.png) – Afmelding via link i e-mail/SMS (bekræftelse før afmelding).
 
 ## Onboarding
 
@@ -24,6 +26,9 @@ Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboa
 - [`onboarding/08-trin5-efter-udskiftning.png`](onboarding/08-trin5-efter-udskiftning.png) – Trin 5: boardet efter udskiftning, med opdateret pris pr. møde.
 - [`onboarding/09-trin6-konto-og-resume.png`](onboarding/09-trin6-konto-og-resume.png) – Trin 6: resumé med moms, adgangskode og samtykke.
 
+- [`onboarding/10-trin1-lead-samtykke.png`](onboarding/10-trin1-lead-samtykke.png) – Trin 1 som lead-boks med markedsføringssamtykke (ikke forudkrydset).
+- [`onboarding/11-trin1-redigeret-tekst.png`](onboarding/11-trin1-redigeret-tekst.png) – Trin 1 med tekster ændret i CMS'en (ny overskrift og samtykketekst).
+
 ## Kunde
 
 - [`kunde/01-dashboard.png`](kunde/01-dashboard.png) – Kundens dashboard med aktivt abonnement og board.
@@ -32,6 +37,15 @@ Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboa
 - [`kunde/04-moede-med-transskription-og-resume.png`](kunde/04-moede-med-transskription-og-resume.png) – Afholdt møde med resumé og transskription.
 - [`kunde/05-konto-abonnement-board-builder.png`](kunde/05-konto-abonnement-board-builder.png) – Konto/abonnement med board builder til at skifte rådgivere og frekvens.
 - [`kunde/06-moeder-oversigt.png`](kunde/06-moeder-oversigt.png) – Kundens mødeoversigt.
+
+- [`kunde/07-moede-ikke-aabnet-nedtaelling.png`](kunde/07-moede-ikke-aabnet-nedtaelling.png) – Mødeside før tidsvinduet: «Åbner kl. HH:MM» og nedtælling.
+- [`kunde/08-moede-aabent-rum-direkte.png`](kunde/08-moede-aabent-rum-direkte.png) – Mødet er åbent: rummet vises direkte med en lille informationslinje (ingen accept-gate).
+- [`kunde/09-moede-afholdt-transskription-behandles.png`](kunde/09-moede-afholdt-transskription-behandles.png) – Afholdt møde: «Transskription behandles».
+- [`kunde/10-moede-afholdt-resume.png`](kunde/10-moede-afholdt-resume.png) – Afholdt møde med resumé og transskription.
+- [`kunde/11-moede-aflyst.png`](kunde/11-moede-aflyst.png) – Aflyst møde.
+- [`kunde/12-moede-samtykke-mangler-blokeret.png`](kunde/12-moede-samtykke-mangler-blokeret.png) – Eksisterende bruger uden samtykke: deltag er blokeret med en forklaring.
+- [`kunde/13-samtykke-engangs-accept.png`](kunde/13-samtykke-engangs-accept.png) – Engangs-accept af optagelse og transskription.
+- [`kunde/14-konto-beskeder-og-samtykke.png`](kunde/14-konto-beskeder-og-samtykke.png) – Konto: valg af e-mail/SMS og status på samtykke.
 
 ## Rådgiver
 
@@ -54,6 +68,31 @@ Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboa
 - [`admin/10-moeder.png`](admin/10-moeder.png) – Alle møder.
 - [`admin/11-abonnementer.png`](admin/11-abonnementer.png) – Abonnementer.
 
+### Notifikationer, leads og tekster (CMS)
+
+- [`admin/12-notifikationer-regler.png`](admin/12-notifikationer-regler.png) – Regler pr. udløser med timing i klart sprog og til/fra-knapper.
+- [`admin/13-notifikationer-ny-regel.png`](admin/13-notifikationer-ny-regel.png) – Ny regel: antal + enhed + før/efter, modtager, skabelon.
+- [`admin/14-notifikationer-sms-skabelon.png`](admin/14-notifikationer-sms-skabelon.png) – SMS-skabelon med variabel-chips, SMS-tegntæller, preview og «Send test til mig».
+- [`admin/15-notifikationer-email-skabelon-preview.png`](admin/15-notifikationer-email-skabelon-preview.png) – E-mail-skabelon med brandet HTML-preview.
+- [`admin/16-notifikationer-validering-ukendt-variabel.png`](admin/16-notifikationer-validering-ukendt-variabel.png) – Valideringsfejl ved ukendt variabel.
+- [`admin/17-notifikationer-log.png`](admin/17-notifikationer-log.png) – Log (inkl. testbeskeder), filtre og «Send igen».
+- [`admin/18-notifikationer-log-planlagte-paamindelser.png`](admin/18-notifikationer-log-planlagte-paamindelser.png) – Planlagte påmindelser efter en booking.
+- [`admin/19-notifikationer-indstillinger.png`](admin/19-notifikationer-indstillinger.png) – Stille timer, SMS-afsender, opbevaring, leverandører.
+- [`admin/20-leads.png`](admin/20-leads.png) – Leads med trin, status og samtykke; filter og CSV-eksport.
+- [`admin/21-onboarding-tekster.png`](admin/21-onboarding-tekster.png) – Alle onboarding-tekster pr. trin med forhåndsvisning.
+- [`admin/22-onboarding-tekster-samtykketekst-version.png`](admin/22-onboarding-tekster-samtykketekst-version.png) – Redigering af samtykketekst (ny version) med preview i kontekst.
+- [`admin/23-onboarding-tekster-trin3-fejltekster.png`](admin/23-onboarding-tekster-trin3-fejltekster.png) – Fejl- og tomtilstande i trin 3 (ophørt, ikke fundet, kvote, manuel).
+
+### Boards og enkeltmøder (admin)
+
+- [`admin/24-abonnementer-boards.png`](admin/24-abonnementer-boards.png) – Abonnementer med board og «Rediger board».
+- [`admin/25-fast-board-udskift-pris-kommende-moeder.png`](admin/25-fast-board-udskift-pris-kommende-moeder.png) – Fast board i admin-tilstand: udskift rådgiver, vælg pris og opdatering af kommende møder.
+- [`admin/26-fast-board-konflikt-kommende-moede.png`](admin/26-fast-board-konflikt-kommende-moede.png) – Resultat med konflikt for et kommende møde.
+- [`admin/27-moede-udskift-raadgiver-kandidater.png`](admin/27-moede-udskift-raadgiver-kandidater.png) – Udskift rådgiver i ét møde: kandidater sorteret efter ledighed, match og pris.
+- [`admin/28-moede-udskift-bekraeft-med-note.png`](admin/28-moede-udskift-bekraeft-med-note.png) – Bekræft udskiftning med intern note.
+- [`admin/29-moede-historik-og-advarsel.png`](admin/29-moede-historik-og-advarsel.png) – Advarsel under boardets størrelse og historik.
+- [`admin/30-moede-flyttet.png`](admin/30-moede-flyttet.png) – Møde flyttet med genplanlagte påmindelser.
+
 ## Mobil (390 px)
 
 - [`mobil/01-forside.png`](mobil/01-forside.png) – Forside ved 390 px.
@@ -63,3 +102,8 @@ Friske skærmbilleder af den nuværende app (designmanual, officielt logo, onboa
 - [`mobil/05-booking.png`](mobil/05-booking.png) – Booking ved 390 px.
 - [`mobil/06-cms.png`](mobil/06-cms.png) – Onboarding-CMS ved 390 px.
 - [`mobil/07-forside-340px-ikon-header.png`](mobil/07-forside-340px-ikon-header.png) – Forside ved 340 px, hvor headeren skifter til ab|u-ikonet.
+- [`mobil/08-onboarding-trin1-samtykke.png`](mobil/08-onboarding-trin1-samtykke.png) – Onboarding trin 1 med samtykke.
+- [`mobil/09-moede-ikke-aabnet.png`](mobil/09-moede-ikke-aabnet.png), [`mobil/10-moede-afholdt.png`](mobil/10-moede-afholdt.png) – Mødesiden.
+- [`mobil/11-cms-notifikationer-regler.png`](mobil/11-cms-notifikationer-regler.png), [`12-cms-notifikationer-skabelon`](mobil/12-cms-notifikationer-skabelon.png), [`13-cms-ny-regel-dialog`](mobil/13-cms-ny-regel-dialog.png), [`14-cms-notifikationer-log`](mobil/14-cms-notifikationer-log.png), [`15-cms-notifikationer-indstillinger`](mobil/15-cms-notifikationer-indstillinger.png) – Notifikations-CMS.
+- [`mobil/16-admin-leads.png`](mobil/16-admin-leads.png), [`17-cms-onboarding-tekster`](mobil/17-cms-onboarding-tekster.png) – Leads og onboarding-tekster.
+- [`mobil/18-admin-fast-board.png`](mobil/18-admin-fast-board.png), [`19-admin-moede`](mobil/19-admin-moede.png), [`20-admin-moede-kandidater`](mobil/20-admin-moede-kandidater.png) – Boards og enkeltmøder.
