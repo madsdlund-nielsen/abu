@@ -62,6 +62,12 @@ model User {
   deletionRequestedAt DateTime?
   /// GDPR: timestamp of consent to terms/privacy at signup.
   consentAt    DateTime?
+  /// Eksplicit samtykke til optagelse og transskription af møder (givet ved oprettelse/invitation, ellers ved næste login).
+  recordingConsentAt      DateTime?
+  recordingConsentVersion String?
+  /// Afmelding af ikke-obligatoriske beskeder pr. kanal (afmeldingslink, STOP-svar eller under Konto).
+  emailOptOutAt DateTime?
+  smsOptOutAt   DateTime?
 
   sessions        Session[]
   passwordTokens  PasswordToken[]
@@ -69,6 +75,8 @@ model User {
   customerProfile CustomerProfile?
   participations  MeetingParticipant[]
   auditLogs       AuditLog[]
+  notificationLogs NotificationLog[]
+  marketingConsents MarketingConsent[]
 }
 
 model Session {
@@ -188,8 +196,71 @@ model OnboardingSession {
   suggestedBoard Json    @default("{}")
   createdAt     DateTime @default(now())
   expiresAt     DateTime
+  /// Lead oprettet i trin 1 (navn, e-mail og evt. markedsføringssamtykke gemmes, selv om tilmeldingen aldrig gøres færdig).
+  leadId        String?
+  lead          Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([expiresAt])
+  @@index([leadId])
+}
+
+/// Kontaktperson fra onboarding trin 1. Oprettes, så snart trin 1 er sendt – også hvis tilmeldingen aldrig gøres færdig.
+/// Uden samtykke og uden gennemførelse slettes leadet, når sessionen udløber; med samtykke gemmes det, til samtykket
+/// trækkes tilbage eller opbevaringsperioden (LEAD_RETENTION_MONTHS) er gået.
+model Lead {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String
+  phone          String?
+  /// Højeste trin nået (1-6)
+  step           Int       @default(1)
+  source         String    @default("onboarding_trin1")
+  createdAt      DateTime  @default(now())
+  lastActivityAt DateTime  @default(now())
+  /// Sat, når personen har oprettet konto
+  convertedAt    DateTime?
+  userId         String?
+
+  sessions OnboardingSession[]
+  consents MarketingConsent[]
+
+  @@index([lastActivityAt])
+}
+
+/// Markedsføringssamtykke (e-mail og/eller SMS) med den præcise tekst, personen så, og versionen af den.
+model MarketingConsent {
+  id               String    @id @default(cuid())
+  leadId           String?
+  userId           String?
+  email            String
+  phone            String?
+  emailConsent     Boolean   @default(true)
+  smsConsent       Boolean   @default(true)
+  consentedAt      DateTime  @default(now())
+  /// Snapshot af samtykketeksten på afkrydsningstidspunktet
+  text             String
+  textVersion      String
+  source           String
+  ipAddress        String?
+  userAgent        String?
+  emailWithdrawnAt DateTime?
+  smsWithdrawnAt   DateTime?
+  lead             Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user             User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([leadId])
+  @@index([userId])
+}
+
+/// Redigerbare tekster (onboarding). Kun ændrede tekster ligger her; manglende nøgler falder tilbage til standardteksten i koden.
+model ContentBlock {
+  key         String   @id
+  value       String
+  /// Hæves ved hver ændring (bruges som version af samtykketekster)
+  version     Int      @default(1)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
 }
 
 model CustomerProfile {
@@ -291,6 +362,9 @@ model Meeting {
 model MeetingParticipant {
   meetingId String
   userId    String
+  addedAt   DateTime @default(now())
+  /// Rådgiverens mødepris (ekskl. moms) for netop dette møde, til senere afregning pr. faktisk deltager.
+  pricePerMeetingDkk Int?
   meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -338,6 +412,8 @@ model AuditLog {
   action    String
   entity    String
   entityId  String
+  /// Valgfri uddybning (fx intern note ved udskiftning af rådgiver).
+  detail    String?
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -356,4 +432,107 @@ model Job {
   createdAt DateTime  @default(now())
 
   @@index([status, runAt])
+}
+
+// ------------------------------------------------------------------ Notifikationer
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationAudience {
+  CUSTOMER
+  ADVISORS
+  BOTH
+  /// Personen hændelsen handler om (invitation, nulstilling, ufærdig tilmelding).
+  SUBJECT
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  SKIPPED
+}
+
+/// Tekst til en besked. Brødtekst bruger {{variabler}}; ukendte variabler afvises i CMS'et.
+model NotificationTemplate {
+  id        String              @id @default(cuid())
+  /// Stabil nøgle for standardtekster (tom for egne skabeloner)
+  key       String?             @unique
+  channel   NotificationChannel
+  name      String
+  subject   String?
+  body      String
+  active    Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  rules NotificationRule[]
+}
+
+/// Hvornår (trigger + offset), til hvem og med hvilken tekst en besked sendes.
+model NotificationRule {
+  id            String               @id @default(cuid())
+  trigger       String
+  /// Minutter i forhold til hændelsen. Negativ = før (fx -1440 = 24 timer før mødet), positiv = efter.
+  offsetMinutes Int                  @default(0)
+  channel       NotificationChannel
+  templateId    String
+  audience      NotificationAudience
+  active        Boolean              @default(true)
+  /// SMS: respekter stille timer (undtagen påmindelser tæt på mødet).
+  quietHours    Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  template      NotificationTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  logs NotificationLog[]
+
+  @@index([trigger, active])
+}
+
+/// Hver planlagt og udsendt besked. Slettes efter opbevaringsperioden og sammen med kontoen.
+model NotificationLog {
+  id                String              @id @default(cuid())
+  ruleId            String?
+  templateKey       String
+  trigger           String
+  channel           NotificationChannel
+  recipientUserId   String?
+  recipientAddress  String
+  entityType        String
+  entityId          String
+  /// Skelner flere forekomster for samme regel/enhed/modtager (fx påmindelser efter flytning af mødet).
+  dedupe            String              @default("")
+  status            NotificationStatus  @default(QUEUED)
+  providerMessageId String?
+  error             String?
+  subject           String?
+  /// Første del af den sendte tekst (til loggen i CMS'et)
+  preview           String?
+  /// Ekstra kontekst til oprendering (fx hvem der er tilføjet/fjernet)
+  context           Json?
+  scheduledFor      DateTime
+  claimedAt         DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime            @default(now())
+  rule              NotificationRule?   @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  recipient         User?               @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, entityId, recipientAddress, dedupe])
+  @@index([status, scheduledFor])
+  @@index([entityType, entityId])
+  @@index([recipientUserId])
+  @@index([providerMessageId])
+  @@index([createdAt])
+}
+
+/// Enkle indstillinger der kan ændres i CMS'et (stille timer, SMS-afsender, opbevaring af log).
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
