@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { requireRole, requireUser } from "@/lib/auth";
 import { BookingError, bookMeeting, cancelMeeting } from "@/lib/booking";
 import { prisma } from "@/lib/db";
+import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
 import { enqueueJob } from "@/lib/jobs";
 import { finalizeRecordingUpload, prepareRecordingUpload } from "@/lib/recording-upload";
 import { redirectWith } from "@/lib/redirect";
@@ -17,14 +18,24 @@ export async function bookAction(formData: FormData) {
   const startsAt = new Date(String(formData.get("startsAt") ?? ""));
   if (Number.isNaN(startsAt.getTime())) redirectWith("/book", "err", "Ugyldigt tidspunkt.");
 
-  let id: string;
+  // Idempotent (QA #1): et gentaget kald med samme formular-nøgle giver samme møde i stedet for «allerede brugt»
+  let outcome;
   try {
-    id = (await bookMeeting({ subscriptionId: sub.id, startsAt, actorId: user.id })).id;
+    outcome = await withIdempotency<{ ok: true; meetingId: string } | { ok: false; error: string }>({ userId: user.id, scope: "booking", key: formData.get("idem") }, async () => {
+      try {
+        return { ok: true, meetingId: (await bookMeeting({ subscriptionId: sub.id, startsAt, actorId: user.id })).id };
+      } catch (e) {
+        if (e instanceof BookingError) return { ok: false, error: e.message };
+        throw e;
+      }
+    });
   } catch (e) {
-    if (e instanceof BookingError) redirectWith("/book", "err", e.message);
+    if (e instanceof IdempotencyInFlightError) redirectWith("/book", "err", e.message);
     throw e;
   }
-  redirectWith(`/meetings/${id}`, "ok", "Mødet er booket. Vi har sendt en bekræftelse på e-mail.");
+  const r = outcome.result;
+  if (!r.ok) redirectWith("/book", "err", r.error);
+  redirectWith(`/meetings/${r.meetingId}`, "ok", "Mødet er booket. Vi har sendt en bekræftelse på e-mail.");
 }
 
 export async function cancelMeetingAction(formData: FormData) {

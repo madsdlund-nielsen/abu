@@ -562,3 +562,16 @@ model CvrLookupCache {
 
   @@index([expiresAt])
 }
+
+/// Idempotens for formularer (QA #1): et gentaget kald med samme nøgle returnerer det første resultat i stedet for en fejl.
+/// id = SHA-256 af bruger + handling + klientens nøgle. Ryddes op efter udløb.
+model IdempotencyKey {
+  id        String   @id
+  userId    String
+  scope     String
+  result    Json?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { resendInviteAction, toggleAdvisorActiveAction } from "@/app/actions/admin";
+import { toggleAdvisorActiveAction } from "@/app/actions/admin";
+import { ResendInviteButton } from "@/components/admin/advisor-invite";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { prisma } from "@/lib/db";
 import { formatDkk } from "@/lib/pricing";
@@ -8,8 +9,7 @@ import { formatDkk } from "@/lib/pricing";
 export const metadata: Metadata = { title: "Rådgivere" };
 
 export default async function AdminAdvisors({ searchParams }: { searchParams: SP }) {
-  const { ok, err, one, params } = await flashFrom(searchParams);
-  const invite = one(params.invite);
+  const { ok, err } = await flashFrom(searchParams);
   const advisors = await prisma.advisorProfile.findMany({ include: { user: true, tags: { include: { tag: true } } }, orderBy: { user: { name: "asc" } } });
   return (
     <div className="space-y-6">
@@ -18,12 +18,6 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
         <Link href="/admin/advisors/new" className="btn">Opret rådgiver</Link>
       </div>
       <Flash ok={ok} err={err} />
-      {invite && (
-        <div className="callout text-sm">
-          <p className="font-medium">Invitationslink (vises kun fordi e-mail kører i konsol-tilstand eller ikke kunne sendes):</p>
-          <p className="mt-2 break-all bg-grey-bg p-2 font-mono text-xs" data-testid="invite-link">{invite}</p>
-        </div>
-      )}
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -55,12 +49,7 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
                 <td>
                   <div className="flex justify-end gap-2">
                     <Link href={`/admin/advisors/${a.userId}`} className="btn-secondary btn-sm">Rediger</Link>
-                    {!a.user.passwordHash && (
-                      <form action={resendInviteAction}>
-                        <input type="hidden" name="userId" value={a.userId} />
-                        <button className="btn-secondary btn-sm" type="submit">Ny invitation</button>
-                      </form>
-                    )}
+                    {!a.user.passwordHash && <ResendInviteButton userId={a.userId} />}
                     <form action={toggleAdvisorActiveAction}>
                       <input type="hidden" name="userId" value={a.userId} />
                       <button className="btn-secondary btn-sm" type="submit">{a.active ? "Deaktiver" : "Aktiver"}</button>
