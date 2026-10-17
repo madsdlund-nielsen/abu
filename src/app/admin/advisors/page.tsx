@@ -80,7 +80,7 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
                   )}
                 </td>
                 <td>
-                  <div className="flex justify-end gap-2">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <Link href={`/admin/advisors/${a.userId}`} className="btn-secondary btn-sm">Rediger</Link>
                     {!a.user.passwordHash && <ResendInviteButton userId={a.userId} />}
                     <form
