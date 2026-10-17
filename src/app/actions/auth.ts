@@ -52,49 +52,6 @@ export async function logoutAction() {
   redirect("/");
 }
 
-const signupSchema = z.object({
-  name: z.string().trim().min(2, "Indtast dit navn."),
-  email: z.string().trim().toLowerCase().email("Ugyldig e-mail."),
-  phone: z.string().trim().min(5, "Indtast et telefonnummer."),
-  companyName: z.string().trim().min(2, "Indtast firmanavn."),
-  cvr: z.string().trim().regex(/^\d{8}$/, "CVR-nummer skal være 8 cifre."),
-  address: z.string().trim().optional(),
-  password: z.string(),
-});
-
-export async function signupAction(formData: FormData) {
-  const raw = Object.fromEntries(formData) as Record<string, string>;
-  const parsed = signupSchema.safeParse({ ...raw, cvr: (raw.cvr ?? "").replace(/\s/g, "") });
-  if (!parsed.success) redirectWith("/signup", "err", parsed.error.issues[0].message);
-  if (formData.get("consent") !== "on") {
-    redirectWith("/signup", "err", "Du skal acceptere vilkår og privatlivspolitik for at oprette en konto.");
-  }
-  const d = parsed.data;
-  const pwErr = validatePassword(d.password);
-  if (pwErr) redirectWith("/signup", "err", pwErr);
-  if (!rateLimit(await clientKey("signup"), 10)) redirectWith("/signup", "err", "For mange forsøg. Prøv igen senere.");
-
-  const exists = await prisma.user.findUnique({ where: { email: d.email } });
-  if (exists) redirectWith("/signup", "err", "Der findes allerede en konto med den e-mail. Log ind i stedet.");
-
-  const user = await prisma.user.create({
-    data: {
-      email: d.email,
-      name: d.name,
-      phone: d.phone,
-      role: "CUSTOMER",
-      passwordHash: await hashPassword(d.password),
-      consentAt: new Date(),
-      customerProfile: {
-        create: { companyName: d.companyName, cvr: d.cvr, address: d.address ?? "", billingEmail: d.email },
-      },
-    },
-  });
-  await createSession(user.id);
-  await audit(user.id, "auth.signup", "User", user.id);
-  redirect("/subscribe");
-}
-
 export async function requestResetAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!rateLimit(await clientKey("reset"), 5)) redirectWith("/reset-password", "err", "For mange forsøg. Prøv igen senere.");

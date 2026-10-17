@@ -53,13 +53,13 @@ export function PriceCalculator() {
         </fieldset>
       </div>
       <div className="mt-6 border-t border-navy pt-space-4">
-        <p className="text-sm text-muted">Din månedlige pris (ekskl. moms)</p>
-        <p className="text-4xl font-light text-navy" data-testid="price">{formatDkk(price)} / md.</p>
+        <p className="text-sm text-muted">Månedspris fra (ekskl. moms)</p>
+        <p className="text-4xl font-light text-navy" data-testid="price">fra {formatDkk(price)} / md.</p>
         <p className="mt-1 text-xs text-muted">
-          {advisors} rådgivere · ca. {meetingsPerYear} møder om året · 1.750 kr. pr. rådgiver pr. møde
+          {advisors} rådgivere · ca. {meetingsPerYear} møder om året · fra 1.750 kr. pr. rådgiver pr. møde. Den endelige pris afhænger af de rådgivere, du vælger.
         </p>
       </div>
-      <Link href="/signup" className="btn mt-6 w-full sm:w-auto">
+      <Link href="/kom-i-gang" className="btn mt-6 w-full sm:w-auto">
         Kom i gang
       </Link>
     </div>

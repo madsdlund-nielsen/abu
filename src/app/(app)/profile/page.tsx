@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Profil" };
 export default async function ProfilePage({ searchParams }: { searchParams: SP }) {
   const user = await requireRole("ADVISOR");
   const { ok, err } = await flashFrom(searchParams);
-  const profile = await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: user.id } });
+  const profile = await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: user.id }, include: { tags: { include: { tag: true } } } });
   return (
     <div>
       <h1>Min profil</h1>
@@ -30,8 +30,17 @@ export default async function ProfilePage({ searchParams }: { searchParams: SP }
             <textarea className="input min-h-32" id="bio" name="bio" defaultValue={profile.bio} maxLength={4000} />
           </div>
           <div>
-            <label className="label" htmlFor="expertise">Ekspertiseområder (kommasepareret)</label>
-            <input className="input" id="expertise" name="expertise" defaultValue={profile.expertise.join(", ")} />
+            <p className="label">Kompetence-tags</p>
+            {profile.tags.length ? (
+              <ul className="flex flex-wrap gap-1">
+                {profile.tags.map((t) => (
+                  <li key={t.tagId} className="badge badge-muted">{t.tag.name}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">Ingen tags endnu.</p>
+            )}
+            <p className="mt-1 text-xs text-muted">Tags bruges til at matche dig med kunder og tildeles af administratoren.</p>
           </div>
           <div>
             <label className="label" htmlFor="photoUrl">Foto-URL (https)</label>

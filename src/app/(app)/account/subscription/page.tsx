@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cancelSubscriptionAction, changePlanAction } from "@/app/actions/subscription";
 import { Flash, flashFrom, type SP } from "@/components/flash";
-import { PlanPicker } from "@/components/plan-picker";
+import { BoardBuilder } from "@/components/board-builder";
 import { SubStatusBadge } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
+import { loadCatalog } from "@/lib/onboarding/catalog";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
-import { getCustomerSubscription, listActiveAdvisors } from "@/lib/subscriptions";
+import { getCustomerNeeds, getCustomerSubscription } from "@/lib/subscriptions";
 import { formatDate } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Abonnement" };
@@ -15,8 +16,8 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
   const user = await requireRole("CUSTOMER");
   const { ok, err } = await flashFrom(searchParams);
   const sub = await getCustomerSubscription(user.id);
-  const advisors = await listActiveAdvisors();
   const manageable = sub && (sub.status === "ACTIVE" || sub.status === "PAST_DUE");
+  const [catalog, needs] = manageable ? await Promise.all([loadCatalog(), getCustomerNeeds(user.id)]) : [null, {}];
 
   return (
     <div className="space-y-6">
@@ -40,7 +41,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
             {sub.startedAt && <div><dt className="text-muted">Startet</dt><dd>{formatDate(sub.startedAt)}</dd></div>}
             <div className="sm:col-span-2">
               <dt className="text-muted">Dit board</dt>
-              <dd>{sub.advisors.map((a) => a.advisor.user.name).join(", ")}</dd>
+              <dd>{sub.advisors.map((a) => `${a.advisor.user.name} (${formatDkk(a.pricePerMeetingDkk)} pr. møde)`).join(", ")}</dd>
             </div>
           </dl>
           {sub.status === "PAST_DUE" && (
@@ -52,17 +53,22 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
         </section>
       )}
 
-      {manageable && sub && (
+      {manageable && sub && catalog && (
         <>
           <section>
-            <h2 className="mb-3">Skift plan</h2>
-            <PlanPicker
-              advisors={advisors.map((a) => ({ id: a.userId, name: a.user.name, title: a.title, bio: a.bio, expertise: a.expertise }))}
+            <span className="eyebrow">Skift board</span>
+            <h2 className="section-title !text-[length:var(--fs-h3)] mb-3">Ret rådgivere og frekvens</h2>
+            <p className="mb-space-4 max-w-2xl text-sm text-muted">
+              Ved planskift bruges rådgivernes aktuelle priser. Ændrede priser påvirker kun nye abonnementer og planskift.
+            </p>
+            <BoardBuilder
+              advisors={catalog.advisors}
+              tags={catalog.tags}
+              needs={needs}
               action={changePlanAction}
-              submitLabel="Gem ny plan"
-              initialCount={sub.advisorCount}
+              submitLabel="Gem ændringer"
+              initialAdvisorIds={sub.advisors.map((a) => a.advisorId)}
               initialWeeks={sub.frequencyWeeks}
-              initialSelected={sub.advisors.map((a) => a.advisorId)}
             />
           </section>
           <section className="card">

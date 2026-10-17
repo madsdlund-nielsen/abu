@@ -1,100 +1,55 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { cancelMeeting } from "@/lib/booking";
 import { prisma } from "@/lib/db";
-import { getEnv } from "@/lib/env";
+import { startCheckout } from "@/lib/checkout";
+import { resolveBoard } from "@/lib/onboarding/board";
 import { getPayments } from "@/lib/payments";
-import { isAdvisorCount, isFrequencyWeeks, monthlyPriceDkk, planHandle } from "@/lib/pricing";
+import { planHandle } from "@/lib/pricing";
 import { redirectWith } from "@/lib/redirect";
 import { getCustomerSubscription } from "@/lib/subscriptions";
 
-const planSchema = z.object({
-  advisors: z.coerce.number().int(),
-  weeks: z.coerce.number().int(),
-});
-
-async function parsePlan(formData: FormData, back: string) {
-  const parsed = planSchema.safeParse({ advisors: formData.get("advisors"), weeks: formData.get("weeks") });
-  if (!parsed.success || !isAdvisorCount(parsed.data.advisors) || !isFrequencyWeeks(parsed.data.weeks)) {
-    redirectWith(back, "err", "Vælg et gyldigt antal rådgivere og en gyldig frekvens.");
-  }
+async function parseBoard(formData: FormData, back: string) {
   const advisorIds = [...new Set(formData.getAll("advisorIds").map(String))];
-  if (advisorIds.length !== parsed.data.advisors) {
-    redirectWith(back, "err", `Vælg præcis ${parsed.data.advisors} rådgivere.`);
-  }
-  const found = await prisma.advisorProfile.count({ where: { userId: { in: advisorIds }, active: true } });
-  if (found !== advisorIds.length) redirectWith(back, "err", "En af de valgte rådgivere er ikke tilgængelig.");
-  return { advisors: parsed.data.advisors, weeks: parsed.data.weeks, advisorIds };
+  const board = await resolveBoard(advisorIds, Number(formData.get("weeks")));
+  if ("error" in board) redirectWith(back, "err", board.error);
+  return board;
 }
 
+/** Eksisterende kunde uden aktivt abonnement (fx afbrudt betaling) vælger board og går til betaling. */
 export async function startSubscriptionAction(formData: FormData) {
   const user = await requireRole("CUSTOMER");
-  const plan = await parsePlan(formData, "/subscribe");
-
+  const board = await parseBoard(formData, "/subscribe");
   const existing = await getCustomerSubscription(user.id);
   if (existing && existing.status !== "PENDING") {
     redirectWith("/account/subscription", "err", "Du har allerede et abonnement. Skift plan eller opsig det under Abonnement.");
   }
-  // Afventende forsøg erstattes
-  await prisma.subscription.deleteMany({ where: { customerId: user.id, status: "PENDING" } });
-
-  const profile = await prisma.customerProfile.findUniqueOrThrow({ where: { userId: user.id } });
-  const payments = getPayments();
-  const sub = await prisma.subscription.create({
-    data: {
-      customerId: user.id,
-      advisorCount: plan.advisors,
-      frequencyWeeks: plan.weeks,
-      monthlyPriceDkk: monthlyPriceDkk(plan.advisors, plan.weeks),
-      provider: payments.name,
-      advisors: { create: plan.advisorIds.map((advisorId) => ({ advisorId })) },
-    },
-  });
-
-  const base = getEnv().APP_URL.replace(/\/$/, "");
   let url: string;
   try {
-    const checkout = await payments.createCheckout({
-      subscriptionId: sub.id,
-      planHandle: planHandle(plan.advisors, plan.weeks),
-      customer: {
-        id: user.id,
-        email: profile.billingEmail,
-        name: user.name,
-        companyName: profile.companyName,
-        cvr: profile.cvr,
-      },
-      acceptUrl: `${base}/subscribe/success?sub=${sub.id}`,
-      cancelUrl: `${base}/subscribe?err=${encodeURIComponent("Betalingen blev afbrudt.")}`,
-    });
-    await prisma.subscription.update({
-      where: { id: sub.id },
-      data: { providerCustomerId: checkout.providerCustomerId, providerSubscriptionId: checkout.providerSubscriptionId },
-    });
-    url = checkout.url;
+    const r = await startCheckout({ userId: user.id, board, cancelPath: "/subscribe" });
+    await audit(user.id, "subscription.checkout", "Subscription", r.subscriptionId);
+    url = r.url;
   } catch (e) {
     console.error("[subscription] checkout fejlede", e);
-    await prisma.subscription.delete({ where: { id: sub.id } });
     redirectWith("/subscribe", "err", "Betalingen kunne ikke startes. Prøv igen om lidt.");
   }
-  await audit(user.id, "subscription.checkout", "Subscription", sub.id);
   redirect(url);
 }
 
+/** Skift board og/eller frekvens. Priserne fastfryses på ny ud fra rådgivernes aktuelle priser, og beløbet genberegnes. */
 export async function changePlanAction(formData: FormData) {
   const user = await requireRole("CUSTOMER");
   const back = "/account/subscription";
-  const plan = await parsePlan(formData, back);
+  const board = await parseBoard(formData, back);
   const sub = await getCustomerSubscription(user.id);
   if (!sub || (sub.status !== "ACTIVE" && sub.status !== "PAST_DUE")) {
     redirectWith(back, "err", "Du har intet aktivt abonnement at ændre.");
   }
   try {
-    await getPayments().changePlan(sub.providerSubscriptionId ?? sub.id, planHandle(plan.advisors, plan.weeks));
+    await getPayments().changePlan(sub.providerSubscriptionId ?? sub.id, planHandle(board.weeks), board.monthlyPriceDkk);
   } catch (e) {
     console.error("[subscription] skift af plan fejlede", e);
     redirectWith(back, "err", "Planen kunne ikke ændres hos betalingsudbyderen. Prøv igen senere.");
@@ -104,15 +59,15 @@ export async function changePlanAction(formData: FormData) {
     prisma.subscription.update({
       where: { id: sub.id },
       data: {
-        advisorCount: plan.advisors,
-        frequencyWeeks: plan.weeks,
-        monthlyPriceDkk: monthlyPriceDkk(plan.advisors, plan.weeks),
-        advisors: { create: plan.advisorIds.map((advisorId) => ({ advisorId })) },
+        advisorCount: board.advisors.length,
+        frequencyWeeks: board.weeks,
+        monthlyPriceDkk: board.monthlyPriceDkk,
+        advisors: { create: board.advisors.map((a) => ({ advisorId: a.id, pricePerMeetingDkk: a.pricePerMeetingDkk })) },
       },
     }),
   ]);
   await audit(user.id, "subscription.change_plan", "Subscription", sub.id);
-  redirectWith(back, "ok", "Din plan er ændret. Allerede bookede møder med fjernede rådgivere bør aflyses og bookes igen.");
+  redirectWith(back, "ok", "Dit board er opdateret. Allerede bookede møder med fjernede rådgivere bør aflyses og bookes igen.");
 }
 
 export async function cancelSubscriptionAction() {

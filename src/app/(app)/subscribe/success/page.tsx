@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { deleteOnboardingSessionsForEmail } from "@/lib/onboarding/session";
 import { SubStatusBadge } from "@/components/ui";
 
 export default async function SubscribeSuccess({ searchParams }: { searchParams: SP }) {
@@ -15,6 +17,12 @@ export default async function SubscribeSuccess({ searchParams }: { searchParams:
   if (sub && sub.status === "PENDING" && sub.provider === "mock") {
     sub = await prisma.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", startedAt: new Date() } });
     await audit(user.id, "subscription.activate_mock", "Subscription", sub.id);
+  }
+
+  if (sub && (sub.status as string) === "ACTIVE") {
+    // Tilmeldingen er gennemført: onboarding-data er flyttet til kontoen og slettes.
+    await deleteOnboardingSessionsForEmail(user.email);
+    redirect("/dashboard?ok=" + encodeURIComponent("Velkommen! Dit abonnement er aktivt. Du kan nu booke dit første møde."));
   }
 
   return (

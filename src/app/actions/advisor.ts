@@ -16,16 +16,11 @@ export async function updateProfileAction(formData: FormData) {
   });
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) redirectWith("/profile", "err", parsed.error.issues[0]?.message ?? "Ugyldige felter.");
-  const expertise = String(formData.get("expertise") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 12);
   await prisma.$transaction([
     prisma.user.update({ where: { id: user.id }, data: { name: parsed.data.name } }),
     prisma.advisorProfile.update({
       where: { userId: user.id },
-      data: { title: parsed.data.title, bio: parsed.data.bio, photoUrl: parsed.data.photoUrl, expertise },
+      data: { title: parsed.data.title, bio: parsed.data.bio, photoUrl: parsed.data.photoUrl },
     }),
   ]);
   redirectWith("/profile", "ok", "Profilen er gemt.");

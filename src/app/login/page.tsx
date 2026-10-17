@@ -28,7 +28,7 @@ export default async function LoginPage({ searchParams }: { searchParams: SP }) 
             <button className="btn w-full" type="submit">Log ind</button>
           </form>
           <p className="mt-4 text-sm text-muted">
-            <Link href="/reset-password">Glemt adgangskode?</Link> · <Link href="/signup">Opret konto</Link>
+            <Link href="/reset-password">Glemt adgangskode?</Link> · <Link href="/kom-i-gang">Opret konto</Link>
           </p>
         </div>
       </div>
