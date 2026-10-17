@@ -88,7 +88,7 @@ CVR-data og testsvar. Alle ændringer skrives til audit-loggen og gælder straks
 
 Visuelt design følger `docs/design/designmanual.pdf`. Tokens ligger i `src/styles/design-tokens.css` og spejles i `tailwind.config.ts`
 (brug `bg-navy`, `text-gold-dark` osv., aldrig hex i komponenter). Open Sans er selvhostet via `@fontsource/open-sans` (ingen Google Fonts).
-Logoet er de officielle SVG-filer (`docs/design/logo/` er originalerne, `public/brand/` er webkopier uden C2PA-metadata) via komponenten `src/components/logo.tsx`. Skærmbilleder: `docs/design/screens/` (onboarding og CMS: `docs/design/screens/onboarding/`).
+Logoet er de officielle SVG-filer (`docs/design/logo/` er originalerne, `public/brand/` er webkopier uden C2PA-metadata) via komponenten `src/components/logo.tsx`. Skærmbilleder: `docs/screens/` (offentlig, onboarding, kunde, rådgiver, admin og mobil) og demo-video: `docs/demo/`. Ældre skærmbilleder og demoer ligger i `docs/legacy/`.
 
 ## Arkitektur
 
