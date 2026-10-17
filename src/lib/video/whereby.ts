@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { getEnv } from "../env";
+import { verifyWebhookSignature, type SignatureScheme } from "../webhooks/signature";
 import type { CreateRoomInput, CreatedRoom, RecordingEvent, VideoProvider } from "./types";
 
 /**
@@ -74,11 +74,15 @@ export class WherebyVideo implements VideoProvider {
   }
 }
 
-export function verifyWherebySignature(rawBody: string, header: string, secret: string): boolean {
-  if (!secret || !header) return false;
-  const parts = Object.fromEntries(header.split(",").map((p) => p.trim().split("=") as [string, string]));
-  if (!parts.t || !parts.v1) return false;
-  const expected = Buffer.from(createHmac("sha256", secret).update(`${parts.t}.${rawBody}`).digest("hex"));
-  const given = Buffer.from(parts.v1);
-  return expected.length === given.length && timingSafeEqual(expected, given);
+/** Whereby: `Whereby-Signature: t=<unix-sek.>,v1=<hex HMAC-SHA256 af "<t>.<rå body>">`, højst 5 minutter gammel (L-5). */
+export const WHEREBY_WEBHOOK_SCHEME: SignatureScheme = {
+  header: "whereby-signature",
+  format: { kind: "combined", timestampKey: "t", signatureKey: "v1" },
+  payload: (t, body) => `${t}.${body}`,
+  encoding: "hex",
+  toleranceSeconds: 300,
+};
+
+export function verifyWherebySignature(rawBody: string, header: string, secret: string, now = new Date()): boolean {
+  return verifyWebhookSignature(WHEREBY_WEBHOOK_SCHEME, rawBody, { "whereby-signature": header }, secret, now).ok;
 }

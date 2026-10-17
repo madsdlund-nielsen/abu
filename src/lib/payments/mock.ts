@@ -1,3 +1,4 @@
+import type { VerifyResult } from "../webhooks/signature";
 import type { CheckoutInput, CheckoutResult, PaymentProvider } from "./types";
 
 /**
@@ -14,6 +15,11 @@ export class MockPayments implements PaymentProvider {
       providerCustomerId: `mock-cust-${input.customer.id}`,
       providerSubscriptionId: input.subscriptionId,
     };
+  }
+
+  /** Mock har ingen webhooks (ruten svarer 404). */
+  verifyWebhook(): VerifyResult {
+    return { ok: false, reason: "disabled" };
   }
 
   async cancelSubscription() {}

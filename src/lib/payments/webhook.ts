@@ -1,18 +1,19 @@
 import type { Prisma, SubscriptionStatus } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../db";
 import { subscriptionEvents } from "../notifications/service";
 import { afterSubscriptionActivated } from "../subscriptions";
 
-export interface FrisbiiEvent {
-  id: string;
-  event_id?: string;
-  event_type: string;
-  timestamp: string;
-  signature: string;
-  subscription?: string;
-  customer?: string;
-  [k: string]: unknown;
-}
+/** Felter vi bruger fra en (allerede signaturverificeret) betalingsbegivenhed. Øvrige felter ignoreres. */
+export const paymentEventSchema = z.looseObject({
+  id: z.string().min(1).max(200),
+  event_id: z.string().min(1).max(200).optional(),
+  event_type: z.string().min(1).max(100),
+  timestamp: z.string().max(100).optional(),
+  subscription: z.string().min(1).max(200).optional(),
+  customer: z.string().max(200).optional(),
+});
+export type FrisbiiEvent = z.infer<typeof paymentEventSchema>;
 
 /** Hvilken status udløser en given Frisbii-begivenhed? null = ignorer. */
 export function statusForEvent(eventType: string): SubscriptionStatus | null {

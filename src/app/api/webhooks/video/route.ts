@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs";
 import { getVideo } from "@/lib/video";
+import { readLimitedText } from "@/lib/webhooks/signature";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,8 @@ export async function POST(req: Request) {
   const video = getVideo();
   if (video.name === "mock") return NextResponse.json({ error: "Webhook ikke aktiv" }, { status: 404 });
 
-  const raw = await req.text();
+  const raw = await readLimitedText(req);
+  if (raw === null) return NextResponse.json({ error: "For stor" }, { status: 413 });
   let evt;
   try {
     evt = video.parseWebhook(raw, req.headers);

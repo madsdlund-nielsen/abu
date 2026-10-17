@@ -1,24 +1,18 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import type { SignatureScheme } from "../webhooks/signature";
 
 /**
- * Frisbii/Reepay webhook-signatur: hex(HMAC-SHA256(timestamp + id, webhookSecret)).
- * `timestamp` og `id` er felter i webhook-bodyen.
+ * Signaturskema for betalingswebhooks (H-4): HMAC-SHA256 over `<tidsstempel>.<rå body>` med webhook-hemmeligheden,
+ * sendt som `Frisbii-Signature: t=<unix-sek.>,v1=<hex>`, og højst 5 minutter gammelt.
+ *
+ * VIGTIGT: Betalingsudbyderen er ikke valgt endnu (Frisbii eller Alunta). Headernavn, nøgler, hvad der signeres og
+ * kodning SKAL rettes til udbyderens dokumentation, når kontoen findes – det er alt sammen samlet i denne konstant.
+ * Signerer udbyderen ikke selve body'en (fx kun `timestamp + id` som Reepays gamle skema), må body'en ikke stoles på:
+ * hent da begivenheden via udbyderens API ud fra id'et (se docs/OPEN_ITEMS.md).
  */
-export function computeFrisbiiSignature(timestamp: string, id: string, secret: string): string {
-  return createHmac("sha256", secret).update(timestamp + id).digest("hex");
-}
-
-export function verifyFrisbiiSignature(
-  body: { id?: unknown; timestamp?: unknown; signature?: unknown },
-  secret: string,
-): boolean {
-  if (!secret) return false;
-  const { id, timestamp, signature } = body;
-  if (typeof id !== "string" || typeof timestamp !== "string" || typeof signature !== "string") {
-    return false;
-  }
-  const expected = Buffer.from(computeFrisbiiSignature(timestamp, id, secret), "utf8");
-  const given = Buffer.from(signature, "utf8");
-  if (expected.length !== given.length) return false;
-  return timingSafeEqual(expected, given);
-}
+export const PAYMENT_WEBHOOK_SCHEME: SignatureScheme = {
+  header: "frisbii-signature",
+  format: { kind: "combined", timestampKey: "t", signatureKey: "v1" },
+  payload: (timestamp, rawBody) => `${timestamp}.${rawBody}`,
+  encoding: "hex",
+  toleranceSeconds: 300,
+};
