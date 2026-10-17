@@ -1,5 +1,6 @@
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EMAIL_COLORS, buildEmail, escapeHtml, textToHtml } from "./email-layout";
 import { makeUnsubscribeToken, verifyUnsubscribeToken } from "./unsubscribe";
 
@@ -9,7 +10,7 @@ describe("afmeldingstoken", () => {
     expect(verifyUnsubscribeToken(e)).toEqual({ channel: "EMAIL", address: "mette@firma.dk" });
     const s = makeUnsubscribeToken({ channel: "SMS", address: "+4520304050" });
     expect(verifyUnsubscribeToken(s)).toEqual({ channel: "SMS", address: "+4520304050" });
-    expect(s.length).toBeLessThan(40); // kort nok til en SMS
+    expect(s.length).toBeLessThan(70); // stadig kort nok til en SMS
   });
   it("afviser ændrede og forfalskede tokens", () => {
     const t = makeUnsubscribeToken({ channel: "EMAIL", address: "a@b.dk" });
@@ -19,6 +20,29 @@ describe("afmeldingstoken", () => {
     expect(verifyUnsubscribeToken("sladder")).toBeNull();
     expect(verifyUnsubscribeToken("")).toBeNull();
     expect(verifyUnsubscribeToken(makeUnsubscribeToken({ channel: "SMS", address: "+4520304050" }).replace("4520304050", "4520304051"))).toBeNull();
+  });
+
+  it("bruger fuld HMAC (256 bit) og udløber efter et år (M-8)", () => {
+    const now = new Date("2026-10-17T12:00:00Z");
+    const t = makeUnsubscribeToken({ channel: "EMAIL", address: "a@b.dk" }, now);
+    expect(t.split(".")[2]).toHaveLength(43);
+    expect(verifyUnsubscribeToken(t, new Date("2027-10-16T12:00:00Z"))).not.toBeNull();
+    expect(verifyUnsubscribeToken(t, new Date("2027-10-18T12:00:00Z"))).toBeNull();
+    // Forlænget udløb uden ny signatur afvises
+    const [p, , sig] = t.split(".");
+    expect(verifyUnsubscribeToken(`${p}.zzzzzz.${sig}`, now)).toBeNull();
+  });
+
+  it("afviser tokens forfalsket med den gamle afledte nøgle og trunkerede signaturer", () => {
+    vi.stubEnv("APP_SECRET", "x".repeat(48));
+    const payload = `e${Buffer.from("kunde@abu.local").toString("base64url")}`;
+    const oldKey = `abu-unsubscribe:postgresql://abu:abu@localhost:5432/abu:`;
+    const forgedOld = `${payload}.${createHmac("sha256", oldKey).update(payload).digest("base64url").slice(0, 16)}`;
+    expect(verifyUnsubscribeToken(forgedOld)).toBeNull();
+    const exp = Math.floor(Date.now() / 1000 + 86_400).toString(36);
+    const forgedNew = `${payload}.${exp}.${createHmac("sha256", oldKey).update(`abu-unsubscribe:v1:${payload}.${exp}`).digest("base64url")}`;
+    expect(verifyUnsubscribeToken(forgedNew)).toBeNull();
+    vi.unstubAllEnvs();
   });
 });
 
