@@ -50,14 +50,7 @@ export default async function KomIGang({ searchParams }: { searchParams: SP }) {
           <div className={wide ? "" : "mx-auto max-w-xl"}>
             <span className="eyebrow hidden sm:block">{interpolate(t["common.eyebrow"], { n: step, total: TOTAL_STEPS, trin: labels[step - 1] })}</span>
             <h1 className="mb-space-4">{t[`step${step}.title`]}</h1>
-            {err &&
-              (one(params.konto) ? (
-                <div role="alert" className="callout callout-error mb-space-4 text-sm">
-                  {err} <Link href="/login">Log ind her</Link>, eller brug en anden e-mail.
-                </div>
-              ) : (
-                <Flash err={err} />
-              ))}
+            {err && <Flash err={err} />}
             {step === 1 && <StepContact state={state} t={t} n={one(params.n)} e={one(params.e)} />}
             {step === 2 && state && <StepCompany state={state} t={t} cvr={one(params.cvr)} tlf={one(params.tlf)} />}
             {step === 3 && state && <StepConfirm state={state} t={t} />}

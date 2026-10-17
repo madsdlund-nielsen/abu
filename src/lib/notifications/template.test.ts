@@ -111,3 +111,18 @@ describe("variabler til beskeder", () => {
     expect(describeChange({ scope: "board", role: "customer", added: ["A"], removed: ["B"], upcomingUpdated: 2 })).toMatch(/2 kommende møder er opdateret/);
   });
 });
+
+describe("konto findes allerede (M-1)", () => {
+  it("er en låst, transaktionel e-mail med login- og nulstillingslink, uden markedsføringskrav", async () => {
+    const { TRIGGERS } = await import("./triggers");
+    const { DEFAULT_TEMPLATES, DEFAULT_RULES } = await import("./defaults");
+    const def = TRIGGERS.account_exists;
+    expect(def).toMatchObject({ locked: true, optIn: false, sensitive: false, audiences: ["SUBJECT"] });
+    const tpl = DEFAULT_TEMPLATES.find((t) => t.key === "account_exists_email")!;
+    expect(validateTemplate({ channel: "EMAIL", subject: tpl.subject, body: tpl.body }, def.variables)).toEqual([]);
+    const text = renderTemplate(tpl.body, { fornavn: "Mette", loginlink: "https://abu.dk/login", nulstillingsside: "https://abu.dk/reset-password" });
+    expect(text).toContain("https://abu.dk/login");
+    expect(text).not.toMatch(/token/);
+    expect(DEFAULT_RULES.some((r) => r.trigger === "account_exists" && r.audience === "SUBJECT")).toBe(true);
+  });
+});

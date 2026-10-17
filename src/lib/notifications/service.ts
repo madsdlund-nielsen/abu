@@ -360,7 +360,7 @@ export const subscriptionEvents = {
 
 // --------------------------------------------------------------------------- Udløsere: konto (transaktionelle, med engangslinks)
 
-async function sendSubjectNow(trigger: "advisor_invited" | "password_reset", user: User, vars: Record<string, string>): Promise<boolean> {
+async function sendSubjectNow(trigger: "advisor_invited" | "password_reset" | "account_exists", user: User, vars: Record<string, string>): Promise<boolean> {
   const result = await safely(trigger, async () => {
     const ids = await enqueue({
       trigger,
@@ -383,6 +383,8 @@ async function sendSubjectNow(trigger: "advisor_invited" | "password_reset", use
 export const accountEvents = {
   invited: (user: User, link: string) => sendSubjectNow("advisor_invited", user, { invitationslink: link }),
   passwordReset: (user: User, link: string) => sendSubjectNow("password_reset", user, { nulstillingslink: link }),
+  /** Neutral besked til en eksisterende konto, der starter en ny tilmelding (M-1). */
+  alreadyExists: (user: User) => sendSubjectNow("account_exists", user, { loginlink: `${appUrl()}/login`, nulstillingsside: `${appUrl()}/reset-password` }),
 };
 
 // --------------------------------------------------------------------------- Udløser: ufærdig tilmelding

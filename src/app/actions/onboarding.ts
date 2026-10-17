@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { recordingConsentNow } from "@/lib/consent";
@@ -20,12 +21,26 @@ import { accountSchema, answerSchema, boardSchema, companyStepSchema, contactSch
 import {
   asSuggestion,
   createOnboardingSession,
+  deleteOnboardingSession,
   getOnboardingSession,
   updateOnboardingSession,
   type CompanyState,
   type OnboardingState,
 } from "@/lib/onboarding/session";
 import { buildTestSnapshot } from "@/lib/onboarding/snapshot";
+import { accountEvents } from "@/lib/notifications/service";
+
+/**
+ * M-1: om en e-mail allerede har en konto, må ikke kunne ses på siden. Ejeren får i stedet en neutral e-mail ("du har
+ * allerede en konto – log ind her"), højst én gang i døgnet, sendt efter svaret (ingen tidsforskel).
+ */
+async function notifyExistingAccount(userId: string, email: string) {
+  if (!(await rateLimit(`account-exists:${email}`, 1, 24 * 3_600_000))) return;
+  after(async () => {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user) await accountEvents.alreadyExists(user).catch((e) => console.error("[onboarding] konto-findes-mail fejlede", e instanceof Error ? e.message : e));
+  });
+}
 
 const BASE = "/kom-i-gang";
 const to = (step: number, extra = "") => `${BASE}?trin=${step}${extra}`;
@@ -47,24 +62,29 @@ export async function saveContactAction(formData: FormData) {
   if (!parsed.success) fail(1, parsed.error.issues[0].message, keep);
   const contact = parsed.data!;
   const exists = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
-  if (exists) fail(1, "Der findes allerede en konto med den e-mail.", `&konto=1${keep}`);
-  // Lead gemmes straks (også hvis tilmeldingen aldrig gøres færdig). Samtykket er aktivt (aldrig forudkrydset)
-  // og gemmes med den præcise tekst og version, personen så.
-  const h = await headers();
-  const proof = await currentConsent("marketing");
-  const leadId = await upsertLead({
-    name: contact.name,
-    email: contact.email,
-    consent: formData.get("contactConsent") === "on",
-    proof: { ...proof, ipAddress: await getClientIp(), userAgent: h.get("user-agent") },
-  });
+  let leadId: string | null = null;
+  if (exists) {
+    // Ingen forskel på siden (M-1): tilmeldingen fortsætter, og kontoejeren får en neutral e-mail
+    await notifyExistingAccount(exists.id, contact.email);
+  } else {
+    // Lead gemmes straks (også hvis tilmeldingen aldrig gøres færdig). Samtykket er aktivt (aldrig forudkrydset)
+    // og gemmes med den præcise tekst og version, personen så.
+    const h = await headers();
+    const proof = await currentConsent("marketing");
+    leadId = await upsertLead({
+      name: contact.name,
+      email: contact.email,
+      consent: formData.get("contactConsent") === "on",
+      proof: { ...proof, ipAddress: await getClientIp(), userAgent: h.get("user-agent") },
+    });
+  }
   const s = await getOnboardingSession();
   if (s) {
     await updateOnboardingSession(s.id, { step: Math.max(s.step, 2), data: { ...s.data, contact }, leadId });
   } else {
     await createOnboardingSession({ step: 2, data: { contact }, leadId });
   }
-  await prisma.lead.updateMany({ where: { id: leadId, step: { lt: 2 } }, data: { step: 2 } });
+  if (leadId) await prisma.lead.updateMany({ where: { id: leadId, step: { lt: 2 } }, data: { step: 2 } });
   redirect(to(2));
 }
 
@@ -192,8 +212,12 @@ export async function completeOnboardingAction(formData: FormData) {
   const board = await resolveBoard(chosen.advisorIds, chosen.weeks);
   if ("error" in board) fail(5, board.error);
   const resolved = board as Exclude<typeof board, { error: string }>;
-  if (await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } })) {
-    fail(1, "Der findes allerede en konto med den e-mail.", "&konto=1");
+  const existing = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
+  if (existing) {
+    // Opret ikke en ny konto, og sig ikke, at e-mailen er kendt (M-1): samme neutrale besked som ellers sendes på mail
+    await notifyExistingAccount(existing.id, contact.email);
+    await deleteOnboardingSession(s.id);
+    redirect("/login?ok=" + encodeURIComponent("Tjek din e-mail. Vi har sendt dig en besked om, hvordan du fortsætter."));
   }
 
   const [questions, tags] = await Promise.all([loadActiveQuestions(), prisma.tag.findMany({ select: { id: true, name: true } })]);
