@@ -25,13 +25,13 @@ export default async function SubscribeSuccess({ searchParams }: { searchParams:
       ) : sub.status === "ACTIVE" ? (
         <>
           <h1>Tak – dit abonnement er aktivt</h1>
-          <p className="mt-3 text-slate-600">Du kan nu booke dit første møde.</p>
+          <p className="mt-3 text-muted">Du kan nu booke dit første møde.</p>
           <Link href="/book" className="btn mt-6">Book møde</Link>
         </>
       ) : (
         <>
           <h1>Vi afventer betalingsbekræftelse</h1>
-          <p className="mt-3 text-slate-600">
+          <p className="mt-3 text-muted">
             Status: <SubStatusBadge status={sub.status} />. Det kan tage et øjeblik, før betalingen er bekræftet. Opdater siden om lidt.
           </p>
           <Link href={`/subscribe/success?sub=${sub.id}`} className="btn-secondary mt-6">Opdater</Link>

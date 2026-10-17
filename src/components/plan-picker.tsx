@@ -39,12 +39,12 @@ export function PlanPicker({
   const ready = selected.length === count;
 
   const choice = (active: boolean) =>
-    `flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
-      active ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+    `flex-1 border px-3 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
+      active ? "border-navy bg-navy text-white" : "border-slate bg-white text-navy hover:border-navy"
     }`;
 
   return (
-    <form action={action} className="space-y-8">
+    <form action={action} className="space-y-space-4">
       <input type="hidden" name="advisors" value={count} />
       <input type="hidden" name="weeks" value={weeks} />
       {selected.map((id) => (
@@ -76,7 +76,7 @@ export function PlanPicker({
       <section className="card">
         <h2>
           3. Vælg dit board{" "}
-          <span className="text-sm font-normal text-slate-500">
+          <span className="text-sm font-normal text-muted">
             ({selected.length} af {count} valgt)
           </span>
         </h2>
@@ -91,17 +91,17 @@ export function PlanPicker({
                 onClick={() => toggle(a.id)}
                 disabled={disabled}
                 aria-pressed={on}
-                className={`rounded-xl border p-4 text-left transition ${
-                  on ? "border-brand-600 bg-brand-50 ring-1 ring-brand-600" : "border-slate-200 bg-white hover:border-slate-300"
+                className={`border-2 bg-white p-4 text-left transition-colors ${
+                  on ? "border-navy" : "border-grey-bg hover:border-slate"
                 } ${disabled ? "opacity-50" : ""}`}
               >
-                <span className="block font-semibold">{a.name}</span>
-                <span className="block text-sm text-brand-700">{a.title}</span>
-                <span className="mt-1 line-clamp-3 block text-sm text-slate-600">{a.bio}</span>
+                <span className="block font-semibold text-navy">{a.name}</span>
+                <span className="block text-sm font-semibold text-muted">{a.title}</span>
+                <span className="mt-1 line-clamp-3 block text-sm text-muted">{a.bio}</span>
                 {a.expertise.length > 0 && (
                   <span className="mt-2 flex flex-wrap gap-1">
                     {a.expertise.map((e) => (
-                      <span key={e} className="badge bg-slate-100 text-slate-700">{e}</span>
+                      <span key={e} className="badge badge-muted">{e}</span>
                     ))}
                   </span>
                 )}
@@ -113,8 +113,8 @@ export function PlanPicker({
 
       <section className="card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm text-slate-600">Månedlig pris (ekskl. moms)</p>
-          <p className="text-2xl font-semibold text-brand-700">{formatDkk(monthlyPriceDkk(count, weeks))} / md.</p>
+          <p className="text-sm text-muted">Månedlig pris (ekskl. moms)</p>
+          <p className="text-3xl font-light text-navy">{formatDkk(monthlyPriceDkk(count, weeks))} / md.</p>
         </div>
         <button className="btn" type="submit" disabled={!ready}>
           {ready ? submitLabel : `Vælg ${count - selected.length} mere`}

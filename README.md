@@ -54,6 +54,12 @@ docker compose run --rm migrate npx tsx prisma/seed.ts   # valgfrit: demodata
 | `npm run db:deploy` | Anvend migrationer (produktion) |
 | `npm run db:seed` | Seed-data |
 
+## Design
+
+Visuelt design følger `docs/design/designmanual.pdf`. Tokens ligger i `src/styles/design-tokens.css` og spejles i `tailwind.config.ts`
+(brug `bg-navy`, `text-gold-dark` osv., aldrig hex i komponenter). Open Sans er selvhostet via `@fontsource/open-sans` (ingen Google Fonts).
+Ordmærket er komponenten `src/components/logo.tsx`. Skærmbilleder: `docs/design/screens/`.
+
 ## Arkitektur
 
 ```

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { setPasswordAction } from "@/app/actions/auth";
 import { Flash, flashFrom, type SP } from "@/components/flash";
+import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
 import { findValidPasswordToken, MIN_PASSWORD_LENGTH } from "@/lib/auth";
 
@@ -12,19 +13,20 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
   const token = one(params.token) ?? "";
   const row = token ? await findValidPasswordToken(token) : null;
   return (
-    <PageShell>
+    <PageShell variant="bare">
+      <Band tone="grey">
       <div className="mx-auto max-w-md">
         <h1>{row?.purpose === "INVITE" ? "Velkommen – vælg din adgangskode" : "Vælg ny adgangskode"}</h1>
-        <div className="card mt-6">
+        <div className="panel mt-space-5">
           {!row ? (
             <>
-              <p className="text-sm text-slate-700">Linket er ugyldigt eller udløbet.</p>
+              <p className="text-sm text-muted">Linket er ugyldigt eller udløbet.</p>
               <p className="mt-3 text-sm"><Link href="/reset-password">Bed om et nyt link</Link></p>
             </>
           ) : (
             <>
               <Flash err={err} />
-              <p className="mb-4 text-sm text-slate-600">Konto: {row.user.email}</p>
+              <p className="mb-4 text-sm text-muted">Konto: {row.user.email}</p>
               <form action={setPasswordAction} className="space-y-4">
                 <input type="hidden" name="token" value={token} />
                 <div>
@@ -41,6 +43,7 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
           )}
         </div>
       </div>
+      </Band>
     </PageShell>
   );
 }

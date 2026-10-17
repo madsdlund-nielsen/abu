@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { signupAction } from "@/app/actions/auth";
 import { Flash, flashFrom, type SP } from "@/components/flash";
+import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth";
 
@@ -10,11 +11,12 @@ export const metadata: Metadata = { title: "Opret konto" };
 export default async function SignupPage({ searchParams }: { searchParams: SP }) {
   const { err } = await flashFrom(searchParams);
   return (
-    <PageShell>
+    <PageShell variant="bare">
+      <Band tone="grey">
       <div className="mx-auto max-w-xl">
         <h1>Opret konto</h1>
-        <p className="mt-2 text-sm text-slate-600">Opret din virksomhed og vælg derefter dit abonnement.</p>
-        <div className="card mt-6">
+        <p className="mt-2 text-sm text-muted">Opret din virksomhed og vælg derefter dit abonnement.</p>
+        <div className="panel mt-space-5">
           <Flash err={err} />
           <form action={signupAction} className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
@@ -45,7 +47,7 @@ export default async function SignupPage({ searchParams }: { searchParams: SP })
               <label className="label" htmlFor="password">Adgangskode (mindst {MIN_PASSWORD_LENGTH} tegn)</label>
               <input className="input" id="password" name="password" type="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
             </div>
-            <label className="flex items-start gap-3 text-sm text-slate-700 sm:col-span-2">
+            <label className="flex items-start gap-3 text-sm text-muted sm:col-span-2">
               <input type="checkbox" name="consent" className="mt-1 h-4 w-4" required />
               <span>
                 Jeg accepterer <Link href="/vilkaar" target="_blank">vilkårene</Link> og har læst{" "}
@@ -57,11 +59,12 @@ export default async function SignupPage({ searchParams }: { searchParams: SP })
               <button className="btn w-full" type="submit">Opret konto</button>
             </div>
           </form>
-          <p className="mt-4 text-sm text-slate-600">
+          <p className="mt-4 text-sm text-muted">
             Har du allerede en konto? <Link href="/login">Log ind</Link>
           </p>
         </div>
       </div>
+      </Band>
     </PageShell>
   );
 }

@@ -17,7 +17,7 @@ export default async function SubscribePage({ searchParams }: { searchParams: SP
   return (
     <div>
       <h1>Sammensæt dit advisory board</h1>
-      <p className="mb-6 mt-2 text-slate-600">Vælg antal rådgivere, mødefrekvens og hvilke rådgivere der skal sidde i dit board.</p>
+      <p className="mb-6 mt-2 text-muted">Vælg antal rådgivere, mødefrekvens og hvilke rådgivere der skal sidde i dit board.</p>
       <Flash ok={ok} err={err} />
       <PlanPicker
         advisors={advisors.map((a) => ({

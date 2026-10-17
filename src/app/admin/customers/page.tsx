@@ -25,10 +25,10 @@ export default async function AdminCustomers({ searchParams }: { searchParams: S
           <tbody>
             {customers.map((c) => (
               <tr key={c.userId}>
-                <td><p className="font-medium">{c.companyName}</p><p className="text-xs text-slate-500">CVR {c.cvr}</p></td>
-                <td><p>{c.user.name}</p><p className="text-xs text-slate-500">{c.user.email} · {c.user.phone}</p></td>
+                <td><p className="font-medium">{c.companyName}</p><p className="text-xs text-muted">CVR {c.cvr}</p></td>
+                <td><p>{c.user.name}</p><p className="text-xs text-muted">{c.user.email} · {c.user.phone}</p></td>
                 <td>{formatDate(c.user.createdAt)}</td>
-                <td>{c.subscriptions[0] ? <SubStatusBadge status={c.subscriptions[0].status} /> : <span className="text-slate-400">Ingen</span>}</td>
+                <td>{c.subscriptions[0] ? <SubStatusBadge status={c.subscriptions[0].status} /> : <span className="text-muted">Ingen</span>}</td>
                 <td className="text-right">
                   {c.user.deletionRequestedAt && (
                     <form action={processDeletionAction}>

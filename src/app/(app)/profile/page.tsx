@@ -13,7 +13,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: SP }
   return (
     <div>
       <h1>Min profil</h1>
-      <p className="mt-2 text-sm text-slate-600">Profilen vises for kunder, når de sammensætter deres board.</p>
+      <p className="mt-2 text-sm text-muted">Profilen vises for kunder, når de sammensætter deres board.</p>
       <div className="card mt-6 max-w-2xl">
         <Flash ok={ok} err={err} />
         <form action={updateProfileAction} className="grid gap-4">

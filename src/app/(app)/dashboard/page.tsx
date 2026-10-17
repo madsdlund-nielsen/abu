@@ -42,7 +42,7 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
         <h1>Hej {user.name.split(" ")[0]}</h1>
         <Flash ok={ok} err={err} />
         {rules === 0 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="callout text-sm">
             Du har endnu ikke angivet tilgængelighed, så kunder kan ikke booke dig. <Link href="/availability">Angiv tilgængelighed</Link>
           </div>
         )}
@@ -69,7 +69,7 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
       {!sub || sub.status === "PENDING" ? (
         <div className="card">
           <h2>Kom i gang</h2>
-          <p className="mt-2 text-sm text-slate-600">Du har endnu ikke et aktivt abonnement. Sammensæt dit board og start.</p>
+          <p className="mt-2 text-sm text-muted">Du har endnu ikke et aktivt abonnement. Sammensæt dit board og start.</p>
           <Link href="/subscribe" className="btn mt-4">Vælg abonnement</Link>
         </div>
       ) : (
@@ -78,22 +78,22 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
             <h2>Dit abonnement</h2>
             <SubStatusBadge status={sub.status} />
           </div>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-sm text-muted">
             {sub.advisorCount} rådgivere · {frequencyLabel(sub.frequencyWeeks)} · {formatDkk(sub.monthlyPriceDkk)} / md.
           </p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {sub.advisors.map((a) => (
-              <div key={a.advisorId} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3">
+              <div key={a.advisorId} className="flex items-center gap-3 border border-grey-bg p-3">
                 <Initials name={a.advisor.user.name} url={a.advisor.photoUrl} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{a.advisor.user.name}</p>
-                  <p className="truncate text-xs text-slate-500">{a.advisor.title}</p>
+                  <p className="truncate text-xs text-muted">{a.advisor.title}</p>
                 </div>
               </div>
             ))}
           </div>
           {sub.status === "ACTIVE" && quota && (
-            <p className="mt-4 text-sm text-slate-600">
+            <p className="mt-4 text-sm text-muted">
               Aktuel periode: {periodText}.{" "}
               {quota.openPeriods.includes(quota.currentPeriod) ? (
                 <>Du har et møde til gode. <Link href="/book">Book nu</Link></>

@@ -21,13 +21,13 @@ export default async function AccountPage({ searchParams }: { searchParams: SP }
       <section className="card">
         <h2>Oplysninger</h2>
         <dl className="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-          <div><dt className="text-slate-500">Navn</dt><dd>{user.name}</dd></div>
-          <div><dt className="text-slate-500">E-mail</dt><dd>{user.email}</dd></div>
-          {user.phone && <div><dt className="text-slate-500">Telefon</dt><dd>{user.phone}</dd></div>}
+          <div><dt className="text-muted">Navn</dt><dd>{user.name}</dd></div>
+          <div><dt className="text-muted">E-mail</dt><dd>{user.email}</dd></div>
+          {user.phone && <div><dt className="text-muted">Telefon</dt><dd>{user.phone}</dd></div>}
           {customer && (
             <>
-              <div><dt className="text-slate-500">Virksomhed</dt><dd>{customer.companyName}</dd></div>
-              <div><dt className="text-slate-500">CVR</dt><dd>{customer.cvr}</dd></div>
+              <div><dt className="text-muted">Virksomhed</dt><dd>{customer.companyName}</dd></div>
+              <div><dt className="text-muted">CVR</dt><dd>{customer.cvr}</dd></div>
             </>
           )}
         </dl>
@@ -53,15 +53,15 @@ export default async function AccountPage({ searchParams }: { searchParams: SP }
 
       <section className="card">
         <h2>Dine data (GDPR)</h2>
-        <p className="mt-2 text-sm text-slate-600">Download alle data, vi har om dig, som en JSON-fil.</p>
+        <p className="mt-2 text-sm text-muted">Download alle data, vi har om dig, som en JSON-fil.</p>
         <a className="btn-secondary mt-3" href="/api/account/export" download>Download mine data</a>
 
         {user.role !== "ADMIN" && (
-          <div className="mt-6 border-t border-slate-100 pt-4">
+          <div className="mt-6 border-t border-grey-bg pt-4">
             <h3>Slet min konto</h3>
             {user.deletionRequestedAt ? (
               <>
-                <p className="mt-2 text-sm text-slate-600">
+                <p className="mt-2 text-sm text-muted">
                   Du har anmodet om sletning den {formatDate(user.deletionRequestedAt)}. Vi behandler anmodningen.
                 </p>
                 <form action={cancelDeletionRequestAction} className="mt-3">
@@ -70,7 +70,7 @@ export default async function AccountPage({ searchParams }: { searchParams: SP }
               </>
             ) : (
               <>
-                <p className="mt-2 text-sm text-slate-600">
+                <p className="mt-2 text-sm text-muted">
                   Vi sletter din konto og alle tilhørende data (inkl. møder og transskriptioner). Et aktivt abonnement skal
                   opsiges først.
                 </p>

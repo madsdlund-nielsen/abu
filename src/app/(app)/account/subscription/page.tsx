@@ -34,21 +34,21 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
             <SubStatusBadge status={sub.status} />
           </div>
           <dl className="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-            <div><dt className="text-slate-500">Rådgivere</dt><dd>{sub.advisorCount}</dd></div>
-            <div><dt className="text-slate-500">Frekvens</dt><dd>{frequencyLabel(sub.frequencyWeeks)}</dd></div>
-            <div><dt className="text-slate-500">Pris</dt><dd>{formatDkk(sub.monthlyPriceDkk)} / md. ekskl. moms</dd></div>
-            {sub.startedAt && <div><dt className="text-slate-500">Startet</dt><dd>{formatDate(sub.startedAt)}</dd></div>}
+            <div><dt className="text-muted">Rådgivere</dt><dd>{sub.advisorCount}</dd></div>
+            <div><dt className="text-muted">Frekvens</dt><dd>{frequencyLabel(sub.frequencyWeeks)}</dd></div>
+            <div><dt className="text-muted">Pris</dt><dd>{formatDkk(sub.monthlyPriceDkk)} / md. ekskl. moms</dd></div>
+            {sub.startedAt && <div><dt className="text-muted">Startet</dt><dd>{formatDate(sub.startedAt)}</dd></div>}
             <div className="sm:col-span-2">
-              <dt className="text-slate-500">Dit board</dt>
+              <dt className="text-muted">Dit board</dt>
               <dd>{sub.advisors.map((a) => a.advisor.user.name).join(", ")}</dd>
             </div>
           </dl>
           {sub.status === "PAST_DUE" && (
-            <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+            <p className="callout callout-error mt-3 text-sm">
               Seneste betaling mislykkedes. Opdater dit betalingskort hos Frisbii; du kan ikke booke nye møder, før betalingen er gået igennem.
             </p>
           )}
-          {sub.status === "PENDING" && <p className="mt-3 text-sm text-slate-600"><Link href="/subscribe">Fuldfør tilmelding</Link></p>}
+          {sub.status === "PENDING" && <p className="mt-3 text-sm text-muted"><Link href="/subscribe">Fuldfør tilmelding</Link></p>}
         </section>
       )}
 
@@ -67,7 +67,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
           </section>
           <section className="card">
             <h2>Opsig abonnement</h2>
-            <p className="mt-2 text-sm text-slate-600">Kommende møder aflyses, og abonnementet stoppes hos betalingsudbyderen.</p>
+            <p className="mt-2 text-sm text-muted">Kommende møder aflyses, og abonnementet stoppes hos betalingsudbyderen.</p>
             <form action={cancelSubscriptionAction} className="mt-3">
               <button className="btn-danger" type="submit">Opsig abonnement</button>
             </form>
