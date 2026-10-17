@@ -28,7 +28,7 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
         tags={tags}
         activeSubscriptions={activeSubscriptions}
         readiness={readiness.get(id) ?? []}
-        boards={boards.map((b) => b.companyName)}
+        boards={[...new Set(boards.map((b) => b.companyName))]}
         priceBounds={bounds}
       />
     </div>

@@ -106,7 +106,7 @@ export async function toggleAdvisorActiveAction(formData: FormData) {
   redirectWith(
     "/admin/advisors",
     "ok",
-    `${profile.user.name} er deaktiveret.${boards.length ? ` Berørte kunder (vælg en ny rådgiver under Abonnementer): ${boards.map((b) => b.companyName).join(", ")}.` : ""}`,
+    `${profile.user.name} er deaktiveret.${boards.length ? ` Berørte kunder (vælg en ny rådgiver under Abonnementer): ${[...new Set(boards.map((b) => b.companyName))].join(", ")}.` : ""}`,
   );
 }
 
