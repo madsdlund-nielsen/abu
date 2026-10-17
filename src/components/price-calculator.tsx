@@ -8,7 +8,7 @@ export function PriceCalculator() {
   const [advisors, setAdvisors] = useState<number>(3);
   const [weeks, setWeeks] = useState<number>(8);
   const price = monthlyPriceDkk(advisors, weeks);
-  const meetingsPerYear = Math.round(52 / weeks);
+  const meetingsPerYear = new Intl.NumberFormat("da-DK", { maximumFractionDigits: 1 }).format(52 / weeks);
 
   return (
     <div className="panel">

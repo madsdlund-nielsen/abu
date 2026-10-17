@@ -4,7 +4,7 @@ import { BookingError } from "./booking";
 import { changeMeetingAdvisors } from "./meeting-admin";
 import { subscriptionEvents } from "./notifications/service";
 import { getPayments } from "./payments";
-import { isFrequencyWeeks, monthlyPriceForBoard, planHandle, MAX_BOARD_SIZE, MIN_BOARD_SIZE } from "./pricing";
+import { formatDkk, isFrequencyWeeks, monthlyPriceForBoard, planHandle, MAX_BOARD_SIZE, MIN_BOARD_SIZE } from "./pricing";
 import { formatDate } from "./time";
 
 export function diffBoard(before: string[], after: string[]) {
@@ -111,7 +111,7 @@ export async function changeBoardAsAdmin(opts: {
     }
   }
 
-  const priceNote = opts.pricePolicy === "recalc" ? `ny pris ${monthly} kr./md.` : "uændret pris";
+  const priceNote = opts.pricePolicy === "recalc" ? `ny pris ${formatDkk(monthly)}/md.` : "uændret pris";
   await audit(
     opts.actorId,
     "subscription.admin_change_board",
@@ -123,7 +123,7 @@ export async function changeBoardAsAdmin(opts: {
     await subscriptionEvents.boardChanged(sub.id, { addedIds: diff.added, removedIds: diff.removed, upcomingUpdated: updated });
   }
 
-  const parts = ["Boardet er opdateret.", opts.pricePolicy === "recalc" ? `Ny månedspris: ${monthly} kr. (gælder fra næste betalingsperiode).` : "Prisen er uændret."];
+  const parts = ["Boardet er opdateret.", opts.pricePolicy === "recalc" ? `Ny månedspris: ${formatDkk(monthly)} (gælder fra næste betalingsperiode).` : "Prisen er uændret."];
   if (opts.updateUpcoming) parts.push(`${updated === 1 ? "1 kommende møde er" : `${updated} kommende møder er`} opdateret${conflicts.length ? `, ${conflicts.length} konflikt${conflicts.length === 1 ? "" : "er"}` : ""}.`);
   return { ok: true, message: parts.join(" "), conflicts, updatedMeetings: updated };
 }

@@ -114,7 +114,7 @@ export default async function AccountPage({ searchParams }: { searchParams: SP }
                   Vi sletter din konto og alle tilhørende data (inkl. møder og transskriptioner). Et aktivt abonnement skal
                   opsiges først.
                 </p>
-                <form action={requestDeletionAction} className="mt-3">
+                <form action={requestDeletionAction} className="mt-3" data-confirm="Vil du anmode om sletning af din konto og alle tilhørende data?">
                   <button className="btn-danger" type="submit">Anmod om sletning</button>
                 </form>
               </>

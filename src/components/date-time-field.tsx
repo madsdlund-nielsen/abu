@@ -8,7 +8,7 @@ for (let m = 0; m < 1440; m += 15) {
 }
 
 /** Regex for dd.mm.åååå (tillader 1-cifrede dag/måned). Samme regler som parseDanishDate på serveren. */
-export const DK_DATE_PATTERN = "\\d{1,2}[./-]\\d{1,2}[./-]\\d{4}";
+export const DK_DATE_PATTERN = "\\d{1,2}(?:\\.|/|-)\\d{1,2}(?:\\.|/|-)\\d{4}";
 
 function isValidDanishDate(v: string): boolean {
   const m = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/.exec(v.trim());

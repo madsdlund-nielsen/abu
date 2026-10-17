@@ -74,7 +74,7 @@ export async function processJobsAction() {
   const admin = await requireRole("ADMIN");
   const n = await processJobs(10);
   await audit(admin.id, "jobs.process", "Job", "manual");
-  redirectWith("/admin", "ok", `${n} job(s) behandlet.`);
+  redirectWith("/admin", "ok", `${n} baggrundsjob behandlet.`);
 }
 
 export async function processDeletionAction(formData: FormData) {
