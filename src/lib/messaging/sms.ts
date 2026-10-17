@@ -1,11 +1,15 @@
 import { getEnv } from "../env";
 import { inmobileSendSms } from "./inmobile";
+import { maskPhone, redactText } from "./redact";
 import type { OutgoingSms, SendResult, SmsProvider } from "./types";
 
-class ConsoleSms implements SmsProvider {
+/** Kun til udvikling (forbudt i produktion). Logger en redigeret udgave; følsomme beskeder logges ikke. */
+export class ConsoleSms implements SmsProvider {
   readonly name = "console" as const;
+  constructor(private log: (line: string) => void = console.log) {}
   async send(m: OutgoingSms): Promise<SendResult> {
-    console.log(`\n[sms:console] Fra: ${m.from}  Til: ${m.to}\n[sms:console] ${m.text}\n[sms:console] ---\n`);
+    const head = `[sms:console] Fra: ${m.from} · Til: ${maskPhone(m.to)}`;
+    this.log(m.sensitive ? `${head} · (følsom besked – indholdet logges ikke)` : `\n${head}\n[sms:console] ${redactText(m.text)}\n[sms:console] ---\n`);
     return { providerMessageId: `console-${m.messageId}` };
   }
 }

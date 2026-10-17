@@ -5,6 +5,7 @@ import { getEnv } from "../env";
 import { getEmail } from "../messaging/email";
 import { getSms } from "../messaging/sms";
 import { hasMarketingConsent, withdrawMarketing } from "../leads";
+import { maskAddress, redactText } from "../messaging/redact";
 import { toE164 } from "../phone";
 import { DEFAULT_RULES, DEFAULT_TEMPLATES } from "./defaults";
 import { buildEmail } from "./email-layout";
@@ -622,11 +623,11 @@ export async function deliverLog(id: string, opts: { extraVars?: Record<string, 
       subject = renderTemplate(template.subject ?? "", vars).trim();
       const mail = buildEmail({ subject, bodyText: body, unsubscribeUrl: def.optIn ? vars.afmeldlink : undefined, baseUrl: appUrl() });
       sentText = mail.text;
-      result = await getEmail().send({ to: log.recipientAddress, toName: vars.navn || undefined, subject, text: mail.text, html: mail.html, messageId: log.id });
+      result = await getEmail().send({ to: log.recipientAddress, toName: vars.navn || undefined, subject, text: mail.text, html: mail.html, messageId: log.id, sensitive: def.sensitive });
     } else {
       const settings = await getNotificationSettings();
       sentText = def.optIn && !body.includes(vars.afmeldlink) ? `${body}\nAfmeld: ${vars.afmeldlink}` : body;
-      result = await getSms().send({ to: log.recipientAddress, text: sentText, from: settings.smsSender, messageId: log.id });
+      result = await getSms().send({ to: log.recipientAddress, text: sentText, from: settings.smsSender, messageId: log.id, sensitive: def.sensitive });
     }
     await prisma.notificationLog.update({
       where: { id },
@@ -643,7 +644,7 @@ export async function deliverLog(id: string, opts: { extraVars?: Record<string, 
     return "SENT";
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error(`[notifications] ${log.trigger} til ${log.recipientAddress} fejlede`, message);
+    console.error(`[notifications] ${log.trigger} til ${maskAddress(log.recipientAddress)} fejlede`, redactText(message));
     await prisma.notificationLog.update({ where: { id }, data: { status: "FAILED", error: message.slice(0, 500), claimedAt: null } });
     return "FAILED";
   }
