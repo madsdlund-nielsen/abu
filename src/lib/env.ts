@@ -233,6 +233,8 @@ export function isProductionEnv(): boolean {
 }
 
 export function cookieSecure(): boolean {
+  // I produktion altid Secure, uanset APP_URL/COOKIE_SECURE (M-6)
+  if (isProductionEnv()) return true;
   const env = getEnv();
   if (env.COOKIE_SECURE === "true") return true;
   if (env.COOKIE_SECURE === "false") return false;

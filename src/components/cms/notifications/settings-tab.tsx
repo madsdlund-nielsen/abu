@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { loadDefaultsAction, saveSettingsAction } from "@/app/actions/notifications";
 import type { CmsProviders, CmsSettings } from "@/lib/notifications/cms-types";
-import { validateSmsSender } from "@/lib/messaging/sms";
+import { validateSmsSender } from "@/lib/messaging/sender";
 import { Switch, type Saver } from "../primitives";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);

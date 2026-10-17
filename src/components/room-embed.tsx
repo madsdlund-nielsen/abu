@@ -21,7 +21,7 @@ export function RoomEmbed({ url, mock }: { url: string; mock: boolean }) {
       <iframe
         src={src}
         title="Videomøde"
-        allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
+        allow="camera; microphone; fullscreen; display-capture; autoplay"
         className="aspect-video w-full border border-grey-bg"
         data-testid="room"
       />
