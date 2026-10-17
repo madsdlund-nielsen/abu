@@ -1,0 +1,92 @@
+# CI: lint, typetjek, test (inkl. DB-tests mod Postgres), build, npm audit, prod-config-guard og Docker-build.
+# Actions er låst til commit-SHA (Renovate opdaterer dem). Kun `npm ci` – lockfilen er sandheden.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    name: Lint, typer, test, build, audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: abu
+          POSTGRES_PASSWORD: abu
+          POSTGRES_DB: abu_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U abu -d abu_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://abu:abu@localhost:5432/abu_test
+      TEST_DATABASE_URL: postgresql://abu:abu@localhost:5432/abu_test
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installér (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      - name: npm audit (produktion, høj/kritisk blokerer)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typetjek
+        run: npx tsc --noEmit
+
+      - name: Migrér testdatabase
+        run: npx prisma migrate deploy
+
+      - name: Prod-config-guard (enhedstest)
+        run: npx vitest run src/lib/env.test.ts
+
+      - name: Test (enheds- og DB-tests)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Prod-config-guard (produktionsbuild med mock-konfiguration skal nægte at starte)
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          set +e
+          env -i PATH="$PATH" HOME="$HOME" NODE_ENV=production PORT=3999 HOSTNAME=127.0.0.1 \
+            DATABASE_URL="$DATABASE_URL" timeout 60 node .next/standalone/server.js > boot.log 2>&1
+          code=$?
+          set -e
+          cat boot.log
+          if [ "$code" -ne 1 ] || ! grep -q "Appen starter ikke" boot.log; then
+            echo "::error::Produktionsbuildet startede med mock-udbydere (exit $code)"; exit 1
+          fi
+
+  docker:
+    name: Docker-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: docker build (uden push)
+        run: docker build --pull -t abu:ci .
