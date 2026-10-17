@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { cancelMeetingAction, retryRecordingAction, uploadRecordingAction } from "@/app/actions/meetings";
+import { cancelMeetingAction, retryRecordingAction } from "@/app/actions/meetings";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { AutoRefresh, JoinCountdown } from "@/components/join-countdown";
+import { RecordingUpload } from "@/components/recording-upload";
 import { RoomEmbed } from "@/components/room-embed";
 import { MeetingStatusBadge } from "@/components/ui";
 import Link from "next/link";
@@ -20,7 +21,7 @@ import type { TranscriptSegment } from "@/lib/transcription/types";
 
 export const metadata: Metadata = { title: "Møde" };
 
-const REC_LABEL = { RECEIVED: "Modtaget", TRANSCRIBING: "Transskriberer …", DONE: "Færdig", FAILED: "Fejlet" } as const;
+const REC_LABEL = { UPLOADING: "Uploades …", RECEIVED: "Modtaget", TRANSCRIBING: "Transskriberer …", DONE: "Færdig", FAILED: "Fejlet" } as const;
 
 export default async function MeetingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SP }) {
   const user = await requireUser();
@@ -219,11 +220,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
               <p className="mt-4 text-sm text-muted">
                 Mangler den automatiske optagelse? Upload en lyd- eller videofil, så transskriberes den på samme måde.
               </p>
-              <form action={uploadRecordingAction} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-                <input type="hidden" name="meetingId" value={meeting.id} />
-                <input type="file" name="file" accept="audio/*,video/*" required className="text-sm" />
-                <button className="btn" type="submit">Upload og transskriber</button>
-              </form>
+              <RecordingUpload meetingId={meeting.id} />
             </>
           ) : (
             <p className="callout mt-4 text-sm" data-testid="upload-disabled">

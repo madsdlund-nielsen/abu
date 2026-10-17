@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { getEnv } from "./env";
 import { statusAfterTranscription } from "./meeting-status";
 import { registerJobHandler } from "./jobs";
+import { detectMediaType, MEDIA_SNIFF_BYTES } from "./media-type";
 import { getStorage } from "./storage";
 import { meetingEvents } from "./notifications/service";
 import { getTranscriber } from "./transcription";
@@ -16,9 +17,17 @@ export async function transcribeRecording(recordingId: string) {
   await prisma.recording.update({ where: { id: rec.id }, data: { status: "TRANSCRIBING", error: null } });
   try {
     const storage = getStorage();
-    const file = await storage.get(rec.storageKey);
+    const mime = rec.mime ?? "application/octet-stream";
+    const type = detectMediaType(await storage.readHead(rec.storageKey, MEDIA_SNIFF_BYTES));
+    // Filen læses fra disk/lager, mens den sendes – ikke ind i hukommelsen (H-5)
+    const { blob, cleanup } = await storage.openBlob(rec.storageKey, type?.mime ?? mime);
     const transcriber = getTranscriber();
-    const result = await transcriber.transcribe(file, rec.mime ?? "application/octet-stream", rec.storageKey.split("/").pop());
+    let result;
+    try {
+      result = await transcriber.transcribe(blob, type?.mime ?? mime, `optagelse.${type?.ext ?? "bin"}`);
+    } finally {
+      await cleanup();
+    }
     const segmentsJson = result.segments as unknown as Prisma.InputJsonValue;
     const summary = await transcriber.summarize(result.text);
 
@@ -57,6 +66,11 @@ export async function transcribeRecording(recordingId: string) {
     throw e;
   }
 }
+
+registerJobHandler("cleanup_stale_uploads", async () => {
+  const { cleanupStaleUploads } = await import("./recording-upload");
+  await cleanupStaleUploads();
+});
 
 registerJobHandler("transcribe_recording", async (payload) => {
   await transcribeRecording(String(payload.recordingId));

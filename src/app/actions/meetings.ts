@@ -1,18 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { canAccessMeeting } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { requireRole, requireUser } from "@/lib/auth";
 import { BookingError, bookMeeting, cancelMeeting } from "@/lib/booking";
 import { prisma } from "@/lib/db";
-import { recordingUploadDecision } from "@/lib/meeting-status";
 import { enqueueJob } from "@/lib/jobs";
+import { finalizeRecordingUpload, prepareRecordingUpload } from "@/lib/recording-upload";
 import { redirectWith } from "@/lib/redirect";
-import { getStorage } from "@/lib/storage";
 import { getCustomerSubscription } from "@/lib/subscriptions";
-import { randomToken } from "@/lib/tokens";
 
 export async function bookAction(formData: FormData) {
   const user = await requireRole("CUSTOMER");
@@ -57,36 +53,23 @@ export async function cancelMeetingAction(formData: FormData) {
   }
 }
 
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-
-export async function uploadRecordingAction(formData: FormData) {
+/** Trin 1 af upload (H-5): giver et upload-mål. Selve filen sendes aldrig gennem en server action. */
+export async function prepareRecordingUploadAction(meetingId: string, size: number) {
   const user = await requireRole("ADMIN", "ADVISOR");
-  const meetingId = String(formData.get("meetingId") ?? "");
-  const back = `/meetings/${meetingId}`;
-  const meeting = await prisma.meeting.findUnique({ where: { id: meetingId }, include: { participants: true } });
-  if (!meeting || !canAccessMeeting(user, meeting.participants.map((p) => p.userId))) {
-    redirectWith("/meetings", "err", "Mødet findes ikke.");
+  try {
+    return await prepareRecordingUpload(user, String(meetingId), Number(size));
+  } catch (e) {
+    console.error("[upload] forberedelse fejlede", e instanceof Error ? e.message : e);
+    return { ok: false as const, error: "Uploaden kunne ikke startes. Prøv igen." };
   }
-  const decision = recordingUploadDecision(meeting, new Date());
-  if (!decision.allowed) redirectWith(back, "err", decision.reason);
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) redirectWith(back, "err", "Vælg en lyd- eller videofil.");
-  if (file.size > MAX_UPLOAD_BYTES) redirectWith(back, "err", "Filen er for stor (maks 500 MB).");
-  const mime = file.type || "application/octet-stream";
-  if (!/^(audio|video)\//.test(mime) && mime !== "application/octet-stream") {
-    redirectWith(back, "err", "Kun lyd- og videofiler kan uploades.");
-  }
+}
 
-  const ext = (file.name.split(".").pop() ?? "bin").replace(/[^a-z0-9]/gi, "").slice(0, 8) || "bin";
-  const key = `recordings/${meetingId}/${randomToken(8)}.${ext}`;
-  await getStorage().put(key, Buffer.from(await file.arrayBuffer()), mime);
-  const rec = await prisma.recording.create({
-    data: { meetingId, storageKey: key, mime, source: "UPLOAD" },
-  });
-  await enqueueJob("transcribe_recording", { recordingId: rec.id });
-  await audit(user.id, "recording.upload", "Recording", rec.id);
-  revalidatePath(back);
-  redirect(`${back}?ok=${encodeURIComponent("Optagelsen er uploadet og transskriberes nu. Opdater siden om lidt.")}`);
+/** Trin 2: tjekker filen i lageret (størrelse + magic bytes) og starter transskriptionen. */
+export async function finalizeRecordingUploadAction(recordingId: string) {
+  const user = await requireRole("ADMIN", "ADVISOR");
+  const r = await finalizeRecordingUpload(user, String(recordingId));
+  if (r.ok) revalidatePath(`/meetings/${r.meetingId}`);
+  return r;
 }
 
 export async function retryRecordingAction(formData: FormData) {

@@ -36,6 +36,8 @@ enum RecordingSource {
 }
 
 enum RecordingStatus {
+  /// Upload startet (presigned/streamet), endnu ikke verificeret. Ryddes op efter 24 timer.
+  UPLOADING
   RECEIVED
   TRANSCRIBING
   DONE
@@ -382,6 +384,9 @@ model Recording {
   mime       String?
   source     RecordingSource
   status     RecordingStatus @default(RECEIVED)
+  /// Hvem uploadede (kun UPLOAD), og filens størrelse efter verifikation
+  uploadedById String?
+  sizeBytes    Int?
   error      String?
   createdAt  DateTime        @default(now())
   meeting    Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)

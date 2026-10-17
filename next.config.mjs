@@ -3,7 +3,8 @@ const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
   serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg", "bcryptjs"],
-  experimental: { serverActions: { bodySizeLimit: "500mb" } },
+  // Optagelser uploades direkte til lageret / som stream (H-5); server actions behøver kun små bodies
+  experimental: { serverActions: { bodySizeLimit: "10mb" } },
   async headers() {
     return [
       {

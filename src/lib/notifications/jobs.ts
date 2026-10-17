@@ -28,5 +28,6 @@ export async function runNotificationTick(now = new Date()): Promise<{ created: 
   await ensureRecurringJob("cleanup_notification_logs", DAY_MS);
   await ensureRecurringJob("cleanup_leads", DAY_MS);
   await ensureRecurringJob("cleanup_rate_limits", DAY_MS);
+  await ensureRecurringJob("cleanup_stale_uploads", DAY_MS);
   return { created, sent };
 }
