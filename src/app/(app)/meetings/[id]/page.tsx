@@ -153,7 +153,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
           <p className="mt-2 text-sm text-muted">
             Aflysning mindst {LATE_CANCEL_HOURS} timer før start frigiver mødet, så du kan booke et nyt. Senere aflysning tæller som afholdt.
           </p>
-          <form action={cancelMeetingAction} className="mt-3">
+          <form action={cancelMeetingAction} className="mt-3" data-confirm="Vil du aflyse mødet?">
             <input type="hidden" name="meetingId" value={meeting.id} />
             <button className="btn-danger" type="submit">Aflys mødet</button>
           </form>

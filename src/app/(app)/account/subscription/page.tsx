@@ -74,7 +74,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
           <section className="card">
             <h2>Opsig abonnement</h2>
             <p className="mt-2 text-sm text-muted">Kommende møder aflyses, og abonnementet stoppes hos betalingsudbyderen.</p>
-            <form action={cancelSubscriptionAction} className="mt-3">
+            <form action={cancelSubscriptionAction} className="mt-3" data-confirm="Vil du opsige abonnementet? Kommende møder aflyses.">
               <button className="btn-danger" type="submit">Opsig abonnement</button>
             </form>
           </section>

@@ -38,7 +38,7 @@ export default async function AdminCustomers({ searchParams }: { searchParams: S
                 <td>{c.subscriptions[0] ? <SubStatusBadge status={c.subscriptions[0].status} /> : <span className="text-muted">Ingen</span>}</td>
                 <td className="text-right">
                   {c.user.deletionRequestedAt && (
-                    <form action={processDeletionAction}>
+                    <form action={processDeletionAction} data-confirm="Slet brugeren og alle tilhørende data permanent? Det kan ikke fortrydes.">
                       <input type="hidden" name="userId" value={c.userId} />
                       <button className="btn-danger btn-sm" type="submit">
                         Slet (anmodet {formatDate(c.user.deletionRequestedAt)})
