@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint src prisma/seed.ts",
+    "lint": "eslint src prisma/seed.ts prisma/seed-data.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",
@@ -19,6 +19,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@fontsource/open-sans": "^5.3.0",
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",

@@ -23,6 +23,12 @@ const schema = z.object({
   FRISBII_API_URL: z.string().default("https://api.reepay.com"),
   FRISBII_CHECKOUT_API_URL: z.string().default("https://checkout-api.reepay.com"),
 
+  CVR_PROVIDER: z.enum(["mock", "virk", "cvrapi"]).default("mock"),
+  CVR_VIRK_USERNAME: z.string().default(""),
+  CVR_VIRK_PASSWORD: z.string().default(""),
+  CVR_VIRK_URL: z.string().default("http://distribution.virk.dk/cvr-permanent/virksomhed/_search"),
+  CVR_USER_AGENT: z.string().default("Advisory Board Unlimited - onboarding (kontakt: support@example.dk)"),
+
   VIDEO_PROVIDER: z.enum(["mock", "whereby"]).default("mock"),
   WHEREBY_API_KEY: z.string().default(""),
   WHEREBY_WEBHOOK_SECRET: z.string().default(""),

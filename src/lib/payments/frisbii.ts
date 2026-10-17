@@ -33,7 +33,14 @@ export class FrisbiiPayments implements PaymentProvider {
         vat: input.customer.cvr,
         generate_handle: false,
       },
-      subscription: { plan: input.planHandle, handle: input.subscriptionId },
+      // GÆT (skal verificeres mod Frisbii): beløbet pr. abonnement overstyrer planens beløb. Mindste enhed (øre),
+      // ekskl. moms; momsen lægges til efter planens momsopsætning (amount_incl_vat=false).
+      subscription: {
+        plan: input.planHandle,
+        handle: input.subscriptionId,
+        amount: input.amountDkk * 100,
+        amount_incl_vat: false,
+      },
       accept_url: input.acceptUrl,
       cancel_url: input.cancelUrl,
       locale: "da_DK",
@@ -52,9 +59,12 @@ export class FrisbiiPayments implements PaymentProvider {
     await this.call(`${getEnv().FRISBII_API_URL}/v1/subscription/${encodeURIComponent(handle)}/cancel`, "POST");
   }
 
-  async changePlan(handle: string, planHandle: string) {
+  async changePlan(handle: string, planHandle: string, amountDkk: number) {
+    // GÆT (skal verificeres): planskift med nyt beløb-override i samme kald.
     await this.call(`${getEnv().FRISBII_API_URL}/v1/subscription/${encodeURIComponent(handle)}`, "PUT", {
       plan: planHandle,
+      amount: amountDkk * 100,
+      amount_incl_vat: false,
     });
   }
 }

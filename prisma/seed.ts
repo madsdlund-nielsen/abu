@@ -1,39 +1,10 @@
-/* Seed: admin, 4 rådgivere, 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
+/* Seed: admin, tags, 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { monthlyPriceForBoard } from "../src/lib/pricing";
+import { ADVISORS, DEMO_BOARD_EMAILS, QUESTIONS, TAGS } from "./seed-data";
 
 const prisma = new PrismaClient();
-
-const ADVISORS = [
-  {
-    name: "Mette Lindberg",
-    email: "mette.lindberg@abu.local",
-    title: "Tidligere CFO, børsnoteret industrikoncern",
-    bio: "Mette har 20 års erfaring som økonomichef og bestyrelsesmedlem. Hun hjælper med likviditetsstyring, finansiering og kapitalrejsning.",
-    expertise: ["Økonomi", "Finansiering", "Kapitalrejsning"],
-  },
-  {
-    name: "Jesper Holm Andersen",
-    email: "jesper.andersen@abu.local",
-    title: "Salgsdirektør og iværksætter",
-    bio: "Jesper har opbygget salgsorganisationer i tre skalerende B2B-virksomheder. Fokus på pipeline, prissætning og kundeanskaffelse.",
-    expertise: ["Salg", "Prissætning", "B2B-vækst"],
-  },
-  {
-    name: "Camilla Strøm Nielsen",
-    email: "camilla.nielsen@abu.local",
-    title: "CTO og digital transformation",
-    bio: "Camilla har ledet tech-teams på 5 til 150 medarbejdere og rådgiver om produktstrategi, arkitektur og AI i forretningen.",
-    expertise: ["Teknologi", "Produkt", "AI"],
-  },
-  {
-    name: "Søren Bjerregaard",
-    email: "soeren.bjerregaard@abu.local",
-    title: "HR-direktør og organisationsudvikler",
-    bio: "Søren hjælper ledelser med rekruttering, kultur og ledelsesudvikling – især i virksomheder i hurtig vækst.",
-    expertise: ["HR", "Ledelse", "Organisation"],
-  },
-];
 
 async function main() {
   const adminHash = await bcrypt.hash("Admin123!", 12);
@@ -46,7 +17,17 @@ async function main() {
     create: { email: "admin@abu.local", name: "Admin", role: "ADMIN", passwordHash: adminHash },
   });
 
-  const advisorIds: string[] = [];
+  const tagIds = new Map<string, string>();
+  for (const [i, t] of TAGS.entries()) {
+    const tag = await prisma.tag.upsert({
+      where: { slug: t.slug },
+      update: {},
+      create: { slug: t.slug, name: t.name, description: t.description, sortOrder: (i + 1) * 10 },
+    });
+    tagIds.set(t.slug, tag.id);
+  }
+
+  const advisorIds = new Map<string, string>();
   for (const a of ADVISORS) {
     const user = await prisma.user.upsert({
       where: { email: a.email },
@@ -56,10 +37,14 @@ async function main() {
         name: a.name,
         role: "ADVISOR",
         passwordHash: advisorHash,
-        advisorProfile: { create: { title: a.title, bio: a.bio, expertise: a.expertise, active: true } },
+        advisorProfile: { create: { title: a.title, bio: a.bio, active: true, pricePerMeetingDkk: a.price } },
       },
     });
-    advisorIds.push(user.id);
+    advisorIds.set(a.email, user.id);
+    await prisma.advisorTag.createMany({
+      data: a.tags.map((slug) => ({ advisorId: user.id, tagId: tagIds.get(slug)! })),
+      skipDuplicates: true,
+    });
     const existing = await prisma.availabilityRule.count({ where: { advisorId: user.id } });
     if (existing === 0) {
       // Hverdage 09:00-16:00 (København-tid); torsdag formiddag kun for variation
@@ -85,10 +70,31 @@ async function main() {
       passwordHash: kundeHash,
       consentAt: new Date(),
       customerProfile: {
-        create: { companyName: "Demo ApS", cvr: "12345678", address: "Testvej 1, 2100 København Ø", billingEmail: "kunde@abu.local" },
+        create: { companyName: "Demo ApS", cvr: "30000102", address: "Testvej 1, 2100 København Ø", billingEmail: "kunde@abu.local" },
       },
     },
   });
+
+  if ((await prisma.onboardingQuestion.count()) === 0) {
+    for (const [qi, q] of QUESTIONS.entries()) {
+      await prisma.onboardingQuestion.create({
+        data: {
+          text: q.text,
+          helpText: q.helpText,
+          type: q.type,
+          sortOrder: (qi + 1) * 10,
+          answers: {
+            create: q.answers.map((a, ai) => ({
+              text: a.text,
+              sortOrder: (ai + 1) * 10,
+              boardSize: a.boardSize,
+              weights: { create: Object.entries(a.weights).map(([slug, weight]) => ({ tagId: tagIds.get(slug)!, weight })) },
+            })),
+          },
+        },
+      });
+    }
+  }
 
   const hasSub = await prisma.subscription.count({ where: { customerId: customer.id } });
   if (!hasSub) {
@@ -97,12 +103,20 @@ async function main() {
         customerId: customer.id,
         advisorCount: 3,
         frequencyWeeks: 8,
-        monthlyPriceDkk: Math.round((3 * 1750 * (52 / 8)) / 12),
+        monthlyPriceDkk: monthlyPriceForBoard(
+          DEMO_BOARD_EMAILS.map((e) => ADVISORS.find((a) => a.email === e)!.price),
+          8,
+        ),
         status: "ACTIVE",
         provider: "mock",
         providerCustomerId: `mock-cust-${customer.id}`,
         startedAt: new Date(),
-        advisors: { create: advisorIds.slice(0, 3).map((advisorId) => ({ advisorId })) },
+        advisors: {
+          create: DEMO_BOARD_EMAILS.map((e) => ({
+            advisorId: advisorIds.get(e)!,
+            pricePerMeetingDkk: ADVISORS.find((a) => a.email === e)!.price,
+          })),
+        },
       },
     });
   }

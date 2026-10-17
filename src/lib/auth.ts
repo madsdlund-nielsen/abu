@@ -9,7 +9,8 @@ import { randomToken, sha256 } from "./tokens";
 
 export const SESSION_COOKIE = "abu_session";
 const SESSION_DAYS = 14;
-export const MIN_PASSWORD_LENGTH = 10;
+export { MIN_PASSWORD_LENGTH } from "./auth-constants";
+import { MIN_PASSWORD_LENGTH as MIN_LEN } from "./auth-constants";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
@@ -25,7 +26,7 @@ export async function verifyPassword(password: string, hash: string | null): Pro
 }
 
 export function validatePassword(password: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) return `Adgangskoden skal være mindst ${MIN_PASSWORD_LENGTH} tegn.`;
+  if (password.length < MIN_LEN) return `Adgangskoden skal være mindst ${MIN_LEN} tegn.`;
   return null;
 }
 

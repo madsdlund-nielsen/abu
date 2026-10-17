@@ -22,3 +22,14 @@ export async function listActiveAdvisors() {
     orderBy: { user: { name: "asc" } },
   });
 }
+
+/** Kundens behov fra onboarding-testen (snapshot på kundeprofilen), begrænset til aktive tags. */
+export async function getCustomerNeeds(userId: string): Promise<Record<string, number>> {
+  const [profile, tags] = await Promise.all([
+    prisma.customerProfile.findUnique({ where: { userId }, select: { testAnswers: true } }),
+    prisma.tag.findMany({ where: { active: true }, select: { id: true } }),
+  ]);
+  const active = new Set(tags.map((t) => t.id));
+  const needs = (profile?.testAnswers as { needs?: { tagId: string; weight: number }[] } | null)?.needs ?? [];
+  return Object.fromEntries(needs.filter((n) => active.has(n.tagId)).map((n) => [n.tagId, n.weight]));
+}
