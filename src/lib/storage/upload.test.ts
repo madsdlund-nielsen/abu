@@ -106,6 +106,11 @@ describeDb("upload-flow: prepare → stream → finalize (H-5)", () => {
     // Andre kan ikke afslutte min upload
     const pending = await prisma.recording.findFirstOrThrow({ where: { meetingId: meeting.id, status: "UPLOADING" } });
     expect(await finalizeRecordingUpload({ id: customer.id, role: "ADMIN" }, pending.id)).toMatchObject({ ok: false });
+    // En afbrudt/afvist upload ryddes op med det samme, så en ny kan startes
+    const { cancelRecordingUpload } = await import("../recording-upload");
+    expect(await cancelRecordingUpload(customer.id, pending.id)).toBe(false);
+    expect(await cancelRecordingUpload(advisor.id, pending.id)).toBe(true);
+    expect((await prepareRecordingUpload(actor, meeting.id, 100)).ok).toBe(true);
 
     await prisma.user.delete({ where: { id: customer.id } });
     await prisma.user.delete({ where: { id: advisor.id } });

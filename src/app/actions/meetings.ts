@@ -7,7 +7,7 @@ import { BookingError, bookMeeting, cancelMeeting } from "@/lib/booking";
 import { prisma } from "@/lib/db";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
 import { enqueueJob } from "@/lib/jobs";
-import { finalizeRecordingUpload, prepareRecordingUpload } from "@/lib/recording-upload";
+import { cancelRecordingUpload, finalizeRecordingUpload, prepareRecordingUpload } from "@/lib/recording-upload";
 import { redirectWith } from "@/lib/redirect";
 import { getCustomerSubscription } from "@/lib/subscriptions";
 
@@ -81,6 +81,12 @@ export async function finalizeRecordingUploadAction(recordingId: string) {
   const r = await finalizeRecordingUpload(user, String(recordingId));
   if (r.ok) revalidatePath(`/meetings/${r.meetingId}`);
   return r;
+}
+
+/** Upload fejlede i browseren (afbrudt, afvist af lageret): ryd den ventende upload op. */
+export async function cancelRecordingUploadAction(recordingId: string) {
+  const user = await requireRole("ADMIN", "ADVISOR");
+  await cancelRecordingUpload(user.id, String(recordingId));
 }
 
 export async function retryRecordingAction(formData: FormData) {

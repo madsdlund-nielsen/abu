@@ -80,6 +80,15 @@ export async function finalizeRecordingUpload(user: Actor, recordingId: string, 
   return { ok: true, meetingId: rec.meetingId };
 }
 
+/** Brugeren afbrød, eller uploaden blev afvist undervejs: fjern rækken og evt. halve objekt med det samme. */
+export async function cancelRecordingUpload(userId: string, recordingId: string): Promise<boolean> {
+  const rec = await prisma.recording.findUnique({ where: { id: recordingId } });
+  if (!rec || rec.status !== "UPLOADING" || rec.uploadedById !== userId) return false;
+  if (rec.storageKey) await getStorage().delete(rec.storageKey).catch(() => {});
+  await prisma.recording.delete({ where: { id: rec.id } }).catch(() => {});
+  return true;
+}
+
 /** Rydder op i uploads, der aldrig blev afsluttet (objekt + række). */
 export async function cleanupStaleUploads(now = new Date()): Promise<number> {
   const stale = await prisma.recording.findMany({ where: { status: "UPLOADING", createdAt: { lt: new Date(now.getTime() - STALE_UPLOAD_MS) } }, take: 200 });

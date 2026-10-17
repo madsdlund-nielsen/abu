@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { finalizeRecordingUploadAction, prepareRecordingUploadAction } from "@/app/actions/meetings";
+import { cancelRecordingUploadAction, finalizeRecordingUploadAction, prepareRecordingUploadAction } from "@/app/actions/meetings";
 
 const MAX_BYTES = 500 * 1024 * 1024;
 
@@ -54,15 +54,19 @@ export function RecordingUpload({ meetingId }: { meetingId: string }) {
     if (file.size > MAX_BYTES) return setError("Filen er for stor (maks 500 MB).");
     setBusy(true);
     setProgress(0);
+    let pending: string | null = null;
     try {
       const prep = await prepareRecordingUploadAction(meetingId, file.size);
       if (!prep.ok) throw new Error(prep.error);
+      pending = prep.recordingId;
       await send(prep.target, file, setProgress);
       const fin = await finalizeRecordingUploadAction(prep.recordingId);
+      pending = null; // finalize rydder selv op ved fejl
       if (!fin.ok) throw new Error(fin.error);
       setDone(true);
       router.refresh();
     } catch (err) {
+      if (pending) await cancelRecordingUploadAction(pending).catch(() => {});
       setError(err instanceof Error ? err.message : "Uploaden mislykkedes.");
     } finally {
       setBusy(false);
