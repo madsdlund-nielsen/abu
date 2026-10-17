@@ -389,7 +389,7 @@ function Catalog({
         </div>
         <div className="border-b border-grey-bg p-space-3 sm:px-space-4">
           <label className="label" htmlFor="catalog-search">Søg</label>
-          <input id="catalog-search" className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Navn, titel eller kompetence" autoFocus />
+          <input id="catalog-search" className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} placeholder="Navn, titel eller kompetence" autoFocus />
           <details className="mt-space-3 sm:hidden">
             <summary className="label !mb-0 cursor-pointer">Filtrér på kompetence{filter.length > 0 && ` (${filter.length} valgt)`}</summary>
             <TagChips className="mt-2 flex flex-wrap gap-1" />
