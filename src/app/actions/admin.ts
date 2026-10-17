@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
 import { getEnv } from "@/lib/env";
 import { processJobs } from "@/lib/jobs";
+import { deleteOnboardingSessionsForEmail } from "@/lib/onboarding/session";
 import { redirectWith } from "@/lib/redirect";
 
 async function inviteAndReport(userId: string, email: string, name: string, back: string, actorId: string): Promise<never> {
@@ -42,7 +43,7 @@ export async function createAdvisorAction(formData: FormData) {
       name: parsed.data.name,
       email: parsed.data.email,
       role: "ADVISOR",
-      advisorProfile: { create: { title: parsed.data.title ?? "", expertise: [] } },
+      advisorProfile: { create: { title: parsed.data.title ?? "" } },
     },
   });
   await audit(admin.id, "advisor.create", "User", user.id);
@@ -75,11 +76,15 @@ export async function setBoardAction(formData: FormData) {
   if (advisorIds.length !== sub.advisorCount) {
     redirectWith("/admin/subscriptions", "err", `Vælg præcis ${sub.advisorCount} rådgivere.`);
   }
-  const found = await prisma.advisorProfile.count({ where: { userId: { in: advisorIds } } });
-  if (found !== advisorIds.length) redirectWith("/admin/subscriptions", "err", "Ugyldig rådgiver.");
+  const profiles = await prisma.advisorProfile.findMany({ where: { userId: { in: advisorIds } } });
+  if (profiles.length !== advisorIds.length) redirectWith("/admin/subscriptions", "err", "Ugyldig rådgiver.");
+  // Rådgivere, der bliver på boardet, beholder deres fastfrosne pris; nye rådgivere får deres aktuelle pris. Månedsprisen ændres ikke.
+  const kept = new Map((await prisma.subscriptionAdvisor.findMany({ where: { subscriptionId } })).map((a) => [a.advisorId, a.pricePerMeetingDkk]));
   await prisma.$transaction([
     prisma.subscriptionAdvisor.deleteMany({ where: { subscriptionId } }),
-    prisma.subscriptionAdvisor.createMany({ data: advisorIds.map((advisorId) => ({ subscriptionId, advisorId })) }),
+    prisma.subscriptionAdvisor.createMany({
+      data: profiles.map((p) => ({ subscriptionId, advisorId: p.userId, pricePerMeetingDkk: kept.get(p.userId) ?? p.pricePerMeetingDkk })),
+    }),
   ]);
   await audit(admin.id, "subscription.set_board", "Subscription", subscriptionId);
   redirectWith("/admin/subscriptions", "ok", "Boardet er opdateret.");
@@ -99,6 +104,8 @@ export async function processDeletionAction(formData: FormData) {
   if (!user || user.role === "ADMIN") redirectWith("/admin/customers", "err", "Kan ikke slette denne bruger.");
   if (!user.deletionRequestedAt) redirectWith("/admin/customers", "err", "Brugeren har ikke anmodet om sletning.");
   await audit(admin.id, "user.delete", "User", id);
+  // Onboarding-data, der endnu ikke er slettet (genstartede tilmeldinger), fjernes sammen med brugeren.
+  await deleteOnboardingSessionsForEmail(user.email);
   await prisma.user.delete({ where: { id } });
   redirectWith("/admin/customers", "ok", "Brugeren og tilhørende data er slettet.");
 }

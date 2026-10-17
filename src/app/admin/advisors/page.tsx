@@ -3,13 +3,14 @@ import Link from "next/link";
 import { resendInviteAction, toggleAdvisorActiveAction } from "@/app/actions/admin";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { prisma } from "@/lib/db";
+import { formatDkk } from "@/lib/pricing";
 
 export const metadata: Metadata = { title: "Rådgivere" };
 
 export default async function AdminAdvisors({ searchParams }: { searchParams: SP }) {
   const { ok, err, one, params } = await flashFrom(searchParams);
   const invite = one(params.invite);
-  const advisors = await prisma.advisorProfile.findMany({ include: { user: true }, orderBy: { user: { name: "asc" } } });
+  const advisors = await prisma.advisorProfile.findMany({ include: { user: true, tags: { include: { tag: true } } }, orderBy: { user: { name: "asc" } } });
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -26,7 +27,7 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
       <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>Navn</th><th>Titel</th><th>Status</th><th /></tr>
+            <tr><th>Navn</th><th>Titel</th><th>Tags</th><th className="text-right">Pris pr. møde</th><th>Status</th><th /></tr>
           </thead>
           <tbody>
             {advisors.map((a) => (
@@ -36,6 +37,15 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
                   <p className="text-xs text-muted">{a.user.email}</p>
                 </td>
                 <td>{a.title}</td>
+                <td className="max-w-[18rem]">
+                  <ul className="flex flex-wrap gap-1">
+                    {a.tags.map((t) => (
+                      <li key={t.tagId} className={`badge ${t.tag.active ? "badge-muted" : "badge-outline opacity-60"}`}>{t.tag.name}</li>
+                    ))}
+                    {a.tags.length === 0 && <li className="text-xs text-gold-dark">Ingen tags</li>}
+                  </ul>
+                </td>
+                <td className="text-right tabular-nums">{formatDkk(a.pricePerMeetingDkk)}</td>
                 <td>
                   <span className={`badge ${a.active ? "badge-navy" : "badge-muted"}`}>
                     {a.active ? "Aktiv" : "Inaktiv"}
@@ -44,6 +54,7 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
                 </td>
                 <td>
                   <div className="flex justify-end gap-2">
+                    <Link href={`/admin/advisors/${a.userId}`} className="btn-secondary btn-sm">Rediger</Link>
                     {!a.user.passwordHash && (
                       <form action={resendInviteAction}>
                         <input type="hidden" name="userId" value={a.userId} />
