@@ -5,12 +5,13 @@ import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirectWith } from "@/lib/redirect";
 import { normalizePhone } from "@/lib/onboarding/schemas";
+import { overlapsExistingRule } from "@/lib/availability-rules";
 import { hhmmToMinutes, parseDanishDateTime } from "@/lib/time";
 
 export async function updateProfileAction(formData: FormData) {
   const user = await requireRole("ADVISOR");
   const schema = z.object({
-    name: z.string().trim().min(2),
+    name: z.string().trim().min(2, "Indtast dit navn (mindst 2 tegn)."),
     title: z.string().trim().max(120),
     bio: z.string().trim().max(4000),
     phone: z.string().trim().max(30).optional(),
@@ -38,6 +39,10 @@ export async function addRuleAction(formData: FormData) {
   const end = hhmmToMinutes(String(formData.get("end") ?? ""));
   if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7) redirectWith("/availability", "err", "Vælg en ugedag.");
   if (start === null || end === null || start >= end) redirectWith("/availability", "err", "Sluttidspunkt skal være efter starttidspunkt.");
+  const existing = await prisma.availabilityRule.findMany({ where: { advisorId: user.id }, select: { weekday: true, startMinute: true, endMinute: true } });
+  if (overlapsExistingRule(existing, { weekday, startMinute: start, endMinute: end })) {
+    redirectWith("/availability", "err", "Tidsrummet overlapper et eksisterende tidsrum samme ugedag.");
+  }
   await prisma.availabilityRule.create({
     data: { advisorId: user.id, weekday, startMinute: start, endMinute: end },
   });

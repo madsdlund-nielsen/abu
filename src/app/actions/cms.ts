@@ -5,6 +5,7 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isDuplicateTagName } from "@/lib/tag-name";
 import type { ActionResult } from "@/lib/onboarding/cms-types";
 
 type R<T = object> = Promise<ActionResult<T>>;
@@ -162,6 +163,8 @@ export async function createTagAction(input: { name: string; description?: strin
   const admin = await requireRole("ADMIN");
   const p = z.object({ name: text(60, 2), description: z.string().trim().max(200).optional() }).safeParse(input);
   if (!p.success) return err(p.error.issues[0].message);
+  const names = await prisma.tag.findMany({ select: { name: true } });
+  if (isDuplicateTagName(names.map((n) => n.name), p.data.name)) return err("Der findes allerede et tag med det navn.");
   let slug = slugify(p.data.name) || "tag";
   if (await prisma.tag.findUnique({ where: { slug } })) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
   const last = await prisma.tag.aggregate({ _max: { sortOrder: true } });
@@ -177,6 +180,10 @@ export async function updateTagAction(id: string, patch: { name?: string; descri
   return guard(async (adminId) => {
     const p = z.object({ name: text(60, 2).optional(), description: z.string().trim().max(200).optional(), active: z.boolean().optional() }).safeParse(patch);
     if (!p.success) return err(p.error.issues[0].message);
+    if (p.data.name !== undefined) {
+      const others = await prisma.tag.findMany({ where: { id: { not: id } }, select: { name: true } });
+      if (isDuplicateTagName(others.map((n) => n.name), p.data.name)) return err("Der findes allerede et tag med det navn.");
+    }
     await prisma.tag.update({
       where: { id },
       data: { ...p.data, ...(p.data.description !== undefined && { description: p.data.description || null }) },
