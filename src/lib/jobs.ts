@@ -41,10 +41,13 @@ async function claimNext() {
 
 export async function processJobs(limit = 5): Promise<number> {
   await import("./pipeline"); // registrerer handlers
+  const { runNotificationTick } = await import("./notifications/jobs"); // registrerer handlers
   // Idempotent oprydning: BOOKED møder, der er slut, bliver COMPLETED.
   await completePastMeetings().catch((e) => console.error("[jobs] completePastMeetings fejlede", e));
   // GDPR: udløbne onboarding-sessioner slettes.
   await cleanupExpiredOnboarding().catch((e) => console.error("[jobs] oprydning af onboarding fejlede", e));
+  // Notifikationer: ufærdige tilmeldinger, forfaldne beskeder og daglig oprydning af loggen.
+  await runNotificationTick().catch((e) => console.error("[jobs] notifikationer fejlede", e));
   let done = 0;
   for (let i = 0; i < limit; i++) {
     const job = await claimNext();

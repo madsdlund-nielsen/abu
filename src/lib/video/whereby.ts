@@ -43,6 +43,11 @@ export class WherebyVideo implements VideoProvider {
     return { roomUrl: json.roomUrl, hostRoomUrl: json.hostRoomUrl, providerMeetingId: String(json.meetingId) };
   }
 
+  async grantHostAccess(_providerMeetingId: string | null, hostRoomUrl: string | null) {
+    void _providerMeetingId;
+    return { hostRoomUrl };
+  }
+
   async deleteMeeting(providerMeetingId: string) {
     const env = getEnv();
     const res = await fetch(`${env.WHEREBY_API_URL}/meetings/${encodeURIComponent(providerMeetingId)}`, {

@@ -12,6 +12,11 @@ export function formatDate(d: Date): string {
   return formatInTimeZone(d, TZ, "d. MMM yyyy", { locale: da });
 }
 
+/** Kort dato til SMS: "tor. 12. nov." */
+export function formatDateShort(d: Date): string {
+  return formatInTimeZone(d, TZ, "EEE d. MMM", { locale: da });
+}
+
 export function formatTime(d: Date): string {
   return formatInTimeZone(d, TZ, "HH:mm");
 }

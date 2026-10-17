@@ -4,6 +4,7 @@ import { getEnv } from "./env";
 import { statusAfterTranscription } from "./meeting-status";
 import { registerJobHandler } from "./jobs";
 import { getStorage } from "./storage";
+import { meetingEvents } from "./notifications/service";
 import { getTranscriber } from "./transcription";
 
 /** Transskriberer en optagelse, laver resumé og gemmer på mødet. */
@@ -21,6 +22,7 @@ export async function transcribeRecording(recordingId: string) {
     const segmentsJson = result.segments as unknown as Prisma.InputJsonValue;
     const summary = await transcriber.summarize(result.text);
 
+    const hadTranscript = Boolean(await prisma.transcript.findUnique({ where: { meetingId: rec.meetingId }, select: { id: true } }));
     await prisma.transcript.upsert({
       where: { meetingId: rec.meetingId },
       create: {
@@ -48,6 +50,7 @@ export async function transcribeRecording(recordingId: string) {
       where: { id: rec.id },
       data: { status: "DONE", storageKey: deleteKey ? null : rec.storageKey },
     });
+    if (!hadTranscript) await meetingEvents.transcriptReady(rec.meetingId);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await prisma.recording.update({ where: { id: rec.id }, data: { status: "FAILED", error: message.slice(0, 1000) } });

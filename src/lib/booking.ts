@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getEnv } from "./env";
-import { sendMeetingBookedEmail, sendMeetingCancelledEmail } from "./emails";
+import { meetingEvents } from "./notifications/service";
 import { canBookAt, quotaState } from "./quota";
 import { bookingWindow, computeSlots, DEFAULTS, isSlotFreeForAll, type AdvisorAvailability } from "./slots";
 import { getVideo } from "./video";
@@ -13,7 +13,7 @@ export class BookingError extends Error {}
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
-async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Date): Promise<AdvisorAvailability[]> {
+export async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Date, excludeMeetingId?: string): Promise<AdvisorAvailability[]> {
   const margin = 24 * 3_600_000;
   const [rules, blocks, meetings] = await Promise.all([
     tx.availabilityRule.findMany({ where: { advisorId: { in: advisorIds } } }),
@@ -23,7 +23,7 @@ async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Da
     tx.meetingParticipant.findMany({
       where: {
         userId: { in: advisorIds },
-        meeting: { status: { in: ADVISOR_BLOCKING_STATUSES }, endsAt: { gt: new Date(from.getTime() - margin) }, startsAt: { lt: new Date(to.getTime() + margin) } },
+        meeting: { ...(excludeMeetingId ? { id: { not: excludeMeetingId } } : {}), status: { in: ADVISOR_BLOCKING_STATUSES }, endsAt: { gt: new Date(from.getTime() - margin) }, startsAt: { lt: new Date(to.getTime() + margin) } },
       },
       select: { userId: true, meeting: { select: { startsAt: true, endsAt: true } } },
     }),
@@ -110,9 +110,14 @@ export async function bookMeeting(opts: { subscriptionId: string; startsAt: Date
           startsAt: opts.startsAt,
           endsAt,
           createdById: opts.actorId,
-          participants: { create: [sub.customerId, ...advisorIds].map((userId) => ({ userId })) },
+          participants: {
+            create: [
+              { userId: sub.customerId },
+              // Rådgiverens pris for netop dette møde gemmes, så afregning kan følge de faktiske deltagere
+              ...advisorIds.map((userId) => ({ userId, pricePerMeetingDkk: sub.advisors.find((a) => a.advisorId === userId)?.pricePerMeetingDkk })),
+            ],
+          },
         },
-        include: { participants: { include: { user: true } } },
       });
     },
     { timeout: 15_000 },
@@ -136,19 +141,14 @@ export async function bookMeeting(opts: { subscriptionId: string; startsAt: Date
   }
 
   await audit(opts.actorId, "meeting.book", "Meeting", meeting.id);
-  await Promise.all(
-    meeting.participants.map((p) => sendMeetingBookedEmail(p.user.email, p.user.name, meeting.id, meeting.startsAt)),
-  );
+  await meetingEvents.booked(meeting.id);
   return meeting;
 }
 
 /** Aflys et møde. Aflysning ≥ 48 t før start frigiver kvoten; senere tæller den som brugt. */
 export async function cancelMeeting(opts: { meetingId: string; actorId: string; now?: Date }) {
   const now = opts.now ?? new Date();
-  const meeting = await prisma.meeting.findUnique({
-    where: { id: opts.meetingId },
-    include: { participants: { include: { user: true } } },
-  });
+  const meeting = await prisma.meeting.findUnique({ where: { id: opts.meetingId } });
   if (!meeting) throw new BookingError("Mødet findes ikke.");
   if (meeting.status !== "BOOKED") throw new BookingError("Mødet kan ikke aflyses.");
   if (meeting.startsAt <= now) throw new BookingError("Mødet er allerede startet.");
@@ -160,8 +160,6 @@ export async function cancelMeeting(opts: { meetingId: string; actorId: string; 
       .catch((e) => console.error("[booking] kunne ikke slette videorum", e));
   }
   await audit(opts.actorId, "meeting.cancel", "Meeting", meeting.id);
-  await Promise.all(
-    meeting.participants.map((p) => sendMeetingCancelledEmail(p.user.email, p.user.name, meeting.startsAt)),
-  );
+  await meetingEvents.cancelled(meeting.id);
   return { freesQuota: cancellationFreesQuota(meeting.startsAt, now) };
 }
