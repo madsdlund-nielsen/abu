@@ -2,12 +2,15 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { recordingConsentNow } from "@/lib/consent";
 import { currentConsent } from "@/lib/content/server";
 import { convertLead, upsertLead } from "@/lib/leads";
-import { createSession, hashPassword, rateLimit } from "@/lib/auth";
+import { createSession, hashPassword } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
+import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { startCheckout } from "@/lib/checkout";
 import { lookupCvr } from "@/lib/cvr";
 import { prisma } from "@/lib/db";
@@ -18,21 +21,31 @@ import { accountSchema, answerSchema, boardSchema, companyStepSchema, contactSch
 import {
   asSuggestion,
   createOnboardingSession,
+  deleteOnboardingSession,
   getOnboardingSession,
   updateOnboardingSession,
   type CompanyState,
   type OnboardingState,
 } from "@/lib/onboarding/session";
 import { buildTestSnapshot } from "@/lib/onboarding/snapshot";
+import { accountEvents } from "@/lib/notifications/service";
+import { formValues, type FormState } from "@/lib/form-state";
+
+/**
+ * M-1: om en e-mail allerede har en konto, må ikke kunne ses på siden. Ejeren får i stedet en neutral e-mail ("du har
+ * allerede en konto – log ind her"), højst én gang i døgnet, sendt efter svaret (ingen tidsforskel).
+ */
+async function notifyExistingAccount(userId: string, email: string) {
+  if (!(await rateLimit(`account-exists:${email}`, 1, 24 * 3_600_000))) return;
+  after(async () => {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user) await accountEvents.alreadyExists(user).catch((e) => console.error("[onboarding] konto-findes-mail fejlede", e instanceof Error ? e.message : e));
+  });
+}
 
 const BASE = "/kom-i-gang";
 const to = (step: number, extra = "") => `${BASE}?trin=${step}${extra}`;
 const fail = (step: number, message: string, extra = ""): never => redirect(`${to(step, extra)}&err=${encodeURIComponent(message)}`);
-
-async function ip() {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
-}
 
 async function need(minStep: number): Promise<OnboardingState> {
   const s = await getOnboardingSession();
@@ -42,44 +55,49 @@ async function need(minStep: number): Promise<OnboardingState> {
 }
 
 /** Trin 1: kontaktperson. Opretter sessionen (og cookien). */
-export async function saveContactAction(formData: FormData) {
-  if (!rateLimit(`onb-contact:${await ip()}`, 30)) fail(1, "For mange forsøg. Prøv igen senere.");
+export async function saveContactAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  // Ved fejl sendes de indtastede værdier tilbage i svaret (ikke i URL'en), så kunden ikke skal skrive dem igen
+  const values = formValues(formData);
+  if (!(await rateLimitIp("onb-contact", await getClientIp(), 30))) return { error: "For mange forsøg. Prøv igen senere.", values, at: Date.now() };
   const parsed = contactSchema.safeParse({ name: formData.get("name"), email: formData.get("email") });
-  // Ved fejl sendes de indtastede værdier med tilbage, så kunden ikke skal skrive dem igen
-  const keep = `&n=${encodeURIComponent(String(formData.get("name") ?? ""))}&e=${encodeURIComponent(String(formData.get("email") ?? ""))}`;
-  if (!parsed.success) fail(1, parsed.error.issues[0].message, keep);
-  const contact = parsed.data!;
+  if (!parsed.success) return { error: parsed.error.issues[0].message, values, at: Date.now() };
+  const contact = parsed.data;
   const exists = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
-  if (exists) fail(1, "Der findes allerede en konto med den e-mail.", `&konto=1${keep}`);
-  // Lead gemmes straks (også hvis tilmeldingen aldrig gøres færdig). Samtykket er aktivt (aldrig forudkrydset)
-  // og gemmes med den præcise tekst og version, personen så.
-  const h = await headers();
-  const proof = await currentConsent("marketing");
-  const leadId = await upsertLead({
-    name: contact.name,
-    email: contact.email,
-    consent: formData.get("contactConsent") === "on",
-    proof: { ...proof, ipAddress: h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, userAgent: h.get("user-agent") },
-  });
+  let leadId: string | null = null;
+  if (exists) {
+    // Ingen forskel på siden (M-1): tilmeldingen fortsætter, og kontoejeren får en neutral e-mail
+    await notifyExistingAccount(exists.id, contact.email);
+  } else {
+    // Lead gemmes straks (også hvis tilmeldingen aldrig gøres færdig). Samtykket er aktivt (aldrig forudkrydset)
+    // og gemmes med den præcise tekst og version, personen så.
+    const h = await headers();
+    const proof = await currentConsent("marketing");
+    leadId = await upsertLead({
+      name: contact.name,
+      email: contact.email,
+      consent: formData.get("contactConsent") === "on",
+      proof: { ...proof, ipAddress: await getClientIp(), userAgent: h.get("user-agent") },
+    });
+  }
   const s = await getOnboardingSession();
   if (s) {
     await updateOnboardingSession(s.id, { step: Math.max(s.step, 2), data: { ...s.data, contact }, leadId });
   } else {
     await createOnboardingSession({ step: 2, data: { contact }, leadId });
   }
-  await prisma.lead.updateMany({ where: { id: leadId, step: { lt: 2 } }, data: { step: 2 } });
+  if (leadId) await prisma.lead.updateMany({ where: { id: leadId, step: { lt: 2 } }, data: { step: 2 } });
   redirect(to(2));
 }
 
 /** Trin 2: CVR + telefon. Slår virksomheden op. */
-export async function saveCompanyAction(formData: FormData) {
+export async function saveCompanyAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const s = await need(2);
+  const values = formValues(formData);
   const parsed = companyStepSchema.safeParse({ cvr: formData.get("cvr") ?? "", phone: formData.get("phone") ?? "" });
-  const keep = `&cvr=${encodeURIComponent(String(formData.get("cvr") ?? ""))}&tlf=${encodeURIComponent(String(formData.get("phone") ?? ""))}`;
-  if (!parsed.success) fail(2, parsed.error.issues[0].message, keep);
-  const { cvr, phone } = parsed.data!;
-  if (!rateLimit(`onb-cvr:${await ip()}`, 20) || !rateLimit(`onb-cvr-s:${s.id}`, 15)) {
-    fail(2, "For mange opslag. Vent lidt og prøv igen.", keep);
+  if (!parsed.success) return { error: parsed.error.issues[0].message, values, at: Date.now() };
+  const { cvr, phone } = parsed.data;
+  if (!(await rateLimitIp("onb-cvr", await getClientIp(), 20)) || !(await rateLimit(`onb-cvr-s:${s.id}`, 15))) {
+    return { error: "For mange opslag. Vent lidt og prøv igen.", values, at: Date.now() };
   }
   const result = await lookupCvr(cvr);
   const company: CompanyState = {
@@ -190,13 +208,17 @@ export async function completeOnboardingAction(formData: FormData) {
     recordingConsent: formData.get("recordingConsent") ?? undefined,
   });
   if (!parsed.success) fail(6, parsed.error.issues[0].message);
-  if (!rateLimit(`onb-complete:${await ip()}`, 10)) fail(6, "For mange forsøg. Prøv igen senere.");
+  if (!(await rateLimitIp("onb-complete", await getClientIp(), 10))) fail(6, "For mange forsøg. Prøv igen senere.");
 
   const board = await resolveBoard(chosen.advisorIds, chosen.weeks);
   if ("error" in board) fail(5, board.error);
   const resolved = board as Exclude<typeof board, { error: string }>;
-  if (await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } })) {
-    fail(1, "Der findes allerede en konto med den e-mail.", "&konto=1");
+  const existing = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
+  if (existing) {
+    // Opret ikke en ny konto, og sig ikke, at e-mailen er kendt (M-1): samme neutrale besked som ellers sendes på mail
+    await notifyExistingAccount(existing.id, contact.email);
+    await deleteOnboardingSession(s.id);
+    redirect("/login?ok=" + encodeURIComponent("Tjek din e-mail. Vi har sendt dig en besked om, hvordan du fortsætter."));
   }
 
   const [questions, tags] = await Promise.all([loadActiveQuestions(), prisma.tag.findMany({ select: { id: true, name: true } })]);

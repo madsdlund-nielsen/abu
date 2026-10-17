@@ -2,14 +2,16 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { processJobsAction } from "@/app/actions/admin";
 import { Flash, flashFrom, type SP } from "@/components/flash";
+import { ALERT_LABEL, recentAlerts } from "@/lib/alerts";
 import { prisma } from "@/lib/db";
+import { formatDateTime } from "@/lib/time";
 import { formatDkk } from "@/lib/pricing";
 
 export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminHome({ searchParams }: { searchParams: SP }) {
   const { ok, err } = await flashFrom(searchParams);
-  const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr] = await Promise.all([
+  const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr, alerts] = await Promise.all([
     prisma.advisorProfile.count(),
     prisma.customerProfile.count(),
     prisma.subscription.count({ where: { status: "ACTIVE" } }),
@@ -18,6 +20,7 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
     prisma.job.count({ where: { status: "FAILED" } }),
     prisma.user.count({ where: { deletionRequestedAt: { not: null } } }),
     prisma.subscription.aggregate({ where: { status: "ACTIVE" }, _sum: { monthlyPriceDkk: true } }),
+    recentAlerts(7),
   ]);
   const stats: [string, string | number, string][] = [
     ["Rådgivere", advisors, "/admin/advisors"],
@@ -31,6 +34,20 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
     <div className="space-y-6">
       <h1>Admin</h1>
       <Flash ok={ok} err={err} />
+      {alerts.length > 0 && (
+        <section className="card" aria-labelledby="alerts-h" data-testid="alerts">
+          <h2 id="alerts-h">Driftsalarmer (seneste 7 dage)</h2>
+          <ul className="mt-3 space-y-2 text-sm">
+            {alerts.map((a) => (
+              <li key={a.kind} className="callout callout-error">
+                <p className="font-semibold">{ALERT_LABEL[a.kind] ?? a.kind} · {a.count} gang{a.count === 1 ? "" : "e"}, senest {formatDateTime(new Date(a.lastAt))}</p>
+                <p className="text-ink">{a.message}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">Lofter og lande for SMS ændres under <Link href="/admin/notifikationer?fane=indstillinger">Notifikationer → Indstillinger</Link>.</p>
+        </section>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {stats.map(([label, value, href]) => (
           <Link key={label} href={href} className="card block no-underline hover:bg-white">
@@ -39,6 +56,10 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
           </Link>
         ))}
       </div>
+      <section className="card">
+        <h2>Booking</h2>
+        <p className="mt-2 text-sm text-muted">Danske helligdage spærres automatisk for booking. <Link href="/admin/helligdage">Se og ret helligdage og lukkedage</Link>.</p>
+      </section>
       <section className="card">
         <h2>Baggrundsjobs</h2>
         <p className="mt-2 text-sm text-muted">{pendingJobs} afventer, {failedJobs} fejlet.</p>

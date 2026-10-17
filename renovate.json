@@ -1,0 +1,127 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Ugentlige, grupperede opdateringer med review (M-9). Versioner er låst; store opdateringer kræver godkendelse i Dependency Dashboard.",
+  "extends": [
+    "config:recommended",
+    ":pinAllExceptPeerDependencies",
+    "helpers:pinGitHubActionDigests",
+    "docker:pinDigests"
+  ],
+  "timezone": "Europe/Copenhagen",
+  "schedule": [
+    "before 7am on monday"
+  ],
+  "rangeStrategy": "pin",
+  "labels": [
+    "afhængigheder"
+  ],
+  "prConcurrentLimit": 6,
+  "automerge": false,
+  "dependencyDashboard": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 7am on monday"
+    ]
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": [
+      "at any time"
+    ],
+    "labels": [
+      "sikkerhed"
+    ]
+  },
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "groupName": "Next.js",
+      "matchPackageNames": [
+        "next",
+        "eslint-config-next",
+        "@next/**"
+      ]
+    },
+    {
+      "groupName": "Prisma",
+      "matchPackageNames": [
+        "prisma",
+        "@prisma/**"
+      ]
+    },
+    {
+      "groupName": "React",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ]
+    },
+    {
+      "groupName": "AWS SDK",
+      "matchPackageNames": [
+        "@aws-sdk/**"
+      ]
+    },
+    {
+      "groupName": "dnd-kit",
+      "matchPackageNames": [
+        "@dnd-kit/**"
+      ]
+    },
+    {
+      "groupName": "Udviklingsværktøjer (minor/patch)",
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "groupName": "Afhængigheder (minor/patch)",
+      "matchDepTypes": [
+        "dependencies"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchPackageNames": [
+        "*",
+        "!next",
+        "!react",
+        "!react-dom",
+        "!prisma",
+        "!@prisma/client",
+        "!@prisma/adapter-pg"
+      ]
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": [
+        "github-actions"
+      ]
+    },
+    {
+      "groupName": "Docker-baseimage",
+      "matchManagers": [
+        "dockerfile",
+        "docker-compose"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true,
+      "labels": [
+        "afhængigheder",
+        "major"
+      ]
+    }
+  ]
+}

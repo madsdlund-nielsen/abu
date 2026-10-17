@@ -5,6 +5,8 @@ import { meetingEvents } from "./notifications/service";
 import { canBookAt, quotaState } from "./quota";
 import { bookingWindow, computeSlots, DEFAULTS, isSlotFreeForAll, type AdvisorAvailability } from "./slots";
 import { getVideo } from "./video";
+import { getBlockedDates } from "./holidays";
+import { localDateKey } from "./time";
 import { audit } from "./audit";
 import { ADVISOR_BLOCKING_STATUSES } from "./meeting-status";
 import { cancellationFreesQuota } from "./quota";
@@ -54,8 +56,8 @@ export async function getBookableSlots(subscriptionId: string, now = new Date())
   if (sub.advisors.some((a) => !a.advisor.active)) return [];
   const duration = getEnv().MEETING_DURATION_MINUTES;
   const { earliest, latest } = bookingWindow({ now });
-  const availability = await loadAvailability(prisma, advisorIds, earliest, latest);
-  const slots = computeSlots(availability, { now, durationMinutes: duration });
+  const [availability, blockedDates] = await Promise.all([loadAvailability(prisma, advisorIds, earliest, latest), getBlockedDates(earliest, latest)]);
+  const slots = computeSlots(availability, { now, durationMinutes: duration, blockedDates });
   const startedAt = sub.startedAt;
   return slots.filter((s) => canBookAt(startedAt, sub.frequencyWeeks, sub.meetings, s, now));
 }
@@ -98,6 +100,9 @@ export async function bookMeeting(opts: { subscriptionId: string; startsAt: Date
       }
       if (!canBookAt(fresh.startedAt, fresh.frequencyWeeks, fresh.meetings, opts.startsAt, now)) {
         throw new BookingError("Du har allerede brugt dit møde for den periode, eller perioden er endnu ikke åben.");
+      }
+      if ((await getBlockedDates(opts.startsAt, opts.startsAt)).has(localDateKey(opts.startsAt))) {
+        throw new BookingError("Der kan ikke bookes møder på helligdage. Vælg en anden dag.");
       }
       const availability = await loadAvailability(tx, advisorIds, opts.startsAt, endsAt);
       if (!isSlotFreeForAll(availability, opts.startsAt, duration, DEFAULTS.bufferMinutes)) {

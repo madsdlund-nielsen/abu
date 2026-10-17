@@ -6,6 +6,8 @@ export interface OutgoingEmail {
   html?: string;
   /** Vores eget id (NotificationLog.id), sendes med så statuswebhooks kan matches */
   messageId?: string;
+  /** Indeholder engangslinks (nulstilling/invitation): må aldrig logges, heller ikke redigeret */
+  sensitive?: boolean;
 }
 
 export interface OutgoingSms {
@@ -15,6 +17,8 @@ export interface OutgoingSms {
   /** Afsendernavn (3-11 tegn) eller nummer */
   from: string;
   messageId: string;
+  /** Indeholder engangslinks: må aldrig logges */
+  sensitive?: boolean;
 }
 
 export interface SendResult {

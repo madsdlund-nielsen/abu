@@ -1,73 +1,113 @@
 "use server";
 
-import type { User } from "@prisma/client";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { createPasswordToken, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
+import { getPriceBounds, savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
+import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
 import { getEnv } from "@/lib/env";
+import { setHolidayBlocked } from "@/lib/holidays";
+import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
 import { processJobs } from "@/lib/jobs";
-import { deleteNotificationDataFor } from "@/lib/notifications/service";
-import { deleteOnboardingSessionsForEmail } from "@/lib/onboarding/session";
+import { eraseUser } from "@/lib/erasure";
 import { redirectWith } from "@/lib/redirect";
 
-async function inviteAndReport(user: User, back: string, actorId: string): Promise<never> {
-  const { email, name } = user;
-  const { token } = await createPasswordToken(user.id, "INVITE");
-  const sent = await sendInviteEmail(user, token);
-  await audit(actorId, "advisor.invite", "User", user.id);
-  const showLink = !sent || getEnv().EMAIL_PROVIDER === "console";
-  const sep = back.includes("?") ? "&" : "?";
-  if (showLink) {
-    const note = sent ? "" : " (mailen kunne ikke sendes)";
-    const { redirect } = await import("next/navigation");
-    redirect(
-      `${back}${sep}ok=${encodeURIComponent(`Invitation oprettet for ${name}${note}.`)}&invite=${encodeURIComponent(inviteUrl(token))}`,
-    );
-  }
-  redirectWith(back, "ok", `Invitation sendt til ${email}.`);
+export interface InviteState {
+  ok?: string;
+  error?: string;
+  /** Kun når mailen ikke kunne sendes, eller e-mail kører i konsol-tilstand. Vises i UI'et, aldrig i URL'en. */
+  inviteLink?: string;
+  values?: { name: string; email: string; title: string };
 }
 
-export async function createAdvisorAction(formData: FormData) {
+/** Engangslink til visning i admin (konsol-tilstand eller mislykket mail). Et nyt token; det i mailen gælder også. */
+async function displayLinkIfNeeded(userId: string, sent: boolean): Promise<string | undefined> {
+  if (sent && getEnv().EMAIL_PROVIDER !== "console") return undefined;
+  const { token } = await createPasswordToken(userId, "INVITE");
+  return inviteUrl(token);
+}
+
+/**
+ * Opret rådgiver (QA #1, #13). Idempotent: samme formular-nøgle giver samme resultat (ingen «findes allerede» ved
+ * dobbeltklik), og invitationslinket går ikke tabt. Nye rådgivere oprettes inaktive (se aktivering i admin).
+ */
+export async function createAdvisorAction(_prev: InviteState, formData: FormData): Promise<InviteState> {
   const admin = await requireRole("ADMIN");
+  const values = {
+    name: String(formData.get("name") ?? "").trim(),
+    email: String(formData.get("email") ?? "").trim(),
+    title: String(formData.get("title") ?? "").trim(),
+  };
   const parsed = z
     .object({
-      name: z.string().trim().min(2, "Indtast navn."),
-      email: z.string().trim().toLowerCase().email("Ugyldig e-mail."),
-      title: z.string().trim().max(120).optional(),
+      name: z.string().min(2, "Indtast navn (mindst 2 tegn)."),
+      email: z.string().toLowerCase().email("Indtast en gyldig e-mailadresse."),
+      title: z.string().max(120, "Titlen må højst være 120 tegn."),
     })
-    .safeParse(Object.fromEntries(formData));
-  if (!parsed.success) redirectWith("/admin/advisors/new", "err", parsed.error.issues[0]?.message ?? "Ugyldige felter.");
-  const exists = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-  if (exists) redirectWith("/admin/advisors/new", "err", "Der findes allerede en bruger med den e-mail.");
-  const user = await prisma.user.create({
-    data: {
-      name: parsed.data.name,
-      email: parsed.data.email,
-      role: "ADVISOR",
-      advisorProfile: { create: { title: parsed.data.title ?? "" } },
-    },
-  });
-  await audit(admin.id, "advisor.create", "User", user.id);
-  await inviteAndReport(user, "/admin/advisors", admin.id);
+    .safeParse(values);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Ugyldige felter.", values };
+  const data = parsed.data;
+  let outcome;
+  try {
+    outcome = await withIdempotency<{ ok: true; userId: string; name: string; email: string; sent: boolean } | { ok: false; error: string }>({ userId: admin.id, scope: "advisor.create", key: formData.get("idem") }, async () => {
+      if (await prisma.user.findUnique({ where: { email: data.email }, select: { id: true } })) {
+        return { ok: false, error: "Der findes allerede en bruger med den e-mail." };
+      }
+      const user = await prisma.user.create({
+        data: { name: data.name, email: data.email, role: "ADVISOR", advisorProfile: { create: { title: data.title, active: false } } },
+      });
+      await audit(admin.id, "advisor.create", "User", user.id);
+      const { token } = await createPasswordToken(user.id, "INVITE");
+      const sent = await sendInviteEmail(user, token);
+      await audit(admin.id, "advisor.invite", "User", user.id);
+      return { ok: true, userId: user.id, name: user.name, email: user.email, sent };
+    });
+  } catch (e) {
+    if (e instanceof IdempotencyInFlightError) return { error: e.message, values };
+    throw e;
+  }
+  const r = outcome.result;
+  if (!r.ok) return { error: r.error, values };
+  revalidatePath("/admin/advisors");
+  const inviteLink = await displayLinkIfNeeded(r.userId, r.sent);
+  return {
+    ok: r.sent ? `${r.name} er oprettet (inaktiv), og invitationen er sendt til ${r.email}.` : `${r.name} er oprettet (inaktiv). Mailen kunne ikke sendes – brug linket herunder.`,
+    inviteLink,
+  };
 }
 
-export async function resendInviteAction(formData: FormData) {
+export async function resendInviteAction(_prev: InviteState, formData: FormData): Promise<InviteState> {
   const admin = await requireRole("ADMIN");
   const user = await prisma.user.findFirst({ where: { id: String(formData.get("userId")), role: "ADVISOR" } });
-  if (!user) redirectWith("/admin/advisors", "err", "Rådgiveren findes ikke.");
-  await inviteAndReport(user, "/admin/advisors", admin.id);
+  if (!user) return { error: "Rådgiveren findes ikke." };
+  const { token } = await createPasswordToken(user.id, "INVITE");
+  const sent = await sendInviteEmail(user, token);
+  await audit(admin.id, "advisor.invite", "User", user.id);
+  return { ok: sent ? `Ny invitation sendt til ${user.email}.` : "Mailen kunne ikke sendes – brug linket.", inviteLink: await displayLinkIfNeeded(user.id, sent) };
 }
 
 export async function toggleAdvisorActiveAction(formData: FormData) {
   const admin = await requireRole("ADMIN");
   const id = String(formData.get("userId"));
-  const profile = await prisma.advisorProfile.findUnique({ where: { userId: id } });
+  const profile = await prisma.advisorProfile.findUnique({ where: { userId: id }, include: { user: true } });
   if (!profile) redirectWith("/admin/advisors", "err", "Rådgiveren findes ikke.");
-  await prisma.advisorProfile.update({ where: { userId: id }, data: { active: !profile.active } });
-  await audit(admin.id, profile.active ? "advisor.deactivate" : "advisor.activate", "User", id);
-  redirectWith("/admin/advisors", "ok", profile.active ? "Rådgiveren er deaktiveret." : "Rådgiveren er aktiveret.");
+  const activate = !profile.active;
+  await prisma.advisorProfile.update({ where: { userId: id }, data: { active: activate } });
+  await audit(admin.id, activate ? "advisor.activate" : "advisor.deactivate", "User", id);
+  revalidatePath("/admin/advisors");
+  if (activate) {
+    const missing = missingReadiness((await loadReadiness([id], await getPriceBounds())).get(id) ?? []);
+    redirectWith("/admin/advisors", "ok", `${profile.user.name} er aktiveret og kan nu vælges af kunder.${missing.length ? ` Bemærk: mangler ${missing.join(", ")}.` : ""}`);
+  }
+  const boards = await boardsWithAdvisor(id);
+  redirectWith(
+    "/admin/advisors",
+    "ok",
+    `${profile.user.name} er deaktiveret.${boards.length ? ` Berørte kunder (vælg en ny rådgiver under Abonnementer): ${[...new Set(boards.map((b) => b.companyName))].join(", ")}.` : ""}`,
+  );
 }
 
 export async function processJobsAction() {
@@ -83,12 +123,34 @@ export async function processDeletionAction(formData: FormData) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.role === "ADMIN") redirectWith("/admin/customers", "err", "Kan ikke slette denne bruger.");
   if (!user.deletionRequestedAt) redirectWith("/admin/customers", "err", "Brugeren har ikke anmodet om sletning.");
-  await audit(admin.id, "user.delete", "User", id);
-  // Onboarding-data, der endnu ikke er slettet (genstartede tilmeldinger), fjernes sammen med brugeren.
-  await deleteOnboardingSessionsForEmail(user.email);
-  // Notifikationslog (også rækker sendt til e-mail/telefon uden konto) slettes sammen med kontoen
-  await deleteNotificationDataFor(user);
-  await prisma.lead.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
-  await prisma.user.delete({ where: { id } });
-  redirectWith("/admin/customers", "ok", "Brugeren og tilhørende data er slettet.");
+  // Opsiger abonnementet hos udbyderen, sletter optagelser i lageret og webhook-data, og derefter kontoen (M-3)
+  const r = await eraseUser(id, admin.id);
+  if (!r.ok) redirectWith("/admin/customers", "err", r.error);
+  redirectWith("/admin/customers", "ok", "Brugeren og tilhørende data er slettet, og abonnementet er opsagt.");
+}
+
+/** Prisinterval for rådgivere (plan #20). */
+export async function savePriceBoundsAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const b = { min: Number(String(formData.get("min") ?? "").replace(/\D/g, "")), max: Number(String(formData.get("max") ?? "").replace(/\D/g, "")) };
+  const problem = validatePriceBounds(b);
+  if (problem) redirectWith("/admin/advisors", "err", problem);
+  await savePriceBounds(b);
+  await audit(admin.id, "advisor.price_bounds", "AppSetting", "advisor.price", `${b.min}-${b.max}`);
+  redirectWith("/admin/advisors", "ok", "Prisintervallet er gemt. Det gælder for nye prisændringer.");
+}
+
+/** Slå en helligdag/lukkedag til eller fra for booking (plan #24). */
+export async function setHolidayBlockedAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const date = String(formData.get("date") ?? "");
+  const blocked = formData.get("blocked") === "1";
+  try {
+    await setHolidayBlocked(date, blocked);
+  } catch {
+    redirectWith("/admin/helligdage", "err", "Datoen er ikke en kendt helligdag.");
+  }
+  await audit(admin.id, blocked ? "holiday.block" : "holiday.open", "AppSetting", date);
+  revalidatePath("/admin/helligdage");
+  redirectWith("/admin/helligdage", "ok", blocked ? `${date} er spærret for booking.` : `${date} er åbnet for booking.`);
 }

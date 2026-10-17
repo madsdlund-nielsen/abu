@@ -283,6 +283,23 @@ Brug linket herunder til at vælge en ny adgangskode (gyldigt i 2 timer). Hvis d
 
 ${SIGN}`,
   },
+  {
+    key: "account_exists_email",
+    channel: "EMAIL",
+    name: "Konto findes allerede (e-mail)",
+    subject: "Du har allerede en konto hos Advisory Board Unlimited",
+    body: `Hej {{fornavn}}
+
+Nogen – forhåbentlig dig – er begyndt at oprette en konto med denne e-mailadresse. Du har allerede en konto, så du kan bare logge ind:
+
+{{loginlink}}
+
+Har du glemt adgangskoden, kan du få en ny her: {{nulstillingsside}}
+
+Var det ikke dig, kan du se bort fra denne e-mail. Der er ikke ændret noget på din konto.
+
+${SIGN}`,
+  },
 ];
 
 export const DEFAULT_RULES: DefaultRule[] = [
@@ -306,4 +323,5 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { trigger: "onboarding_abandoned", offsetMinutes: 4320, channel: "SMS", templateKey: "onboarding_abandoned_sms", audience: "SUBJECT", quietHours: true },
   { trigger: "advisor_invited", offsetMinutes: 0, channel: "EMAIL", templateKey: "advisor_invited_email", audience: "SUBJECT" },
   { trigger: "password_reset", offsetMinutes: 0, channel: "EMAIL", templateKey: "password_reset_email", audience: "SUBJECT" },
+  { trigger: "account_exists", offsetMinutes: 0, channel: "EMAIL", templateKey: "account_exists_email", audience: "SUBJECT" },
 ];

@@ -1,9 +1,10 @@
 import bcrypt from "bcryptjs";
 import type { Role, User } from "@prisma/client";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { prisma } from "./db";
+import { loginUrlFor } from "./consent";
 import { cookieSecure } from "./env";
 import { randomToken, sha256 } from "./tokens";
 
@@ -66,7 +67,7 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
 
 export async function requireUser(): Promise<User> {
   const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  if (!user) redirect(loginUrlFor((await headers()).get("x-abu-path")));
   return user;
 }
 
@@ -74,24 +75,6 @@ export async function requireRole(...roles: Role[]): Promise<User> {
   const user = await requireUser();
   if (!roles.includes(user.role)) redirect("/dashboard");
   return user;
-}
-
-// --- Enkel rate limiting (in-memory, pr. proces) mod brute force ---
-const attempts = new Map<string, { count: number; resetAt: number }>();
-
-export function rateLimit(key: string, max = 8, windowMs = 15 * 60_000): boolean {
-  const now = Date.now();
-  const entry = attempts.get(key);
-  if (!entry || entry.resetAt < now) {
-    attempts.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-  entry.count += 1;
-  return entry.count <= max;
-}
-
-export function clearRateLimit(key: string) {
-  attempts.delete(key);
 }
 
 // --- Password tokens (invite / reset) ---

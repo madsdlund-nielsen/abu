@@ -18,7 +18,7 @@ export function Stepper({ current, reached, labels: STEP_LABELS }: { current: nu
             <>
               <span
                 className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center border text-sm font-semibold ${
-                  isCurrent ? "border-navy bg-navy text-white" : done ? "border-navy bg-white text-navy" : "border-slate bg-white text-slate"
+                  isCurrent ? "border-navy bg-navy text-white" : done ? "border-navy bg-white text-navy" : "border-slate bg-white text-placeholder"
                 }`}
                 aria-hidden="true"
               >

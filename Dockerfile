@@ -4,9 +4,10 @@
 FROM node:22-bookworm-slim AS deps
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
-RUN npm ci
+# Kun låste versioner (package-lock.json); scripts køres (postinstall = prisma generate)
+RUN npm ci --no-audit --no-fund
 
 # ---- build (bruges også til migrationer/seed via docker-compose-servicen "migrate") ----
 FROM node:22-bookworm-slim AS build

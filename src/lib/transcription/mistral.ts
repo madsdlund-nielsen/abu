@@ -14,12 +14,12 @@ export class MistralTranscription implements TranscriptionProvider {
     return { Authorization: `Bearer ${this.env.MISTRAL_API_KEY}` };
   }
 
-  async transcribe(file: Buffer, mime: string, filename = "recording"): Promise<TranscriptionResult> {
+  async transcribe(file: Blob, mime: string, filename = "recording"): Promise<TranscriptionResult> {
     const form = new FormData();
     form.append("model", this.env.MISTRAL_TRANSCRIPTION_MODEL);
     form.append("language", "da");
     form.append("timestamp_granularities", "segment");
-    form.append("file", new Blob([new Uint8Array(file)], { type: mime }), filename);
+    form.append("file", file.type ? file : new Blob([file], { type: mime }), filename);
 
     const res = await fetch(`${this.env.MISTRAL_API_URL}/audio/transcriptions`, {
       method: "POST",

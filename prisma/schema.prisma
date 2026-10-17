@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -37,6 +36,8 @@ enum RecordingSource {
 }
 
 enum RecordingStatus {
+  /// Upload startet (presigned/streamet), endnu ikke verificeret. Ryddes op efter 24 timer.
+  UPLOADING
   RECEIVED
   TRANSCRIBING
   DONE
@@ -68,6 +69,10 @@ model User {
   /// Afmelding af ikke-obligatoriske beskeder pr. kanal (afmeldingslink, STOP-svar eller under Konto).
   emailOptOutAt DateTime?
   smsOptOutAt   DateTime?
+  /// Login-spærring pr. konto (H-2): fejlede forsøg i træk, seneste fejl og spærret indtil.
+  failedLoginCount  Int       @default(0)
+  lastFailedLoginAt DateTime?
+  lockedUntil       DateTime?
 
   sessions        Session[]
   passwordTokens  PasswordToken[]
@@ -107,7 +112,8 @@ model AdvisorProfile {
   title     String   @default("")
   bio       String   @default("")
   photoUrl  String   @default("")
-  active    Boolean  @default(true)
+  /// Rådgivere aktiveres manuelt af admin, når de er klar (QA #13). Indtil da kan kunder ikke vælge dem.
+  active    Boolean  @default(false)
   /// Pris pr. møde i hele kroner, ekskl. moms. Sættes af admin. Fastfryses på abonnementet ved køb.
   pricePerMeetingDkk Int @default(1750)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -379,6 +385,9 @@ model Recording {
   mime       String?
   source     RecordingSource
   status     RecordingStatus @default(RECEIVED)
+  /// Hvem uploadede (kun UPLOAD), og filens størrelse efter verifikation
+  uploadedById String?
+  sizeBytes    Int?
   error      String?
   createdAt  DateTime        @default(now())
   meeting    Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
@@ -535,4 +544,35 @@ model AppSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// Fælles lager til rate limits (H-2/L-2): overlever genstart og deles mellem instanser. Nøglen er SHA-256 af den logiske nøgle.
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
+}
+
+/// Fælles cache for CVR-opslag (M-4/L-2), også for "ikke fundet". Fejl caches ikke.
+model CvrLookupCache {
+  cvr       String   @id
+  result    Json
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+/// Idempotens for formularer (QA #1): et gentaget kald med samme nøgle returnerer det første resultat i stedet for en fejl.
+/// id = SHA-256 af bruger + handling + klientens nøgle. Ryddes op efter udløb.
+model IdempotencyKey {
+  id        String   @id
+  userId    String
+  scope     String
+  result    Json?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }

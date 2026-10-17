@@ -66,7 +66,7 @@
     text-decoration-thickness: 1px;
   }
   a:hover {
-    @apply text-gold-dark;
+    @apply text-gold-ink;
   }
   .on-dark a:not(.btn):not(.btn-outline-light):not(.nav-link) {
     @apply text-white;
@@ -75,7 +75,7 @@
     @apply text-gold;
   }
   ::placeholder {
-    @apply text-slate;
+    @apply text-placeholder;
     opacity: 1;
   }
   summary {
@@ -84,6 +84,14 @@
 }
 
 @layer components {
+  /* «Spring til indhold»: skjult, indtil den får fokus med tastaturet */
+  .skip-link {
+    @apply absolute left-4 top-0 z-50 -translate-y-full bg-navy px-4 py-2 font-bold text-white no-underline;
+    font-size: var(--fs-label);
+  }
+  .skip-link:focus {
+    @apply translate-y-2 text-white;
+  }
   .container-abu {
     @apply mx-auto w-full max-w-container px-4 sm:px-6;
   }
@@ -120,13 +128,13 @@
     @apply text-white;
   }
   .eyebrow {
-    @apply mb-3 block font-bold uppercase text-gold-dark;
+    @apply mb-3 block font-bold uppercase text-eyebrow;
     font-size: var(--fs-label);
     line-height: 1;
     letter-spacing: 0.4em;
   }
   .on-dark .eyebrow {
-    @apply text-gold;
+    @apply text-eyebrow-on-dark;
   }
   /* Kort guldstreg under overskrifter (ca. 55 x 2 px) */
   .rule-gold {
@@ -154,8 +162,9 @@
     letter-spacing: var(--letter-spacing-ui);
     padding: var(--btn-padding);
   }
+  /* Primærknap: charcoal tekst på guld (kontrast AA, se design-tokens) */
   .btn {
-    @apply border-gold bg-gold text-white hover:border-gold-dark hover:bg-gold-dark hover:text-white;
+    @apply border-gold bg-gold text-on-gold hover:border-gold-dark hover:bg-gold-dark hover:text-on-gold;
   }
   .btn-secondary {
     @apply border-navy bg-transparent text-navy hover:bg-navy hover:text-white;

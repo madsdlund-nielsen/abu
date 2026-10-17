@@ -26,6 +26,27 @@
    */
   --color-danger: #9b1c1c;
 
+  /*
+   * Kontrast (WCAG 2.1 AA, ejerens beslutning 17.10.2026 – se docs/screens/kontrast/README.md).
+   * Manualens farver bevares; kun hvilken farve tekst får på/ved guld er ændret. Målt kontrast i kommentarerne.
+   */
+  /* Tekst på guld-knapper: charcoal 5,57:1 på guld, 4,50:1 på guld-mørk (hover). Hvid var 2,81:1 / 3,49:1. */
+  --color-on-gold: var(--color-charcoal);
+  /* Eyebrows på lyse flader: navy 11,97:1 (hvid) / 10,32:1 (grå). Guld-mørk var 3,49:1 / 3,00:1. */
+  --color-eyebrow: var(--color-navy);
+  /*
+   * Eyebrows på mørke flader: guld, en anelse lysere (#b89b65 mod #b4965d – ikke til at se forskel på), så de også
+   * består på navy: 4,51:1 på navy (guld: 4,25:1) og 5,91:1 på charcoal.
+   */
+  --color-eyebrow-on-dark: #b89b65;
+  /*
+   * Udvidelse uden for manualen: guld som TEKST på lyse flader (advarsler i CMS, link-hover). Samme kulør som guld,
+   * mørkere: 5,22:1 på hvid / 4,50:1 på grå. Guld og guld-mørk bruges fortsat til streger, kanter og flader.
+   */
+  --color-gold-ink: #81693c;
+  /* Pladsholdertekst og inaktive trin: slate mørkere (4,52:1 på hvid). Slate selv (3,99:1) bruges kun til kanter. */
+  --color-placeholder: #657a80;
+
   /* Overlays (manual s. 11) */
   --overlay-navy: rgba(38, 55, 83, 0.85);
   --divider-light: rgba(255, 255, 255, 0.15);
@@ -53,7 +74,7 @@
   --fs-h3: 24px;
   --fs-body: 16px;
   --fs-label: 14px;
-  /* Fokusfarve: guld-mørk på lyse flader (3,49:1), guld på mørke (5,57:1). */
+  /* Fokusfarve (ikke tekst, kræver 3:1): guld-mørk på lyse flader (3,49:1 hvid / 3,00:1 grå), guld på mørke (5,57:1). */
   --focus-color: var(--color-gold-dark);
 }
 

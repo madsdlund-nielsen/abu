@@ -53,6 +53,9 @@ export async function loadNotificationsCms(): Promise<{ templates: CmsTemplate[]
       smsSender: settings.smsSender,
       logRetentionMonths: settings.logRetentionMonths,
       leadRetentionMonths: settings.leadRetentionMonths,
+      smsCountries: settings.smsCountries,
+      smsPerNumberCap: settings.smsPerNumberCap,
+      smsDailyCap: settings.smsDailyCap,
     },
     providers: { email: env.EMAIL_PROVIDER, sms: env.SMS_PROVIDER, inmobileKey: Boolean(env.INMOBILE_API_KEY), appUrl: env.APP_URL },
   };

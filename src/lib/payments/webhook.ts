@@ -1,17 +1,19 @@
 import type { Prisma, SubscriptionStatus } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../db";
 import { subscriptionEvents } from "../notifications/service";
+import { afterSubscriptionActivated } from "../subscriptions";
 
-export interface FrisbiiEvent {
-  id: string;
-  event_id?: string;
-  event_type: string;
-  timestamp: string;
-  signature: string;
-  subscription?: string;
-  customer?: string;
-  [k: string]: unknown;
-}
+/** Felter vi bruger fra en (allerede signaturverificeret) betalingsbegivenhed. Øvrige felter ignoreres. */
+export const paymentEventSchema = z.looseObject({
+  id: z.string().min(1).max(200),
+  event_id: z.string().min(1).max(200).optional(),
+  event_type: z.string().min(1).max(100),
+  timestamp: z.string().max(100).optional(),
+  subscription: z.string().min(1).max(200).optional(),
+  customer: z.string().max(200).optional(),
+});
+export type FrisbiiEvent = z.infer<typeof paymentEventSchema>;
 
 /** Hvilken status udløser en given Frisbii-begivenhed? null = ignorer. */
 export function statusForEvent(eventType: string): SubscriptionStatus | null {
@@ -58,6 +60,7 @@ export async function processFrisbiiEvent(evt: FrisbiiEvent): Promise<"processed
       result = "processed";
       // Besked kun ved overgang til PAST_DUE (Frisbii gentager invoice_failed ved hvert forsøg)
       if (status === "PAST_DUE" && sub.status !== "PAST_DUE") await subscriptionEvents.paymentFailed(sub.id);
+      if (status === "ACTIVE" && sub.status === "PENDING") await afterSubscriptionActivated(sub.id);
     }
   }
   await prisma.webhookEvent.update({ where: { externalId }, data: { processedAt: new Date() } });

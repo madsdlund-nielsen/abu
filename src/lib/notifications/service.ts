@@ -5,11 +5,15 @@ import { getEnv } from "../env";
 import { getEmail } from "../messaging/email";
 import { getSms } from "../messaging/sms";
 import { hasMarketingConsent, withdrawMarketing } from "../leads";
+import { maskAddress, redactText } from "../messaging/redact";
 import { toE164 } from "../phone";
 import { DEFAULT_RULES, DEFAULT_TEMPLATES } from "./defaults";
 import { buildEmail } from "./email-layout";
 import { planMeetingReminders, planNotifications, reminderDedupe, type ExistingEntry, type PlanRecipient } from "./plan";
-import { getNotificationSettings } from "./settings";
+import { getNotificationSettings, type NotificationSettings } from "./settings";
+import { isSmsDestinationAllowed, smsCapReached, smsCountryCode } from "./sms-policy";
+import { raiseAlert } from "../alerts";
+import { rateLimit } from "../rate-limit";
 import { renderTemplate } from "./template";
 import { adjustForQuietHours } from "./timing";
 import { isTriggerKey, TRIGGERS, VARIABLES, type TriggerDef, type TriggerKey } from "./triggers";
@@ -359,7 +363,7 @@ export const subscriptionEvents = {
 
 // --------------------------------------------------------------------------- Udløsere: konto (transaktionelle, med engangslinks)
 
-async function sendSubjectNow(trigger: "advisor_invited" | "password_reset", user: User, vars: Record<string, string>): Promise<boolean> {
+async function sendSubjectNow(trigger: "advisor_invited" | "password_reset" | "account_exists", user: User, vars: Record<string, string>): Promise<boolean> {
   const result = await safely(trigger, async () => {
     const ids = await enqueue({
       trigger,
@@ -382,6 +386,8 @@ async function sendSubjectNow(trigger: "advisor_invited" | "password_reset", use
 export const accountEvents = {
   invited: (user: User, link: string) => sendSubjectNow("advisor_invited", user, { invitationslink: link }),
   passwordReset: (user: User, link: string) => sendSubjectNow("password_reset", user, { nulstillingslink: link }),
+  /** Neutral besked til en eksisterende konto, der starter en ny tilmelding (M-1). */
+  alreadyExists: (user: User) => sendSubjectNow("account_exists", user, { loginlink: `${appUrl()}/login`, nulstillingsside: `${appUrl()}/reset-password` }),
 };
 
 // --------------------------------------------------------------------------- Udløser: ufærdig tilmelding
@@ -578,6 +584,37 @@ async function buildVariables(
   return { ...vars, ...extra };
 }
 
+/**
+ * SMS-politik (M-5) lige før afsendelse: kun tilladte lande, og højst N SMS pr. nummer og i alt pr. 24 timer. Ved blokering
+ * oprettes en driftsalarm (højst én pr. type pr. time). Returnerer en årsag til at springe over, ellers null.
+ */
+export async function smsBlockReason(address: string, settings: Pick<NotificationSettings, "smsCountries" | "smsPerNumberCap" | "smsDailyCap">, now = new Date()): Promise<string | null> {
+  const alertOnce = async (kind: "sms_cap_number" | "sms_cap_daily" | "sms_country_blocked", message: string) => {
+    if (await rateLimit(`alert:${kind}`, 1, 3_600_000, now)) await raiseAlert(kind, message);
+  };
+  if (!isSmsDestinationAllowed(address, settings.smsCountries)) {
+    const code = smsCountryCode(address);
+    await alertOnce("sms_country_blocked", `SMS til ${code ? `+${code}` : "ukendt landekode"} er blokeret (tilladte lande: ${settings.smsCountries.map((c) => `+${c}`).join(", ")}).`);
+    return "Landet er ikke på listen over lande, der må modtage SMS (Indstillinger)";
+  }
+  const since = new Date(now.getTime() - 24 * 3_600_000);
+  const sent = { channel: "SMS" as const, status: { in: ["SENT" as const, "DELIVERED" as const] }, sentAt: { gte: since } };
+  const [sentToNumber, sentTotal] = await Promise.all([
+    prisma.notificationLog.count({ where: { ...sent, recipientAddress: address } }),
+    prisma.notificationLog.count({ where: sent }),
+  ]);
+  const hit = smsCapReached({ sentToNumber, sentTotal, perNumberCap: settings.smsPerNumberCap, dailyCap: settings.smsDailyCap });
+  if (hit === "daily") {
+    await alertOnce("sms_cap_daily", `Dagsloftet på ${settings.smsDailyCap} SMS er nået; flere SMS sendes ikke de næste timer.`);
+    return "Dagsloftet for SMS er nået (Indstillinger)";
+  }
+  if (hit === "per_number") {
+    await alertOnce("sms_cap_number", `Et nummer har modtaget ${settings.smsPerNumberCap} SMS på et døgn; flere springes over.`);
+    return "Loftet for SMS til dette nummer er nået (Indstillinger)";
+  }
+  return null;
+}
+
 /** Sender én besked fra køen. Springer over, hvis den ikke længere er relevant, og udsætter SMS i stille timer. */
 export async function deliverLog(id: string, opts: { extraVars?: Record<string, string>; now?: Date } = {}): Promise<DeliverResult> {
   const now = opts.now ?? new Date();
@@ -622,11 +659,13 @@ export async function deliverLog(id: string, opts: { extraVars?: Record<string, 
       subject = renderTemplate(template.subject ?? "", vars).trim();
       const mail = buildEmail({ subject, bodyText: body, unsubscribeUrl: def.optIn ? vars.afmeldlink : undefined, baseUrl: appUrl() });
       sentText = mail.text;
-      result = await getEmail().send({ to: log.recipientAddress, toName: vars.navn || undefined, subject, text: mail.text, html: mail.html, messageId: log.id });
+      result = await getEmail().send({ to: log.recipientAddress, toName: vars.navn || undefined, subject, text: mail.text, html: mail.html, messageId: log.id, sensitive: def.sensitive });
     } else {
       const settings = await getNotificationSettings();
+      const blocked = await smsBlockReason(log.recipientAddress, settings, now);
+      if (blocked) return skip(id, blocked);
       sentText = def.optIn && !body.includes(vars.afmeldlink) ? `${body}\nAfmeld: ${vars.afmeldlink}` : body;
-      result = await getSms().send({ to: log.recipientAddress, text: sentText, from: settings.smsSender, messageId: log.id });
+      result = await getSms().send({ to: log.recipientAddress, text: sentText, from: settings.smsSender, messageId: log.id, sensitive: def.sensitive });
     }
     await prisma.notificationLog.update({
       where: { id },
@@ -643,7 +682,7 @@ export async function deliverLog(id: string, opts: { extraVars?: Record<string, 
     return "SENT";
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error(`[notifications] ${log.trigger} til ${log.recipientAddress} fejlede`, message);
+    console.error(`[notifications] ${log.trigger} til ${maskAddress(log.recipientAddress)} fejlede`, redactText(message));
     await prisma.notificationLog.update({ where: { id }, data: { status: "FAILED", error: message.slice(0, 500), claimedAt: null } });
     return "FAILED";
   }
@@ -682,6 +721,10 @@ export async function sendTestMessage(opts: {
   const address = opts.channel === "SMS" ? toE164(opts.to) : opts.to.trim();
   if (!address || (opts.channel === "EMAIL" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address))) {
     return { ok: false, error: opts.channel === "SMS" ? "Indtast et gyldigt telefonnummer, fx 20 30 40 50." : "Indtast en gyldig e-mailadresse." };
+  }
+  if (opts.channel === "SMS") {
+    const blocked = await smsBlockReason(address, await getNotificationSettings());
+    if (blocked) return { ok: false, error: `Testen sendes ikke: ${blocked.charAt(0).toLowerCase()}${blocked.slice(1)}.` };
   }
   const vars = sampleVariables();
   const logId = randomUUID();
@@ -744,12 +787,15 @@ export async function applyUnsubscribe(channel: NotificationChannel, address: st
 }
 
 /** Statusopdatering fra udbyderen (webhook): matcher på udbyderens besked-id eller vores eget id. */
-export async function applyDeliveryStatus(events: { messageId: string; status: "DELIVERED" | "FAILED"; error?: string }[]): Promise<number> {
+export async function applyDeliveryStatus(events: { messageId: string; status: "DELIVERED" | "FAILED"; error?: string }[], now = new Date()): Promise<number> {
   let n = 0;
+  // Kun beskeder, vi selv har sendt inden for 30 dage (M-7)
+  const since = new Date(now.getTime() - 30 * 86_400_000);
   for (const e of events) {
+    if (e.messageId.length > 200) continue;
     const r = await prisma.notificationLog.updateMany({
-      where: { OR: [{ providerMessageId: e.messageId }, { id: e.messageId }], status: { in: ["SENT", "DELIVERED"] } },
-      data: e.status === "DELIVERED" ? { status: "DELIVERED" } : { status: "FAILED", error: e.error ?? "Leveringen mislykkedes" },
+      where: { OR: [{ providerMessageId: e.messageId }, { id: e.messageId }], status: { in: ["SENT", "DELIVERED"] }, sentAt: { gte: since } },
+      data: e.status === "DELIVERED" ? { status: "DELIVERED" } : { status: "FAILED", error: (e.error ?? "Leveringen mislykkedes").slice(0, 300) },
     });
     n += r.count;
   }

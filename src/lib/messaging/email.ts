@@ -1,12 +1,19 @@
 import nodemailer from "nodemailer";
 import { getEnv } from "../env";
 import { inmobileSendEmail } from "./inmobile";
+import { maskEmail, redactText } from "./redact";
 import type { EmailProvider, OutgoingEmail, SendResult } from "./types";
 
-class ConsoleEmail implements EmailProvider {
+/**
+ * Kun til udvikling (forbudt i produktion af opstarts-guarden). Skriver en redigeret udgave til loggen: links uden
+ * forespørgsel/tokens, maskerede adresser og numre. Følsomme beskeder (engangslinks) logges slet ikke.
+ */
+export class ConsoleEmail implements EmailProvider {
   readonly name = "console" as const;
+  constructor(private log: (line: string) => void = console.log) {}
   async send(m: OutgoingEmail): Promise<SendResult> {
-    console.log(`\n[email:console] Til: ${m.to}\n[email:console] Emne: ${m.subject}\n${m.text}\n[email:console] ---\n`);
+    const head = `[email:console] Til: ${maskEmail(m.to)} · Emne: ${redactText(m.subject)}`;
+    this.log(m.sensitive ? `${head} · (følsom besked med engangslink – indholdet logges ikke)` : `\n${head}\n${redactText(m.text)}\n[email:console] ---\n`);
     return { providerMessageId: `console-${m.messageId ?? Date.now()}` };
   }
 }

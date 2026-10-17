@@ -28,6 +28,9 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 6. E-mail og SMS via inMobile. Tekster, frekvenser og udløsere styres i CMS'en (Admin → Notifikationer).
 7. Onboarding trin 1 er en standard lead-boks med generelt markedsføringssamtykke (ikke forudkrydset), gemt som samtykkepost med tekst og version. Leads vises i Admin → Leads.
 8. Alle tekster i onboarding redigeres i CMS'en (Admin → Onboarding → Tekster).
+9. **Aktivering af rådgivere (18.10.2026):** rådgivere aktiveres manuelt af admin, når de er klar – ingen automatisk aktivering. Nye rådgivere oprettes inaktive og kan ikke vælges nogen steder (katalog, forslag, board-builder, booking, erstatning). Ved «Aktivér» vises en tjekliste (invitation accepteret, tags, ugentlig tilgængelighed, bio, pris); manglende punkter giver en advarsel, ikke en blokering. Deaktivering af en rådgiver i aktive boards advarer og viser de berørte kunder.
+10. **Kontrast (18.10.2026):** forslaget er afprøvet og beholdt (charcoal på guldknapper, navy eyebrows). Endelig godkendelse af udtrykket mangler – se `docs/screens/kontrast/`.
+11. **Betalingsudbyder er stadig uafklaret (Frisbii eller Alunta).** Webhook-signaturen er bygget generisk (rå body + tidsstempel); der er ikke bygget en Alunta-adapter.
 
 ## 2b. Beslutninger du stadig skal tage
 
@@ -61,11 +64,11 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 - Frisbii: checkout-session, opsigelse, planskifte og webhook-format. **Nyt: beløbs-override pr. abonnement** (`subscription.amount` i øre og `amount_incl_vat=false` i checkout-sessionen og ved planskift) er et gæt og skal verificeres mod Frisbii API'et. Hvis override ikke understøttes, må der oprettes planer pr. prispunkt, eller prisen sættes via add-on/ordrelinje.
 - CVR: feltnavnene i Erhvervsstyrelsens Elasticsearch-svar (`Vrvirksomhed.virksomhedMetadata.nyesteNavn/nyesteBeliggenhedsadresse/nyesteVirksomhedsform/nyesteHovedbranche/nyesteAarsbeskaeftigelse/stiftelsesDato/sammensatStatus`) og cvrapi.dk-svaret (`name, address, zipcode, city, companydesc, industrycode, industrydesc, startdate, enddate, employees`) er skrevet efter hukommelsen og skal verificeres, når adgangen er på plads. Virk-endpointet er `http://` (ikke TLS) ifølge dokumentationen; overvej at begrænse opslaget til serveren og at bede om en https-adresse.
 - Whereby: mødeoprettelse med optagelse til S3, webhook-format/signatur, og om Whereby kan skrive til Hetzners S3-endpoint.
-- Mistral: feltnavne i transskriberings-API'et og grænser for filstørrelse/varighed. Store filer håndteres i hukommelsen.
+- Mistral: feltnavne i transskriberings-API'et og grænser for filstørrelse/varighed. Filen sendes nu som en disk-baseret Blob (ikke i RAM), men Mistrals maksimale filstørrelse skal afklares.
 
 **Docker og test:**
-- Docker-image og `docker compose` er ikke bygget/testet (Docker var ikke tilgængelig i byggemiljøet). App, build og standalone-server er testet uden Docker.
-- Ingen automatiske tests af server actions/HTTP-ruter. Hovedflowet er testet manuelt med Playwright: signup → abonnement → booking → møde → transskription.
+- Docker-imaget er bygget og kørt lokalt 18.10.2026 (mock-konfiguration nægter at starte, dev-konfiguration svarer; `migrate`, `create-admin` og seed-afvisning testet i build-imaget). I sandkassen krævede `npm ci` i imaget proxyens CA (kun en lokal variant af Dockerfilen); CI kører et almindeligt `docker build .`. `docker compose` som helhed er ikke kørt.
+- Lib-niveauet har nu DB-integrationstests (kører med `TEST_DATABASE_URL`, i CI mod en Postgres-service). Server actions og HTTP-ruter testes stadig kun end-to-end med Playwright (scripts uden for repoet): onboarding → testbetaling → booking → møde/upload/transskription, admin, CMS, notifikationer, leads.
 
 **Onboarding og CMS (nyt):**
 - Matching-vægtene i seed-testen er et kvalificeret bud og bør justeres af ejeren i CMS'et (`/admin/onboarding`) sammen med rådgivernes tags.
@@ -73,7 +76,7 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 - Genoptagelse af en ufærdig tilmelding fungerer kun i samme browser (cookie). Links i «tilmelding ikke færdig»-beskeder går til /kom-i-gang; et personligt genoptagelseslink kunne tilføjes.
 - Rådgiverfoto er stadig en ekstern URL; kataloget viser initialer uden foto.
 - CMS-ændringer er ikke versioneret ud over audit-loggen; der er ingen «fortryd».
-- Rate-limiting af CVR-opslag og onboarding er i hukommelsen (ok med én server).
+- Rate limits og CVR-cache ligger i Postgres (`RateLimit`, `CvrLookupCache`) og deles mellem instanser.
 
 **inMobile (nyt – skrevet efter bedste viden, ikke testet mod en rigtig konto). Gæt, der skal verificeres:**
 - Base-URL `https://api.inmobile.com` og versionsstien `/v4/...`.
@@ -92,11 +95,24 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 - Whereby: ved flytning af et møde oprettes et nyt rum (rum har faste datoer) og det gamle slettes; ved udskiftning af rådgiver genbruges rummet (hostRoomUrl deles). Verificér mod Whereby.
 - Notifikationer sendes inline i den handling, der udløser dem (ingen kø med genforsøg ud over «Send igen» i loggen).
 - Ingen e-mail-skabelon-tests mod rigtige klienter (Outlook/Gmail); SVG-logoet vises ikke i alle klienter (alt-tekst er reserve). Overvej et PNG-logo.
-- Når admin behandler en sletteanmodning, opsiges abonnementet ikke automatisk hos Frisbii.
-- Ingen admin-UI til at oprette flere admins eller redigere kunder. Første admin kommer fra seed-scriptet – **skift standardpasswords**.
-- Rate-limiting på login er i hukommelsen (ok med én server).
+- Ingen admin-UI til at oprette flere admins eller redigere kunder. Admins oprettes med `npm run create-admin` (engangslink); seed afvises i produktion.
 - Rådgiverfotos er eksterne URL'er; der er ingen upload.
 - Møder der er afholdt uden optagelse markeres ikke automatisk som afholdt.
 
 ## 5. Leverandører der bevidst er fravalgt (amerikanske)
 Stripe, Zoom/Teams/Daily, OpenAI/Deepgram/AssemblyAI, Vercel/AWS, Auth0/Clerk, SendGrid/Mailgun, Google Fonts/Analytics, Sentry. Next.js, Prisma og AWS S3-klienten bruges kun som open source-biblioteker, der kører på egen server. Der sendes ingen data til disse firmaer.
+
+## 6. Opfølgning efter sikkerhedsrettelserne (fase 1 og 2, 18.10.2026)
+
+- **TODO – CAPTCHA (M-4):** hvis CVR-opslag eller onboarding misbruges trods trusted-IP-grænser, dagsbudget og negativ cache, tilføj et ekstra tjek før eksterne opslag. EU-mulighed: **Friendly Captcha** (Tyskland, privatlivsvenlig proof-of-work, ingen cookies). Ikke bygget.
+- **Betalingswebhook (H-4):** headerformat, nøgler og det signerede indhold er samlet i `PAYMENT_WEBHOOK_SCHEME` (`src/lib/payments/frisbii-signature.ts`) og skal rettes til den valgte udbyders dokumentation. Signerer udbyderen ikke selve body'en (Reepays gamle skema: `timestamp + id`), må body'en ikke stoles på – hent da begivenheden via udbyderens API ud fra id'et.
+- **inMobile-webhook (M-7):** afklar om inMobile kan signere webhooks eller sende en custom header (`x-webhook-secret`); ellers bruges `?secret=` i URL'en (hold den ude af proxy-logs, rotér med `INMOBILE_WEBHOOK_SECRET_PREVIOUS`).
+- **Whereby og CSP:** `frame-src https://*.whereby.com` og Permissions-Policy med samme wildcard skal verificeres mod jeres faktiske Whereby-subdomæne (kan låses til ét domæne).
+- **S3 direkte upload (H-5):** bucketten skal have CORS for `POST` fra `APP_URL`, og presigned POST med `content-length-range` skal verificeres mod Hetzner Object Storage. Hvis POST-policies ikke understøttes: presigned PUT med efterfølgende størrelsestjek (finalize tjekker allerede størrelse og magic bytes).
+- **Onboarding trin 6 (M-1, rest):** trin 1 afslører ikke længere, om en e-mail har en konto, men i trin 6 kan man stadig skelne (ny konto → betaling; eksisterende → «tjek din e-mail»). En fuld løsning kræver e-mailbekræftelse, før kontoen oprettes.
+- **Login-spærring:** en angriber, der kender en e-mail, kan spærre kontoen i 15 min (og eskalerende). Indbygget i pr.-konto-spærring; nulstilling af adgangskoden ophæver spærringen. Overvåg `auth.lockout` i audit-loggen.
+- **CSP:** `style-src` tillader `'unsafe-inline'` (inline style-attributter, fx bredden på fremdriftslinjer); scripts er nonce-låst. Kan strammes ved at erstatte style-attributter med CSS-variabler. Alle sider renderes dynamisk pga. noncen.
+- **npm audit (kun udviklingsværktøjer):** `braces`/`micromatch`/`fast-glob` og `postcss-selector-parser` via Tailwind 3 og ESLint-plugins (bruges kun ved build/lint, ikke i produktionsbundlen). Rettes ved migrering til Tailwind 4. `npm audit --omit=dev` er ren.
+- **Renovate og GitHub:** installér Renovate-appen på repoet, slå branch-beskyttelse til på `main` (kræv CI grøn) og secret scanning.
+- **Konsol-adaptere (kun udvikling):** loggen maskerer alle 8-cifrede tal (også CVR-numre i firmanavne) – bevidst konservativt.
+- **Kontrast:** endelig godkendelse af ejeren; mellemvej beskrevet i `docs/screens/kontrast/README.md`.

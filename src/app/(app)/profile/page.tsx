@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { updateProfileAction } from "@/app/actions/advisor";
+import { ProfileForm } from "@/components/advisor-forms";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -16,24 +16,8 @@ export default async function ProfilePage({ searchParams }: { searchParams: SP }
       <p className="mt-2 text-sm text-muted">Profilen vises for kunder, når de sammensætter deres board.</p>
       <div className="card mt-6 max-w-2xl">
         <Flash ok={ok} err={err} />
-        <form action={updateProfileAction} className="grid gap-4">
-          <div>
-            <label className="label" htmlFor="name">Navn</label>
-            <input className="input" id="name" name="name" defaultValue={user.name} required />
-          </div>
-          <div>
-            <label className="label" htmlFor="phone">Mobilnummer (til SMS-påmindelser)</label>
-            <input className="input" id="phone" name="phone" type="tel" autoComplete="tel" defaultValue={user.phone ?? ""} placeholder="20 30 40 50" />
-            <p className="mt-1 text-xs text-muted">Valgfrit. Bruges kun til påmindelser om dine møder. Du kan slå SMS fra under Konto.</p>
-          </div>
-          <div>
-            <label className="label" htmlFor="title">Titel</label>
-            <input className="input" id="title" name="title" defaultValue={profile.title} maxLength={120} />
-          </div>
-          <div>
-            <label className="label" htmlFor="bio">Præsentation</label>
-            <textarea className="input min-h-32" id="bio" name="bio" defaultValue={profile.bio} maxLength={4000} />
-          </div>
+        <ProfileForm initial={{ name: user.name, phone: user.phone ?? "", title: profile.title, bio: profile.bio, photoUrl: profile.photoUrl }} />
+        <div className="mt-space-4 border-t border-grey-bg pt-space-3">
           <div>
             <p className="label">Kompetence-tags</p>
             {profile.tags.length ? (
@@ -47,12 +31,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: SP }
             )}
             <p className="mt-1 text-xs text-muted">Tags bruges til at matche dig med kunder og tildeles af administratoren.</p>
           </div>
-          <div>
-            <label className="label" htmlFor="photoUrl">Foto-URL (https)</label>
-            <input className="input" id="photoUrl" name="photoUrl" type="url" defaultValue={profile.photoUrl} />
-          </div>
-          <div><button className="btn" type="submit">Gem profil</button></div>
-        </form>
+        </div>
       </div>
     </div>
   );

@@ -30,6 +30,8 @@ export interface AdvisorAvailability {
 
 export interface SlotOptions {
   now: Date;
+  /** Datoer (yyyy-MM-dd, København), hvor der ikke kan bookes – fx helligdage (plan #24) */
+  blockedDates?: Set<string>;
   durationMinutes: number;
   stepMinutes?: number;
   bufferMinutes?: number;
@@ -113,6 +115,7 @@ export function computeSlots(advisors: AdvisorAvailability[], opts: SlotOptions)
 
   for (let i = 0; i <= days; i++) {
     const key = addDaysKey(firstKey, i);
+    if (opts.blockedDates?.has(key)) continue;
     const weekday = isoWeekday(localToUtc(key, 12 * 60));
     // Hurtig afvisning: alle skal have mindst én regel denne ugedag
     if (!advisors.every((a) => a.rules.some((r) => r.weekday === weekday))) continue;

@@ -7,13 +7,12 @@ import {
   confirmCompanyAction,
   manualCompanyAction,
   saveBoardAction,
-  saveCompanyAction,
-  saveContactAction,
   skipTestAction,
 } from "@/app/actions/onboarding";
 import { Band } from "@/components/band";
 import { BoardBuilder } from "@/components/board-builder";
 import { Flash, flashFrom, type SP } from "@/components/flash";
+import { CompanyStepForm, ContactStepForm } from "@/components/onboarding/step-forms";
 import { Stepper } from "@/components/onboarding/stepper";
 import { Rich } from "@/components/rich";
 import { PageShell } from "@/components/site-header";
@@ -50,16 +49,9 @@ export default async function KomIGang({ searchParams }: { searchParams: SP }) {
           <div className={wide ? "" : "mx-auto max-w-xl"}>
             <span className="eyebrow hidden sm:block">{interpolate(t["common.eyebrow"], { n: step, total: TOTAL_STEPS, trin: labels[step - 1] })}</span>
             <h1 className="mb-space-4">{t[`step${step}.title`]}</h1>
-            {err &&
-              (one(params.konto) ? (
-                <div role="alert" className="callout callout-error mb-space-4 text-sm">
-                  {err} <Link href="/login">Log ind her</Link>, eller brug en anden e-mail.
-                </div>
-              ) : (
-                <Flash err={err} />
-              ))}
-            {step === 1 && <StepContact state={state} t={t} n={one(params.n)} e={one(params.e)} />}
-            {step === 2 && state && <StepCompany state={state} t={t} cvr={one(params.cvr)} tlf={one(params.tlf)} />}
+            {err && <Flash err={err} />}
+            {step === 1 && <StepContact state={state} t={t} />}
+            {step === 2 && state && <StepCompany state={state} t={t} />}
             {step === 3 && state && <StepConfirm state={state} t={t} />}
             {step === 4 && state && <StepTest state={state} t={t} q={Number(one(params.q)) || 1} />}
             {step === 5 && state && <StepBoard state={state} t={t} />}
@@ -79,55 +71,35 @@ function Back({ step, extra = "", t }: { step: number; extra?: string; t: T }) {
   );
 }
 
-function StepContact({ state, t, n, e }: { state: OnboardingState | null; t: T; n?: string; e?: string }) {
+function StepContact({ state, t }: { state: OnboardingState | null; t: T }) {
   const c = state?.data.contact;
   return (
     <div className="panel">
       <p className="mb-space-4 text-muted">{t["step1.intro"]}</p>
-      <form action={saveContactAction} className="grid gap-4">
-        <div>
-          <label className="label" htmlFor="name">{t["step1.nameLabel"]}</label>
-          <input className="input" id="name" name="name" required autoComplete="name" defaultValue={n ?? c?.name} />
-        </div>
-        <div>
-          <label className="label" htmlFor="email">{t["step1.emailLabel"]}</label>
-          <input className="input" id="email" name="email" type="email" required autoComplete="email" defaultValue={e ?? c?.email} />
-        </div>
-        <label className="flex items-start gap-3 text-sm text-muted">
-          {/* Aktivt samtykke: aldrig forudkrydset (markedsføringsloven/GDPR). Teksten gemmes ordret sammen med samtykket. */}
-          <input type="checkbox" name="contactConsent" className="mt-1 h-4 w-4 shrink-0" defaultChecked={state?.marketingConsent} />
-          <span><Rich text={t["step1.consent"]} /></span>
-        </label>
-        <div className="flex items-center justify-between gap-3 pt-2">
-          <p className="text-sm text-muted"><Rich text={t["step1.loginHint"]} /></p>
-          <button className="btn" type="submit">{t["step1.submit"]}</button>
-        </div>
-      </form>
+      <ContactStepForm
+        t={pick(t, ["step1.nameLabel", "step1.emailLabel", "step1.consent", "step1.loginHint", "step1.submit"])}
+        initial={{ name: c?.name, email: c?.email, consent: state?.marketingConsent }}
+      />
     </div>
   );
 }
 
-function StepCompany({ state, t, cvr, tlf }: { state: OnboardingState; t: T; cvr?: string; tlf?: string }) {
+function StepCompany({ state, t }: { state: OnboardingState; t: T }) {
   const co = state.data.company;
   return (
     <div className="panel">
       <p className="mb-space-4 text-muted">{t["step2.intro"]}</p>
-      <form action={saveCompanyAction} className="grid gap-4">
-        <div>
-          <label className="label" htmlFor="cvr">{t["step2.cvrLabel"]}</label>
-          <input className="input" id="cvr" name="cvr" required inputMode="numeric" placeholder={t["step2.cvrPlaceholder"]} autoComplete="off" defaultValue={cvr ?? co?.cvr} />
-        </div>
-        <div>
-          <label className="label" htmlFor="phone">{t["step2.phoneLabel"]}</label>
-          <input className="input" id="phone" name="phone" type="tel" required autoComplete="tel" placeholder={t["step2.phonePlaceholder"]} defaultValue={tlf ?? co?.phone} />
-        </div>
-        <div className="flex items-center justify-between gap-3 pt-2">
-          <Back step={1} t={t} />
-          <button className="btn" type="submit">{t["step2.submit"]}</button>
-        </div>
-      </form>
+      <CompanyStepForm
+        t={pick(t, ["step2.cvrLabel", "step2.cvrPlaceholder", "step2.phoneLabel", "step2.phonePlaceholder", "step2.submit", "common.back"])}
+        initial={{ cvr: co?.cvr, phone: co?.phone }}
+      />
     </div>
   );
+}
+
+/** Kun de tekster, en klientformular skal bruge (resten bliver på serveren). */
+function pick(t: T, keys: string[]): Record<string, string> {
+  return Object.fromEntries(keys.map((k) => [k, t[k]]));
 }
 
 function StepConfirm({ state, t }: { state: OnboardingState; t: T }) {

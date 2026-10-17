@@ -280,7 +280,7 @@ function CandidateDialog({
               <input id="cand-search" className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Navn eller titel" autoFocus />
             </div>
             <ul className="flex-1 divide-y divide-grey-bg overflow-y-auto" data-testid="candidates">
-              {rows.length === 0 && <li className="p-space-4 text-center text-muted">Ingen aktive rådgivere at vælge.</li>}
+              {rows.length === 0 && <li className="p-space-4 text-center text-muted">Ingen rådgivere at vælge.</li>}
               {rows.map((c, i) => (
                 <li key={c.id} className={`flex gap-3 p-space-3 sm:px-space-4 ${c.available ? "" : "bg-grey-bg/60"}`} data-candidate={c.name} data-available={c.available}>
                   <Initials name={c.name} />
@@ -291,7 +291,7 @@ function CandidateDialog({
                     </p>
                     <p className="text-sm text-muted">{c.title}</p>
                     <p className="mt-1">
-                      {c.available ? <span className="badge badge-navy">Ledig</span> : <span className="badge badge-muted">Optaget · {c.conflict}</span>}
+                      {c.inactive ? <span className="badge badge-muted" data-testid="candidate-inactive">Inaktiv</span> : c.available ? <span className="badge badge-navy">Ledig</span> : <span className="badge badge-muted">Optaget · {c.conflict}</span>}
                     </p>
                     {c.tagIds.length > 0 && (
                       <ul className="mt-2 flex flex-wrap gap-1" aria-label="Kompetencer">
@@ -302,7 +302,7 @@ function CandidateDialog({
                     )}
                     <p className="mt-2 text-sm"><span className="font-semibold text-navy">{formatDkk(c.priceDkk)}</span> <span className="text-muted">pr. møde · match {c.score}</span></p>
                   </div>
-                  <button type="button" className="btn btn-sm self-center" disabled={!c.available} onClick={() => setChosen(c)} aria-label={`Vælg ${c.name}`}>Vælg</button>
+                  <button type="button" className="btn btn-sm self-center" disabled={!c.available || c.inactive} onClick={() => setChosen(c)} aria-label={c.inactive ? `${c.name} er inaktiv og kan ikke vælges` : `Vælg ${c.name}`}>Vælg</button>
                 </li>
               ))}
             </ul>

@@ -54,7 +54,7 @@ export function SaveIndicator({ saver }: { saver: Pick<Saver, "status" | "error"
       {status === "saving" && <span className="text-muted">Gemmer…</span>}
       {status === "saved" && (
         <span className="font-semibold text-navy" data-testid="saved">
-          <span aria-hidden="true" className="mr-1 text-gold-dark">✓</span>Gemt
+          <span aria-hidden="true" className="mr-1 text-gold-ink">✓</span>Gemt
         </span>
       )}
       {status === "error" && (

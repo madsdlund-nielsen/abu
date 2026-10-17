@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Empty } from "@/components/ui";
-import { CONSENT_LABEL, loadLeads, parseLeadFilter, STATUS_LABEL, type LeadConsent, type LeadStatus } from "@/lib/leads-admin";
+import { CONSENT_LABEL, loadLeads, parseLeadFilter, STATUS_LABEL, type LeadConsent, type LeadStatus, consentVersionLabel } from "@/lib/leads-admin";
 import { formatPhone, toE164 } from "@/lib/phone";
 import { formatDateTime } from "@/lib/time";
 import type { SP } from "@/components/flash";
@@ -86,7 +86,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: SP })
                   <td>
                     <span className={`badge ${CONSENT_BADGE[r.consent]}`}>{CONSENT_LABEL[r.consent]}</span>
                     {r.channels.length > 0 && <p className="mt-1 text-xs text-muted">{r.channels.join(" + ")}</p>}
-                    {r.consentedAt && <p className="text-xs text-muted">{formatDateTime(r.consentedAt)} · {r.consentVersion}</p>}
+                    {r.consentedAt && <p className="text-xs text-muted">{formatDateTime(r.consentedAt)} · samtykketekst: {consentVersionLabel(r.consentVersion)}</p>}
                   </td>
                   <td className="whitespace-nowrap text-sm">{formatDateTime(r.lastActivityAt)}</td>
                 </tr>

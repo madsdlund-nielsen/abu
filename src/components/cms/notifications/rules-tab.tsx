@@ -79,7 +79,7 @@ export function RulesTab({
                               <span className="text-muted"> · til {AUDIENCE_LABEL[r.audience].toLowerCase()}</span>
                               {r.quietHours && quietEnabled && <span className="ml-2 badge badge-muted">Stille timer</span>}
                             </span>
-                            <button type="button" className="max-w-[16rem] truncate text-sm underline underline-offset-2 hover:text-gold-dark" onClick={() => onOpenTemplate(r.templateId)} title="Åbn skabelonen">
+                            <button type="button" className="max-w-[16rem] truncate text-sm underline underline-offset-2 hover:text-gold-ink" onClick={() => onOpenTemplate(r.templateId)} title="Åbn skabelonen">
                               {tpl.get(r.templateId)?.name ?? "Skabelon"}
                               {tpl.get(r.templateId)?.active === false && " (slået fra)"}
                             </button>
@@ -176,7 +176,7 @@ function RuleDialog({
   const [unit, setUnit] = useState<TimingUnit>(rule ? initial.unit : def.timing === "before_start" ? "hours" : "minutes");
   const [direction, setDirection] = useState<TimingDirection>(directions[0]);
   const [audience, setAudience] = useState(rule?.audience ?? def.audiences[0]);
-  const [templateId, setTemplateId] = useState(rule?.templateId ?? "");
+  const [chosenTemplateId, setTemplateId] = useState(rule?.templateId ?? "");
   const [quiet, setQuiet] = useState(rule?.quietHours ?? false);
   const [active, setActive] = useState(rule?.active ?? true);
   const [error, setError] = useState<string | null>(null);
@@ -192,12 +192,10 @@ function RuleDialog({
   const compatible = (t: CmsTemplate) => validateTemplate({ channel: t.channel, subject: t.subject, body: t.body }, def.variables).length === 0;
   const usedHere = new Set(allRules.filter((r) => r.trigger === def.key).map((r) => r.templateId));
   const candidates = templates
-    .filter((t) => t.channel === channel && (t.active || t.id === templateId || def.locked))
+    .filter((t) => t.channel === channel && (t.active || t.id === chosenTemplateId || def.locked))
     .sort((a, b) => Number(compatible(b)) - Number(compatible(a)) || Number(usedHere.has(b.id)) - Number(usedHere.has(a.id)) || a.name.localeCompare(b.name, "da"));
-  useEffect(() => {
-    if (!candidates.some((t) => t.id === templateId)) setTemplateId(candidates.find(compatible)?.id ?? candidates[0]?.id ?? "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel]);
+  // Passer det valgte ikke til kanalen (fx efter skift af kanal), vælges den bedst egnede skabelon automatisk
+  const templateId = candidates.some((t) => t.id === chosenTemplateId) ? chosenTemplateId : (candidates.find(compatible)?.id ?? candidates[0]?.id ?? "");
 
   const offset = partsToOffset({ amount: Number.isFinite(amount) ? amount : 0, unit, direction });
   const offsetProblem = validateOffset(def.timing, def.timing === "before_start" && offset === 0 ? -0 : offset);

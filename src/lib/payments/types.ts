@@ -1,3 +1,5 @@
+import type { VerifyResult } from "../webhooks/signature";
+
 export interface CheckoutInput {
   /** Vores Subscription.id – bruges som abonnements-handle hos udbyderen */
   subscriptionId: string;
@@ -25,6 +27,8 @@ export interface CheckoutResult {
 
 export interface PaymentProvider {
   readonly name: "mock" | "frisbii";
+  /** Verificerer en webhook ud fra den RÅ body og headers (signatur + tidsstempel). Kaldes før JSON-parsing. */
+  verifyWebhook(rawBody: string, headers: Headers, now?: Date): VerifyResult;
   createCheckout(input: CheckoutInput): Promise<CheckoutResult>;
   cancelSubscription(providerSubscriptionId: string): Promise<void>;
   changePlan(providerSubscriptionId: string, planHandle: string, amountDkk: number): Promise<void>;

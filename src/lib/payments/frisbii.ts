@@ -1,4 +1,6 @@
 import { getEnv } from "../env";
+import { verifyWebhookSignature } from "../webhooks/signature";
+import { PAYMENT_WEBHOOK_SCHEME } from "./frisbii-signature";
 import type { CheckoutInput, CheckoutResult, PaymentProvider } from "./types";
 
 /**
@@ -53,6 +55,10 @@ export class FrisbiiPayments implements PaymentProvider {
       providerCustomerId: input.customer.id,
       providerSubscriptionId: input.subscriptionId,
     };
+  }
+
+  verifyWebhook(rawBody: string, headers: Headers, now = new Date()) {
+    return verifyWebhookSignature(PAYMENT_WEBHOOK_SCHEME, rawBody, headers, getEnv().FRISBII_WEBHOOK_SECRET, now);
   }
 
   async cancelSubscription(handle: string) {

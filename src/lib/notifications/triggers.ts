@@ -23,6 +23,7 @@ export const TRIGGER_KEYS = [
   "onboarding_abandoned",
   "advisor_invited",
   "password_reset",
+  "account_exists",
 ] as const;
 export type TriggerKey = (typeof TRIGGER_KEYS)[number];
 
@@ -184,6 +185,19 @@ export const TRIGGERS: Record<TriggerKey, TriggerDef> = {
     audiences: ["SUBJECT"],
     variables: [...COMMON, "nulstillingslink"],
   },
+  account_exists: {
+    key: "account_exists",
+    label: "Konto findes allerede",
+    group: "Konto",
+    description:
+      "Sendes, når nogen starter en tilmelding med en e-mail, der allerede har en konto (højst én gang i døgnet). Siden viser ingen forskel, så det ikke kan ses, om en e-mail er kunde. Transaktionel: kan ikke slås fra.",
+    timing: "event",
+    locked: true,
+    optIn: false,
+    sensitive: false,
+    audiences: ["SUBJECT"],
+    variables: [...COMMON, "loginlink", "nulstillingsside"],
+  },
 };
 
 export const TRIGGER_GROUPS: TriggerGroup[] = ["Møder", "Abonnement og board", "Onboarding", "Konto"];
@@ -219,6 +233,8 @@ export const VARIABLES: Record<string, { label: string; sample: string }> = {
   invitationslink: { label: "Link til at vælge adgangskode (invitation)", sample: "{APP}/set-password?token=…" },
   nulstillingslink: { label: "Link til at nulstille adgangskoden", sample: "{APP}/set-password?token=…&reset=1" },
   afmeldlink: { label: "Link til at afmelde beskeder", sample: "{APP}/afmeld?t=…" },
+  loginlink: { label: "Link til login", sample: "{APP}/login" },
+  nulstillingsside: { label: "Link til at bede om en ny adgangskode", sample: "{APP}/reset-password" },
 };
 
 export const KNOWN_VARIABLES = Object.keys(VARIABLES);

@@ -1,18 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { canAccessMeeting } from "@/lib/access";
 import { audit } from "@/lib/audit";
 import { requireRole, requireUser } from "@/lib/auth";
 import { BookingError, bookMeeting, cancelMeeting } from "@/lib/booking";
 import { prisma } from "@/lib/db";
-import { recordingUploadDecision } from "@/lib/meeting-status";
+import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
 import { enqueueJob } from "@/lib/jobs";
+import { cancelRecordingUpload, finalizeRecordingUpload, prepareRecordingUpload } from "@/lib/recording-upload";
 import { redirectWith } from "@/lib/redirect";
-import { getStorage } from "@/lib/storage";
 import { getCustomerSubscription } from "@/lib/subscriptions";
-import { randomToken } from "@/lib/tokens";
 
 export async function bookAction(formData: FormData) {
   const user = await requireRole("CUSTOMER");
@@ -21,14 +18,24 @@ export async function bookAction(formData: FormData) {
   const startsAt = new Date(String(formData.get("startsAt") ?? ""));
   if (Number.isNaN(startsAt.getTime())) redirectWith("/book", "err", "Ugyldigt tidspunkt.");
 
-  let id: string;
+  // Idempotent (QA #1): et gentaget kald med samme formular-nøgle giver samme møde i stedet for «allerede brugt»
+  let outcome;
   try {
-    id = (await bookMeeting({ subscriptionId: sub.id, startsAt, actorId: user.id })).id;
+    outcome = await withIdempotency<{ ok: true; meetingId: string } | { ok: false; error: string }>({ userId: user.id, scope: "booking", key: formData.get("idem") }, async () => {
+      try {
+        return { ok: true, meetingId: (await bookMeeting({ subscriptionId: sub.id, startsAt, actorId: user.id })).id };
+      } catch (e) {
+        if (e instanceof BookingError) return { ok: false, error: e.message };
+        throw e;
+      }
+    });
   } catch (e) {
-    if (e instanceof BookingError) redirectWith("/book", "err", e.message);
+    if (e instanceof IdempotencyInFlightError) redirectWith("/book", "err", e.message);
     throw e;
   }
-  redirectWith(`/meetings/${id}`, "ok", "Mødet er booket. Vi har sendt en bekræftelse på e-mail.");
+  const r = outcome.result;
+  if (!r.ok) redirectWith("/book", "err", r.error);
+  redirectWith(`/meetings/${r.meetingId}`, "ok", "Mødet er booket. Vi har sendt en bekræftelse på e-mail.");
 }
 
 export async function cancelMeetingAction(formData: FormData) {
@@ -57,36 +64,29 @@ export async function cancelMeetingAction(formData: FormData) {
   }
 }
 
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-
-export async function uploadRecordingAction(formData: FormData) {
+/** Trin 1 af upload (H-5): giver et upload-mål. Selve filen sendes aldrig gennem en server action. */
+export async function prepareRecordingUploadAction(meetingId: string, size: number) {
   const user = await requireRole("ADMIN", "ADVISOR");
-  const meetingId = String(formData.get("meetingId") ?? "");
-  const back = `/meetings/${meetingId}`;
-  const meeting = await prisma.meeting.findUnique({ where: { id: meetingId }, include: { participants: true } });
-  if (!meeting || !canAccessMeeting(user, meeting.participants.map((p) => p.userId))) {
-    redirectWith("/meetings", "err", "Mødet findes ikke.");
+  try {
+    return await prepareRecordingUpload(user, String(meetingId), Number(size));
+  } catch (e) {
+    console.error("[upload] forberedelse fejlede", e instanceof Error ? e.message : e);
+    return { ok: false as const, error: "Uploaden kunne ikke startes. Prøv igen." };
   }
-  const decision = recordingUploadDecision(meeting, new Date());
-  if (!decision.allowed) redirectWith(back, "err", decision.reason);
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) redirectWith(back, "err", "Vælg en lyd- eller videofil.");
-  if (file.size > MAX_UPLOAD_BYTES) redirectWith(back, "err", "Filen er for stor (maks 500 MB).");
-  const mime = file.type || "application/octet-stream";
-  if (!/^(audio|video)\//.test(mime) && mime !== "application/octet-stream") {
-    redirectWith(back, "err", "Kun lyd- og videofiler kan uploades.");
-  }
+}
 
-  const ext = (file.name.split(".").pop() ?? "bin").replace(/[^a-z0-9]/gi, "").slice(0, 8) || "bin";
-  const key = `recordings/${meetingId}/${randomToken(8)}.${ext}`;
-  await getStorage().put(key, Buffer.from(await file.arrayBuffer()), mime);
-  const rec = await prisma.recording.create({
-    data: { meetingId, storageKey: key, mime, source: "UPLOAD" },
-  });
-  await enqueueJob("transcribe_recording", { recordingId: rec.id });
-  await audit(user.id, "recording.upload", "Recording", rec.id);
-  revalidatePath(back);
-  redirect(`${back}?ok=${encodeURIComponent("Optagelsen er uploadet og transskriberes nu. Opdater siden om lidt.")}`);
+/** Trin 2: tjekker filen i lageret (størrelse + magic bytes) og starter transskriptionen. */
+export async function finalizeRecordingUploadAction(recordingId: string) {
+  const user = await requireRole("ADMIN", "ADVISOR");
+  const r = await finalizeRecordingUpload(user, String(recordingId));
+  if (r.ok) revalidatePath(`/meetings/${r.meetingId}`);
+  return r;
+}
+
+/** Upload fejlede i browseren (afbrudt, afvist af lageret): ryd den ventende upload op. */
+export async function cancelRecordingUploadAction(recordingId: string) {
+  const user = await requireRole("ADMIN", "ADVISOR");
+  await cancelRecordingUpload(user.id, String(recordingId));
 }
 
 export async function retryRecordingAction(formData: FormData) {

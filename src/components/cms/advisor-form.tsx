@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { updateAdvisorAction } from "@/app/actions/cms";
 import { formatDkk } from "@/lib/pricing";
+import type { ReadinessItem } from "@/lib/advisor-readiness";
+import { ReadinessList } from "@/components/admin/readiness";
 import { SaveIndicator, Switch, useSaver } from "./primitives";
 
 export function AdvisorForm({
@@ -11,11 +13,18 @@ export function AdvisorForm({
   initial,
   tags,
   activeSubscriptions,
+  readiness,
+  boards,
+  priceBounds,
 }: {
   userId: string;
   initial: { priceDkk: number; active: boolean; tagIds: string[] };
   tags: { id: string; name: string; active: boolean }[];
   activeSubscriptions: number;
+  readiness: ReadinessItem[];
+  /** Kunder, hvis aktive boards rådgiveren sidder i */
+  boards: string[];
+  priceBounds: { min: number; max: number };
 }) {
   const [price, setPrice] = useState(String(initial.priceDkk));
   const [active, setActive] = useState(initial.active);
@@ -26,9 +35,14 @@ export function AdvisorForm({
   const saver = useSaver();
 
   const priceNum = Number(price.replace(/[^\d]/g, ""));
-  const priceValid = price.trim() !== "" && Number.isInteger(priceNum) && priceNum >= 0 && priceNum <= 20000;
+  const priceValid = price.trim() !== "" && Number.isInteger(priceNum) && priceNum >= priceBounds.min && priceNum <= priceBounds.max;
   const dirty = priceNum !== saved.priceDkk || active !== saved.active || [...tagIds].sort().join() !== [...saved.tagIds].sort().join();
   const visible = tags.filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase()));
+  // Tag-punktet følger de valgte (endnu ikke gemte) tags
+  const missing = readiness
+    .map((r) => (r.key === "tags" ? { ...r, ok: tagIds.length > 0 } : r))
+    .filter((r) => !r.ok)
+    .map((r) => r.label.charAt(0).toLowerCase() + r.label.slice(1));
 
   const save = async () => {
     if (!priceValid) return;
@@ -60,17 +74,31 @@ export function AdvisorForm({
             />
             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">kr.</span>
           </div>
-          <p className="mt-1 text-sm text-navy">{priceValid ? formatDkk(priceNum) + " pr. møde" : <span className="text-danger">Angiv et helt antal kroner (0-20.000).</span>}</p>
+          <p className="mt-1 text-sm text-navy" id="price-help">{priceValid ? formatDkk(priceNum) + " pr. møde" : <span className="text-danger" role="alert">Prisen skal ligge mellem {formatDkk(priceBounds.min)} og {formatDkk(priceBounds.max)} pr. møde.</span>}</p>
           <p id="price-note" className="callout mt-space-3 text-sm">
             Ændringer gælder kun <strong>nye abonnementer og planskift</strong>. Eksisterende abonnementer ({activeSubscriptions} aktive med denne rådgiver) beholder den pris, der var gældende ved køb.
           </p>
         </div>
         <div className="mt-space-4 flex items-center gap-3">
-          <Switch checked={active} onChange={setActive} label="Rådgiveren er aktiv" />
+          <Switch checked={active} onChange={setActive} label="Aktivér rådgiveren" />
           <span className="text-sm">
-            <span className="font-semibold text-navy">{active ? "Aktiv" : "Inaktiv"}</span>{" "}
-            <span className="text-muted">{active ? "– kan vælges af nye kunder" : "– skjult i kataloget"}</span>
+            <span className="font-semibold text-navy" data-testid="active-label">{active ? "Aktiv" : "Inaktiv"}</span>{" "}
+            <span className="text-muted">{active ? "– kan vælges af kunder" : "– kan ikke vælges af kunder (katalog, forslag, booking)"}</span>
           </span>
+        </div>
+        <div className="mt-space-3">
+          <p className="label !mb-0">Klar til aktivering</p>
+          <ReadinessList items={readiness} />
+          {active && !saved.active && missing.length > 0 && (
+            <p role="alert" className="callout mt-space-3 text-sm" data-testid="activate-warning">
+              Rådgiveren mangler {missing.join(", ")}. Du kan godt aktivere, men kunder kan så vælge en rådgiver, der ikke er helt klar.
+            </p>
+          )}
+          {!active && saved.active && boards.length > 0 && (
+            <p role="alert" className="callout callout-error mt-space-3 text-sm" data-testid="deactivate-warning">
+              Rådgiveren sidder i aktive boards hos {boards.join(", ")}. Efter deaktivering kan de kunder ikke booke nye møder, før rådgiveren er erstattet under Abonnementer.
+            </p>
+          )}
         </div>
       </section>
 
@@ -103,7 +131,7 @@ export function AdvisorForm({
           })}
           {visible.length === 0 && <li className="text-sm text-muted">Ingen tags matcher «{q}».</li>}
         </ul>
-        {tagIds.length === 0 && <p className="mt-space-3 text-sm text-gold-dark">Uden tags kan rådgiveren ikke foreslås i onboarding-testen.</p>}
+        {tagIds.length === 0 && <p className="mt-space-3 text-sm text-gold-ink">Uden tags kan rådgiveren ikke foreslås i onboarding-testen.</p>}
       </section>
 
       <div className="flex flex-wrap items-center gap-4 lg:col-span-2">

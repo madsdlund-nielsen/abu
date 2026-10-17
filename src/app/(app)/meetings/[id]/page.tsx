@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { cancelMeetingAction, retryRecordingAction, uploadRecordingAction } from "@/app/actions/meetings";
+import { cancelMeetingAction, retryRecordingAction } from "@/app/actions/meetings";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { AutoRefresh, JoinCountdown } from "@/components/join-countdown";
+import { RecordingUpload } from "@/components/recording-upload";
+import { UPLOAD_TTL_SECONDS } from "@/lib/recording-upload";
 import { RoomEmbed } from "@/components/room-embed";
 import { MeetingStatusBadge } from "@/components/ui";
 import Link from "next/link";
@@ -20,7 +22,7 @@ import type { TranscriptSegment } from "@/lib/transcription/types";
 
 export const metadata: Metadata = { title: "Møde" };
 
-const REC_LABEL = { RECEIVED: "Modtaget", TRANSCRIBING: "Transskriberer …", DONE: "Færdig", FAILED: "Fejlet" } as const;
+const REC_LABEL = { UPLOADING: "Uploades …", RECEIVED: "Modtaget", TRANSCRIBING: "Transskriberer …", DONE: "Færdig", FAILED: "Fejlet" } as const;
 
 export default async function MeetingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SP }) {
   const user = await requireUser();
@@ -48,6 +50,10 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   const opensAt = joinOpensAt(meeting, joinEarlyMinutes());
   const roomUrl = isStaff ? (meeting.hostRoomUrl ?? meeting.roomUrl) : meeting.roomUrl;
   const processing = meeting.recordings.some((r) => r.status === "RECEIVED" || r.status === "TRANSCRIBING");
+  // Kun uploads fra den sidste time tæller (en afbrudt upload må ikke skjule formularen, til oprydningen kører)
+  const uploading = meeting.recordings.some((r) => r.status === "UPLOADING" && r.createdAt.getTime() > now.getTime() - UPLOAD_TTL_SECONDS * 1000);
+  // Upload-formularen skjules, når der allerede er en transskription eller en optagelse undervejs (plan #23)
+  const showUpload = uploadDecision.allowed && !meeting.transcript && !processing && !uploading;
   const consented = hasRecordingConsent(user);
   // Et møde, hvis tid er gået, vises som afholdt, også før jobkøen har opdateret statussen
   const shownStatus = join === "ended" && meeting.status === "BOOKED" ? "COMPLETED" : meeting.status;
@@ -107,7 +113,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
                 <Link className="btn mt-3" href={`/samtykke?next=${encodeURIComponent(`/meetings/${meeting.id}`)}`}>Giv samtykke</Link>
               </div>
             ) : roomUrl ? (
-              <RoomEmbed url={roomUrl} mock={roomUrl.startsWith(MOCK_ROOM_PREFIX)} />
+              <RoomEmbed url={roomUrl} mock={roomUrl.startsWith(MOCK_ROOM_PREFIX)} staff={isStaff} />
             ) : (
               <p className="text-sm text-muted">Videorummet er ikke klar. Prøv igen om lidt.</p>
             )}
@@ -214,22 +220,32 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
               ))}
             </ul>
           )}
-          {uploadDecision.allowed ? (
+          {showUpload ? (
             <>
               <p className="mt-4 text-sm text-muted">
                 Mangler den automatiske optagelse? Upload en lyd- eller videofil, så transskriberes den på samme måde.
               </p>
-              <form action={uploadRecordingAction} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-                <input type="hidden" name="meetingId" value={meeting.id} />
-                <input type="file" name="file" accept="audio/*,video/*" required className="text-sm" />
-                <button className="btn" type="submit">Upload og transskriber</button>
-              </form>
+              <RecordingUpload meetingId={meeting.id} />
             </>
+          ) : meeting.transcript ? (
+            <>
+              <p className="mt-4 text-sm text-muted" data-testid="upload-hidden">Transskriptionen er færdig, så der skal ikke uploades en optagelse.</p>
+              {user.role === "ADMIN" && uploadDecision.allowed && (
+                <details className="mt-3">
+                  <summary className="text-sm text-navy">Erstat transskriptionen med en ny optagelse</summary>
+                  <RecordingUpload meetingId={meeting.id} />
+                </details>
+              )}
+            </>
+          ) : processing || uploading ? (
+            <p className="mt-4 text-sm text-muted" data-testid="upload-hidden">Optagelsen behandles. Siden opdateres, når transskriptionen er klar.</p>
           ) : (
             <p className="callout mt-4 text-sm" data-testid="upload-disabled">
               {meeting.status !== "CANCELLED" && meeting.startsAt > new Date()
                 ? `Upload af optagelse er først muligt, når mødet er startet (${formatDateTime(meeting.startsAt)}). Før da findes der ingen optagelse at transskribere.`
-                : uploadDecision.reason}
+                : !uploadDecision.allowed
+                  ? uploadDecision.reason
+                  : ""}
             </p>
           )}
         </section>

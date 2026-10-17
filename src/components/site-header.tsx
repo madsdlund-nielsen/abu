@@ -44,18 +44,34 @@ export function HeaderLogo() {
 export async function SiteHeader() {
   const user = await getCurrentUser();
   const links: NavItem[] = user ? NAV[user.role] : [{ href: "/priser", label: "Priser" }];
+  // Mange menupunkter (admin, rådgiver) foldes sammen bag «Menu» på mobil i stedet for at fylde flere linjer (plan #25)
+  const collapse = links.length > 3;
+  const logout = (
+    <form action={logoutAction}>
+      <button className="btn-outline-light btn-sm" type="submit">
+        Log ud
+      </button>
+    </form>
+  );
   return (
-    <header className="on-dark bg-charcoal">
+    <header className="on-dark relative bg-charcoal">
       <div className="container-abu flex flex-wrap items-center justify-between gap-x-8 gap-y-1 py-2">
         <HeaderLogo />
-        <nav aria-label="Hovedmenu" className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        {collapse && (
+          <details className="group sm:hidden" data-testid="mobile-menu">
+            <summary className="nav-link flex cursor-pointer list-none items-center gap-2 py-2 [&::-webkit-details-marker]:hidden">
+              <span aria-hidden="true" className="text-base leading-none">☰</span> Menu
+            </summary>
+            <nav aria-label="Hovedmenu (mobil)" className="absolute inset-x-0 z-40 mt-2 flex flex-col gap-3 border-t border-divider-light bg-charcoal px-4 py-4 shadow-panel">
+              <NavLinks links={links} />
+              {user && logout}
+            </nav>
+          </details>
+        )}
+        <nav aria-label="Hovedmenu" className={`${collapse ? "hidden sm:flex" : "flex"} flex-wrap items-center gap-x-6 gap-y-2`}>
           <NavLinks links={links} />
           {user ? (
-            <form action={logoutAction}>
-              <button className="btn-outline-light btn-sm" type="submit">
-                Log ud
-              </button>
-            </form>
+            logout
           ) : (
             <>
               <Link href="/login" className="nav-link">
@@ -79,7 +95,7 @@ export function SiteFooter() {
         <div className="flex flex-col gap-space-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Logo variant="dark" />
-            <p className="mt-4 text-sm">Din egen advisory board som abonnement.</p>
+            <p className="mt-4 text-sm">Dit eget advisory board som abonnement.</p>
           </div>
           <nav aria-label="Sidefod" className="flex flex-wrap gap-x-6 gap-y-2">
             <Link href="/priser" className="nav-link">Priser</Link>
@@ -110,13 +126,15 @@ export async function PageShell({
 }) {
   return (
     <>
+      {/* Tastatur og skærmlæser: spring navigationen over (plan #25) */}
+      <a href="#indhold" className="skip-link">Spring til indhold</a>
       <SiteHeader />
       {variant === "app" ? (
-        <main className="app-main bg-grey-bg py-space-5 sm:py-space-6">
+        <main id="indhold" tabIndex={-1} className="app-main bg-grey-bg py-space-5 outline-none sm:py-space-6">
           <div className="container-abu">{children}</div>
         </main>
       ) : (
-        <main>{children}</main>
+        <main id="indhold" tabIndex={-1} className="outline-none">{children}</main>
       )}
       <SiteFooter />
     </>

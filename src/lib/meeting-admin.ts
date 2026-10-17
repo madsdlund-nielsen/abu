@@ -28,7 +28,8 @@ export async function listSubstituteCandidates(meetingId: string): Promise<Ranke
   if (!meeting) return [];
   const current = new Set(meeting.participants.map((p) => p.userId));
   const [profiles, profile] = await Promise.all([
-    prisma.advisorProfile.findMany({ where: { active: true, userId: { notIn: [...current] } }, include: { user: true, tags: true } }),
+    // Inaktive rådgivere vises også, men markeret «Inaktiv» og kan ikke vælges (QA #13)
+    prisma.advisorProfile.findMany({ where: { userId: { notIn: [...current] } }, include: { user: true, tags: true } }),
     prisma.customerProfile.findUnique({ where: { userId: meeting.subscription.customerId }, select: { testAnswers: true } }),
   ]);
   const ids = profiles.map((p) => p.userId);
@@ -43,8 +44,8 @@ export async function listSubstituteCandidates(meetingId: string): Promise<Ranke
   const dur = durationMinutes(meeting);
   const candidates: SubstituteCandidate[] = profiles.map((p) => {
     const av = availability.find((a) => a.id === p.userId)!;
-    const conflict = explainSlotConflict(av, meeting.startsAt, dur);
-    return { id: p.userId, name: p.user.name, title: p.title, priceDkk: p.pricePerMeetingDkk, tagIds: p.tags.map((t) => t.tagId), available: conflict === null, conflict };
+    const conflict = p.active ? explainSlotConflict(av, meeting.startsAt, dur) : "Inaktiv";
+    return { id: p.userId, name: p.user.name, title: p.title, priceDkk: p.pricePerMeetingDkk, tagIds: p.tags.map((t) => t.tagId), available: p.active && conflict === null, conflict, ...(p.active ? {} : { inactive: true }) };
   });
   const needsList = (profile?.testAnswers as { needs?: { tagId: string; weight: number }[] } | null)?.needs ?? [];
   const needs = Object.fromEntries(needsList.map((n) => [n.tagId, n.weight]));

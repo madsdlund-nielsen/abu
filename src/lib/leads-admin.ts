@@ -94,3 +94,10 @@ export function leadsToCsv(rows: LeadRow[]): string {
   );
   return "﻿" + [header.map(cell).join(";"), ...lines].join("\r\n") + "\r\n";
 }
+
+/** Læsbar samtykkeversion: "m0" → "standardtekst", "m3" → "version 3" (QA plan #25). */
+export function consentVersionLabel(v: string | null | undefined): string {
+  const m = /^[a-z](\d+)$/.exec(v ?? "");
+  if (!m) return v ?? "";
+  return m[1] === "0" ? "standardtekst" : `version ${m[1]}`;
+}
