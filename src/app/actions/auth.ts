@@ -34,14 +34,15 @@ export async function loginAction(formData: FormData) {
     email: String(formData.get("email") ?? "").trim().toLowerCase(),
     password: String(formData.get("password") ?? ""),
   });
-  if (!parsed.success) redirectWith("/login", "err", "Indtast e-mail og adgangskode.");
+  const keep = `/login?e=${encodeURIComponent(String(formData.get("email") ?? "").trim())}`;
+  if (!parsed.success) redirectWith(keep, "err", "Indtast e-mail og adgangskode.");
   const { email, password } = parsed.data;
   const key = await clientKey(email);
-  if (!rateLimit(key)) redirectWith("/login", "err", "For mange forsøg. Vent et kvarter og prøv igen.");
+  if (!rateLimit(key)) redirectWith(keep, "err", "For mange forsøg. Vent et kvarter og prøv igen.");
 
   const user = await prisma.user.findUnique({ where: { email } });
   const ok = await verifyPassword(password, user?.passwordHash ?? null);
-  if (!user || !ok) redirectWith("/login", "err", "Forkert e-mail eller adgangskode.");
+  if (!user || !ok) redirectWith(keep, "err", "Forkert e-mail eller adgangskode.");
 
   clearRateLimit(key);
   await createSession(user.id);
