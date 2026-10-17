@@ -11,6 +11,8 @@ export interface BuilderAdvisor {
   photoUrl: string;
   priceDkk: number;
   tags: { id: string; name: string }[];
+  /** Kun når admin ser et eksisterende board med en rådgiver, der er deaktiveret siden (kan ikke vælges på ny). */
+  inactive?: boolean;
 }
 
 export interface BuilderTag {
@@ -37,6 +39,7 @@ export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise
       bio: p.bio,
       photoUrl: p.photoUrl,
       priceDkk: p.pricePerMeetingDkk,
+      ...(p.active ? {} : { inactive: true }),
       tags: p.tags
         .filter((t) => t.tag.active)
         .sort((a, b) => a.tag.sortOrder - b.tag.sortOrder || a.tag.name.localeCompare(b.tag.name, "da"))
@@ -46,7 +49,8 @@ export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise
 }
 
 export function toMatchAdvisors(advisors: BuilderAdvisor[]): MatchAdvisor[] {
-  return advisors.map((a) => ({ id: a.id, name: a.name, priceDkk: a.priceDkk, active: true, tagIds: a.tags.map((t) => t.id) }));
+  // Inaktive rådgivere foreslås aldrig (QA #13)
+  return advisors.filter((a) => !a.inactive).map((a) => ({ id: a.id, name: a.name, priceDkk: a.priceDkk, active: true, tagIds: a.tags.map((t) => t.id) }));
 }
 
 const questionInclude = {

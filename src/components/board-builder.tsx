@@ -103,7 +103,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
                   <div className="flex items-start gap-3">
                     <Initials name={a.name} url={a.photoUrl} />
                     <div className="min-w-0">
-                      <p className="font-semibold leading-snug text-navy">{a.name}</p>
+                      <p className="font-semibold leading-snug text-navy">{a.name}{a.inactive && <span className="badge badge-muted ml-2 align-middle">Inaktiv</span>}</p>
                       <p className="text-sm leading-snug text-muted">{a.title}</p>
                     </div>
                   </div>
@@ -338,6 +338,7 @@ function Catalog({
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return advisors
+      .filter((a) => !a.inactive)
       .filter((a) => !selected.includes(a.id) || a.id === target?.id)
       .filter((a) => a.id !== target?.id)
       .filter((a) => filter.length === 0 || a.tags.some((t) => filter.includes(t.id)))

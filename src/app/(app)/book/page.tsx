@@ -61,6 +61,8 @@ export default async function BookPage({ searchParams }: { searchParams: SP }) {
   const weeksWithSlots = new Set(slots.map((s) => mondayKey(localDateKey(s))));
   const nextWithSlots = [...weeksWithSlots].filter((k) => k > monday).sort()[0];
   const noQuota = quota && quota.openPeriods.length === 0;
+  // Inaktive rådgivere kan ikke bookes (QA #13)
+  const inactive = sub.advisors.filter((a) => !a.advisor.active).map((a) => a.advisor.user.name);
   const periods = quota
     ? weekPeriods(monday, sub.startedAt, sub.frequencyWeeks, quota.currentPeriod, quota.openPeriods)
     : [];
@@ -76,7 +78,12 @@ export default async function BookPage({ searchParams }: { searchParams: SP }) {
         tidspunkter, hvor alle dine rådgivere ({sub.advisors.map((a) => a.advisor.user.name).join(", ")}) er ledige.
       </p>
       <Flash ok={ok} err={err} />
-      {noQuota ? (
+      {inactive.length > 0 ? (
+        <Empty>
+          {inactive.join(" og ")} er ikke aktiv lige nu, så der kan ikke bookes møder med dit board. Vælg en anden rådgiver under{" "}
+          <Link href="/account/subscription">Konto → Abonnement</Link>, eller kontakt os.
+        </Empty>
+      ) : noQuota ? (
         <Empty>Du har brugt møderne for den aktuelle og næste periode. Du kan booke igen, når en ny periode åbner.</Empty>
       ) : slots.length === 0 ? (
         <Empty>Der er desværre ingen ledige tidspunkter, hvor alle rådgivere kan. Prøv igen senere, eller kontakt os.</Empty>

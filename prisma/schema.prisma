@@ -112,7 +112,8 @@ model AdvisorProfile {
   title     String   @default("")
   bio       String   @default("")
   photoUrl  String   @default("")
-  active    Boolean  @default(true)
+  /// Rådgivere aktiveres manuelt af admin, når de er klar (QA #13). Indtil da kan kunder ikke vælge dem.
+  active    Boolean  @default(false)
   /// Pris pr. møde i hele kroner, ekskl. moms. Sættes af admin. Fastfryses på abonnementet ved køb.
   pricePerMeetingDkk Int @default(1750)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

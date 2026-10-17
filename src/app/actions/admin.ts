@@ -6,6 +6,7 @@ import { audit } from "@/lib/audit";
 import { createPasswordToken, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
+import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
 import { getEnv } from "@/lib/env";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
 import { processJobs } from "@/lib/jobs";
@@ -89,11 +90,22 @@ export async function resendInviteAction(_prev: InviteState, formData: FormData)
 export async function toggleAdvisorActiveAction(formData: FormData) {
   const admin = await requireRole("ADMIN");
   const id = String(formData.get("userId"));
-  const profile = await prisma.advisorProfile.findUnique({ where: { userId: id } });
+  const profile = await prisma.advisorProfile.findUnique({ where: { userId: id }, include: { user: true } });
   if (!profile) redirectWith("/admin/advisors", "err", "Rådgiveren findes ikke.");
-  await prisma.advisorProfile.update({ where: { userId: id }, data: { active: !profile.active } });
-  await audit(admin.id, profile.active ? "advisor.deactivate" : "advisor.activate", "User", id);
-  redirectWith("/admin/advisors", "ok", profile.active ? "Rådgiveren er deaktiveret." : "Rådgiveren er aktiveret.");
+  const activate = !profile.active;
+  await prisma.advisorProfile.update({ where: { userId: id }, data: { active: activate } });
+  await audit(admin.id, activate ? "advisor.activate" : "advisor.deactivate", "User", id);
+  revalidatePath("/admin/advisors");
+  if (activate) {
+    const missing = missingReadiness((await loadReadiness([id])).get(id) ?? []);
+    redirectWith("/admin/advisors", "ok", `${profile.user.name} er aktiveret og kan nu vælges af kunder.${missing.length ? ` Bemærk: mangler ${missing.join(", ")}.` : ""}`);
+  }
+  const boards = await boardsWithAdvisor(id);
+  redirectWith(
+    "/admin/advisors",
+    "ok",
+    `${profile.user.name} er deaktiveret.${boards.length ? ` Berørte kunder (vælg en ny rådgiver under Abonnementer): ${boards.map((b) => b.companyName).join(", ")}.` : ""}`,
+  );
 }
 
 export async function processJobsAction() {

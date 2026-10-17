@@ -25,7 +25,7 @@ export function NewAdvisorForm({ idem }: { idem: string }) {
         <div className="mt-space-3 flex flex-wrap gap-3">
           <Link href="/admin/advisors" className="btn-secondary">Til rådgivere</Link>
           {/* Fuld genindlæsning: ny formular-nøgle og tom formular */}
-          <button type="button" className="btn-secondary" onClick={() => window.location.assign("/admin/advisors/new")}>Opret en til</button>
+          <button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Opret en til</button>
         </div>
       </div>
     );

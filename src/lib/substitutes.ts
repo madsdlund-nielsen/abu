@@ -10,6 +10,8 @@ export interface SubstituteCandidate {
   available: boolean;
   /** Hvorfor rådgiveren ikke er ledig */
   conflict?: string | null;
+  /** Ikke aktiveret af admin: vises, men kan ikke vælges (QA #13) */
+  inactive?: boolean;
 }
 
 export interface RankedCandidate extends SubstituteCandidate {
@@ -32,6 +34,7 @@ export function rankSubstituteCandidates(candidates: SubstituteCandidate[], need
     }))
     .sort(
       (a, b) =>
+        Number(Boolean(a.inactive)) - Number(Boolean(b.inactive)) ||
         Number(b.available) - Number(a.available) ||
         b.score - a.score ||
         a.priceDkk - b.priceDkk ||
