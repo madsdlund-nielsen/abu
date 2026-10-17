@@ -64,3 +64,30 @@ export function hhmmToMinutes(s: string): number | null {
 }
 
 export const WEEKDAY_NAMES = ["", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"];
+
+/** Parser dansk datoformat "dd.mm.åååå" (også d.m.åååå, med . / - som skilletegn). */
+export function parseDanishDate(input: string): { y: number; m: number; d: number } | null {
+  const m = /^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{4})\s*$/.exec(input);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  const y = Number(m[3]);
+  if (y < 1900 || y > 2200 || mo < 1 || mo > 12 || d < 1) return null;
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (d > daysInMonth) return null;
+  return { y, m: mo, d };
+}
+
+export function formatDanishDateInput(d: Date): string {
+  return formatInTimeZone(d, TZ, "dd.MM.yyyy");
+}
+
+/** "dd.mm.åååå" + "HH:mm" (København-tid) -> UTC-Date. Returnerer null hvis input er ugyldigt. */
+export function parseDanishDateTime(dateStr: string, timeStr: string): Date | null {
+  const date = parseDanishDate(dateStr);
+  const minutes = hhmmToMinutes(timeStr.trim());
+  if (!date || minutes === null || minutes >= 1440) return null;
+  const key = `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}`;
+  const out = localToUtc(key, minutes);
+  return Number.isNaN(out.getTime()) ? null : out;
+}

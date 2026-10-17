@@ -1,4 +1,9 @@
 import type { Metadata } from "next";
+// Open Sans selvhostet via npm (ingen Google Fonts-kald, GDPR). Kun de fire vægte fra designmanualen.
+import "@fontsource/open-sans/latin-300.css";
+import "@fontsource/open-sans/latin-400.css";
+import "@fontsource/open-sans/latin-600.css";
+import "@fontsource/open-sans/latin-700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

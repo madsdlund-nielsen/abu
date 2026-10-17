@@ -1,12 +1,7 @@
 export function Flash({ ok, err }: { ok?: string; err?: string }) {
   if (!ok && !err) return null;
   return (
-    <div
-      role={err ? "alert" : "status"}
-      className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
-        err ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"
-      }`}
-    >
+    <div role={err ? "alert" : "status"} className={`callout mb-space-4 text-sm ${err ? "callout-error" : ""}`}>
       {err ?? ok}
     </div>
   );

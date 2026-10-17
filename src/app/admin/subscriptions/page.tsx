@@ -27,7 +27,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2>{s.customer.companyName}</h2>
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-muted">
                   {s.advisorCount} rådgivere · {frequencyLabel(s.frequencyWeeks)} · {formatDkk(s.monthlyPriceDkk)} / md. · {s.provider}
                 </p>
               </div>
@@ -40,7 +40,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
                 {advisors.map((a) => (
                   <label key={a.userId} className="flex items-center gap-2 text-sm">
                     <input type="checkbox" name="advisorIds" value={a.userId} defaultChecked={selected.has(a.userId)} />
-                    {a.user.name}{!a.active && <span className="text-slate-400"> (inaktiv)</span>}
+                    {a.user.name}{!a.active && <span className="text-muted"> (inaktiv)</span>}
                   </label>
                 ))}
               </div>

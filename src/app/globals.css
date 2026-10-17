@@ -1,72 +1,282 @@
+@import "../styles/design-tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Alle farver, radius og spacing kommer fra tokens (src/styles/design-tokens.css). */
+
 @layer base {
-  body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+  html {
+    font-size: var(--fs-body);
   }
+  body {
+    @apply bg-white font-sans text-ink antialiased;
+    font-size: var(--fs-body);
+    line-height: 1.7;
+    font-weight: 400;
+  }
+  *,
+  *::before,
+  *::after {
+    border-radius: var(--radius);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus-color);
+    outline-offset: 2px;
+  }
+  /* Mørke flader (header, hero, navy-bånd, footer): guld-fokus */
+  .on-dark {
+    --focus-color: var(--color-gold);
+  }
+
+  /* Overskrifter: tynde og store i navy (hvid på mørkt) */
   h1 {
-    @apply text-2xl font-semibold tracking-tight sm:text-3xl;
+    @apply font-light text-navy;
+    font-size: var(--fs-h2);
+    line-height: 1.4;
   }
   h2 {
-    @apply text-xl font-semibold tracking-tight;
+    @apply font-normal text-navy;
+    font-size: var(--fs-h3);
+    line-height: 1.5;
   }
   h3 {
-    @apply text-base font-semibold;
+    @apply font-bold uppercase text-navy;
+    font-size: var(--fs-label);
+    line-height: 1.4;
+    letter-spacing: var(--letter-spacing-ui);
+  }
+  /* Kort guldstreg under sidetitler (ca. 55 x 2 px), som under manualens overskrifter */
+  h1:not(.hero-title):not(.section-title)::after {
+    content: "";
+    display: block;
+    width: 55px;
+    height: 2px;
+    margin-top: var(--space-3);
+    background: var(--color-gold);
+  }
+  .on-dark h1,
+  .on-dark h2,
+  .on-dark h3 {
+    @apply text-white;
   }
   a {
-    @apply text-brand-600 hover:text-brand-700;
+    @apply text-navy underline underline-offset-2;
+    text-decoration-thickness: 1px;
+  }
+  a:hover {
+    @apply text-gold-dark;
+  }
+  .on-dark a:not(.btn):not(.btn-outline-light):not(.nav-link) {
+    @apply text-white;
+  }
+  .on-dark a:not(.btn):not(.btn-outline-light):not(.nav-link):hover {
+    @apply text-gold;
+  }
+  ::placeholder {
+    @apply text-slate;
+    opacity: 1;
+  }
+  summary {
+    cursor: pointer;
   }
 }
 
 @layer components {
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  .container-abu {
+    @apply mx-auto w-full max-w-container px-4 sm:px-6;
   }
-  .btn:hover {
+
+  /* Sektionsbånd: hvid -> lysegrå -> navy -> hvid, ca. 90 px luft */
+  .band {
+    @apply py-section;
+  }
+  .band-white {
+    @apply bg-white;
+  }
+  .band-grey {
+    @apply bg-grey-bg;
+  }
+  .band-navy {
+    @apply bg-navy text-on-dark-soft;
+  }
+  .band-charcoal {
+    @apply bg-charcoal text-on-dark-soft;
+  }
+
+  /* Hero- og sektionsoverskrifter */
+  .hero-title {
+    @apply font-normal text-white;
+    font-size: var(--fs-h1-hero);
+    line-height: 1.3;
+  }
+  .section-title {
+    @apply font-light text-navy;
+    font-size: var(--fs-h2);
+    line-height: 1.4;
+  }
+  .on-dark .section-title {
     @apply text-white;
   }
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2;
+  .eyebrow {
+    @apply mb-3 block font-bold uppercase text-gold-dark;
+    font-size: var(--fs-label);
+    line-height: 1;
+    letter-spacing: 0.4em;
   }
-  .btn-secondary:hover {
-    @apply text-slate-900;
+  .on-dark .eyebrow {
+    @apply text-gold;
+  }
+  /* Kort guldstreg under overskrifter (ca. 55 x 2 px) */
+  .rule-gold {
+    @apply block bg-gold;
+    width: 55px;
+    height: 2px;
+  }
+  .lead {
+    @apply font-light text-muted;
+    font-size: 18px;
+    line-height: 1.7;
+  }
+  .on-dark .lead {
+    @apply text-on-dark-soft;
+  }
+
+  /* Knapper: firkantede, versal 14 px / 700, ingen skygge */
+  .btn,
+  .btn-secondary,
+  .btn-danger,
+  .btn-outline-light {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 border font-bold uppercase no-underline transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    font-size: var(--fs-label);
+    line-height: 1.2;
+    letter-spacing: var(--letter-spacing-ui);
+    padding: var(--btn-padding);
+  }
+  .btn {
+    @apply border-gold bg-gold text-white hover:border-gold-dark hover:bg-gold-dark hover:text-white;
+  }
+  .btn-secondary {
+    @apply border-navy bg-transparent text-navy hover:bg-navy hover:text-white;
   }
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50;
+    @apply border-danger bg-transparent text-danger hover:bg-danger hover:text-white;
   }
-  .btn-danger:hover {
-    @apply text-red-800;
+  .btn-outline-light {
+    @apply border-white bg-transparent text-white hover:bg-white hover:text-navy;
   }
   .btn-sm {
-    @apply px-3 py-1.5 text-xs;
+    padding: 6px 16px;
+    font-size: 12px;
   }
+
+  /* Navigation på mørk flade: små versaler med letter-spacing, guld på aktiv */
+  .nav-link {
+    @apply font-semibold uppercase text-on-dark-soft no-underline transition-colors hover:text-white;
+    font-size: 12px;
+    letter-spacing: var(--letter-spacing-ui);
+  }
+  .nav-link-active {
+    @apply text-gold hover:text-gold;
+  }
+  .on-dark a.nav-link {
+    @apply text-on-dark-soft;
+  }
+  .on-dark a.nav-link:hover {
+    @apply text-white;
+  }
+  .on-dark a.nav-link-active {
+    @apply text-gold;
+  }
+
+  /* Formularfelter: firkantede, 1 px kant, guld ved fokus */
   .input {
-    @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30;
+    @apply block w-full border border-slate bg-white px-3 py-2 text-ink;
+    font-size: var(--fs-body);
+    line-height: 1.5;
+  }
+  .input:focus,
+  .input:focus-visible {
+    @apply border-gold;
+    outline: 1px solid var(--color-gold);
+    outline-offset: 0;
+  }
+  select.input {
+    @apply pr-8;
   }
   .label {
-    @apply mb-1 block text-sm font-medium text-slate-700;
+    @apply mb-1 block font-bold uppercase text-navy;
+    font-size: 12px;
+    letter-spacing: var(--letter-spacing-ui);
   }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--color-navy);
+  }
+
+  /* Kort og paneler: firkantede. Skygge kun på .panel (boksede paneler). */
   .card {
-    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6;
+    @apply border border-grey-bg bg-white p-5 sm:p-6;
   }
+  .band-grey .card,
+  main.app-main .card {
+    @apply border-transparent;
+  }
+  .panel {
+    @apply bg-white p-5 shadow-panel sm:p-8;
+  }
+  .card-title {
+    @apply mb-1;
+  }
+
+  /* Statusmærker: firkantede, versal, små */
   .badge {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center border px-2 py-0.5 font-bold uppercase;
+    font-size: 11px;
+    line-height: 1.4;
+    letter-spacing: 0.08em;
   }
+  .badge-navy {
+    @apply border-navy bg-navy text-white;
+  }
+  .badge-outline {
+    @apply border-navy bg-white text-navy;
+  }
+  .badge-gold {
+    @apply border-gold-dark bg-white text-navy;
+  }
+  .badge-muted {
+    @apply border-slate bg-white text-muted;
+  }
+  .badge-danger {
+    @apply border-danger bg-danger text-white;
+  }
+
+  /* Meddelelser: hvid flade med 4 px kant i venstre side (som manualens do/don't-boks) */
+  .callout {
+    @apply border-l-4 border-gold bg-white px-4 py-3 text-ink;
+  }
+  .callout-error {
+    @apply border-danger text-danger;
+  }
+
+  /* Tabeller: navy linje under overskrifter, grå skillelinjer */
   .table-wrap {
-    @apply overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm;
+    @apply overflow-x-auto border border-grey-bg bg-white;
   }
   .table {
-    @apply min-w-full divide-y divide-slate-200 text-sm;
+    @apply min-w-full text-sm;
   }
   .table th {
-    @apply bg-slate-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply border-b border-navy bg-white px-4 py-3 text-left font-bold uppercase text-navy;
+    font-size: 12px;
+    letter-spacing: var(--letter-spacing-ui);
   }
   .table td {
     @apply px-4 py-3 align-top;
   }
   .table tbody tr {
-    @apply border-t border-slate-100;
+    @apply border-t border-grey-bg;
   }
 }

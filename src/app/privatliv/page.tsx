@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
+import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
 
 export const metadata: Metadata = { title: "Privatlivspolitik" };
 
 export default function Privatliv() {
   return (
-    <PageShell>
+    <PageShell variant="bare">
+      <Band tone="white">
+      <div className="max-w-3xl">
       <h1>Privatlivspolitik</h1>
-      <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+      <p className="callout mt-space-4 text-sm">
         Skabelon – skal gennemgås og tilpasses af jurist før lancering.
       </p>
-      <div className="mt-6 space-y-5 text-sm leading-6 text-slate-700">
+      <div className="mt-space-5 space-y-6 text-ink">
         <section>
           <h2>Dataansvarlig</h2>
           <p>Advisory Board Unlimited [firmanavn, CVR, adresse, kontakt-e-mail] er dataansvarlig for behandlingen af dine personoplysninger.</p>
@@ -50,6 +53,8 @@ export default function Privatliv() {
           </p>
         </section>
       </div>
+      </div>
+      </Band>
     </PageShell>
   );
 }

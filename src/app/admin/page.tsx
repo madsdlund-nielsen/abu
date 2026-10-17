@@ -33,15 +33,15 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
       <Flash ok={ok} err={err} />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {stats.map(([label, value, href]) => (
-          <Link key={label} href={href} className="card block text-slate-900 hover:border-brand-500 hover:text-slate-900">
-            <p className="text-sm text-slate-500">{label}</p>
-            <p className="mt-1 text-2xl font-semibold">{value}</p>
+          <Link key={label} href={href} className="card block no-underline hover:bg-white">
+            <p className="label !mb-0">{label}</p>
+            <p className="mt-1 text-3xl font-light text-navy">{value}</p>
           </Link>
         ))}
       </div>
       <section className="card">
         <h2>Baggrundsjobs</h2>
-        <p className="mt-2 text-sm text-slate-600">{pendingJobs} afventer, {failedJobs} fejlet.</p>
+        <p className="mt-2 text-sm text-muted">{pendingJobs} afventer, {failedJobs} fejlet.</p>
         <form action={processJobsAction} className="mt-3">
           <button className="btn-secondary" type="submit">Kør ventende jobs nu</button>
         </form>

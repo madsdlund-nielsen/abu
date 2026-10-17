@@ -9,7 +9,7 @@ export default async function NewAdvisor({ searchParams }: { searchParams: SP })
   return (
     <div className="max-w-xl">
       <h1>Opret rådgiver</h1>
-      <p className="mt-2 text-sm text-slate-600">Rådgiveren får et invitationslink på e-mail og vælger selv sin adgangskode.</p>
+      <p className="mt-2 text-sm text-muted">Rådgiveren får et invitationslink på e-mail og vælger selv sin adgangskode.</p>
       <div className="card mt-6">
         <Flash err={err} />
         <form action={createAdvisorAction} className="grid gap-4">

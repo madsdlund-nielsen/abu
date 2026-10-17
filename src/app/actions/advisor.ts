@@ -1,11 +1,10 @@
 "use server";
 
-import { fromZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirectWith } from "@/lib/redirect";
-import { hhmmToMinutes, TZ } from "@/lib/time";
+import { hhmmToMinutes, parseDanishDateTime } from "@/lib/time";
 
 export async function updateProfileAction(formData: FormData) {
   const user = await requireRole("ADVISOR");
@@ -53,15 +52,11 @@ export async function deleteRuleAction(formData: FormData) {
 
 export async function addBlockAction(formData: FormData) {
   const user = await requireRole("ADVISOR");
-  const from = String(formData.get("from") ?? "");
-  const to = String(formData.get("to") ?? "");
-  if (!from || !to) redirectWith("/availability", "err", "Angiv fra og til.");
-  // datetime-local -> Copenhagen-lokal tid
-  const startsAt = fromZonedTime(from, TZ);
-  const endsAt = fromZonedTime(to, TZ);
-  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) {
-    redirectWith("/availability", "err", "Slut skal være efter start.");
-  }
+  // Dato som "dd.mm.åååå" og klokkeslæt som "HH:mm", begge tolket som Europe/Copenhagen
+  const startsAt = parseDanishDateTime(String(formData.get("fromDate") ?? ""), String(formData.get("fromTime") ?? ""));
+  const endsAt = parseDanishDateTime(String(formData.get("toDate") ?? ""), String(formData.get("toTime") ?? ""));
+  if (!startsAt || !endsAt) redirectWith("/availability", "err", "Angiv fra og til som dd.mm.åååå og klokkeslæt.");
+  if (endsAt <= startsAt) redirectWith("/availability", "err", "Slut skal være efter start.");
   await prisma.availabilityBlock.create({
     data: { advisorId: user.id, startsAt, endsAt, reason: String(formData.get("reason") ?? "").slice(0, 200) },
   });

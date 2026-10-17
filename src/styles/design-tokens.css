@@ -1,0 +1,68 @@
+/*
+ * Design tokens – Advisory Board Unlimited (Designmanual v1.2, august 2026).
+ * Navne og værdier følger manualen. Hardcod aldrig farve, font, radius eller spacing i en komponent: referér token.
+ */
+:root {
+  /* Farver (manual s. 10) */
+  --color-navy: #263753;
+  --color-charcoal: #1a2528;
+  --color-gold: #b4965d;
+  --color-gold-dark: #a3854f;
+  --color-topbar-navy: #222f4a;
+  --color-white: #ffffff;
+  --color-text: #333333;
+  --color-text-muted: #4e4e4e;
+  --color-grey-bg: #eeeeee;
+  --color-slate: #6d838a;
+  /*
+   * Manualen (s. 15): #1E73BE er WordPress-standardblå, ikke en brandbeslutning. Tokenet findes, men bruges ikke:
+   * tekstlinks er navy (11,97:1) med understregning og guld-mørk ved hover.
+   */
+  --color-link: #1e73be;
+
+  /*
+   * Udvidelse uden for manualen: funktionsfarve til fejl/destruktive handlinger (manualen har ingen rød i paletten).
+   * Kontrast mod hvid 8,0:1. Bruges kun til fejlmeddelelser og "Aflys/Fjern".
+   */
+  --color-danger: #9b1c1c;
+
+  /* Overlays (manual s. 11) */
+  --overlay-navy: rgba(38, 55, 83, 0.85);
+  --divider-light: rgba(255, 255, 255, 0.15);
+  --text-on-dark-soft: rgba(255, 255, 255, 0.8);
+  --tint-steel: rgba(105, 126, 165, 0.6);
+
+  /* Form, spacing, bredder (manual s. 13) */
+  --radius: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 40px;
+  --space-6: 64px;
+  --space-section: 90px;
+  --container-max: 1160px;
+  --btn-padding: 10px 38px;
+  --letter-spacing-ui: 1px;
+  --shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  /* Typografi (manual s. 12) */
+  --font-sans: "Open Sans", system-ui, sans-serif;
+  --fs-h1-hero: 61px;
+  --fs-h2: 45px;
+  --fs-h3: 24px;
+  --fs-body: 16px;
+  --fs-label: 14px;
+  /* Fokusfarve: guld-mørk på lyse flader (3,49:1), guld på mørke (5,57:1). */
+  --focus-color: var(--color-gold-dark);
+}
+
+/* Mobil: overskrifter skaleres ned, ellers uændret */
+@media (max-width: 767px) {
+  :root {
+    --fs-h1-hero: 38px;
+    --fs-h2: 32px;
+    --fs-h3: 21px;
+    --space-section: 64px;
+  }
+}

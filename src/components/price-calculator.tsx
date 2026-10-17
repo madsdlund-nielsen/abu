@@ -11,9 +11,10 @@ export function PriceCalculator() {
   const meetingsPerYear = Math.round(52 / weeks);
 
   return (
-    <div className="card">
+    <div className="panel">
       <h2>Beregn din pris</h2>
-      <div className="mt-4 grid gap-6 sm:grid-cols-2">
+      <span className="rule-gold mt-3" aria-hidden="true" />
+      <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <fieldset>
           <legend className="label">Antal rådgivere</legend>
           <div className="flex gap-2">
@@ -23,8 +24,8 @@ export function PriceCalculator() {
                 type="button"
                 onClick={() => setAdvisors(n)}
                 aria-pressed={advisors === n}
-                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
-                  advisors === n ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-300 bg-white text-slate-700"
+                className={`flex-1 border px-3 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
+                  advisors === n ? "border-navy bg-navy text-white" : "border-slate bg-white text-navy hover:border-navy"
                 }`}
               >
                 {n}
@@ -41,8 +42,8 @@ export function PriceCalculator() {
                 type="button"
                 onClick={() => setWeeks(w)}
                 aria-pressed={weeks === w}
-                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
-                  weeks === w ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-300 bg-white text-slate-700"
+                className={`flex-1 border px-3 py-3 text-sm font-bold uppercase tracking-wide transition-colors ${
+                  weeks === w ? "border-navy bg-navy text-white" : "border-slate bg-white text-navy hover:border-navy"
                 }`}
               >
                 Hver {w}. uge
@@ -51,14 +52,14 @@ export function PriceCalculator() {
           </div>
         </fieldset>
       </div>
-      <div className="mt-6 rounded-lg bg-brand-50 p-4">
-        <p className="text-sm text-slate-600">Din månedlige pris (ekskl. moms)</p>
-        <p className="text-3xl font-semibold text-brand-700" data-testid="price">{formatDkk(price)} / md.</p>
-        <p className="mt-1 text-xs text-slate-500">
+      <div className="mt-6 border-t border-navy pt-space-4">
+        <p className="text-sm text-muted">Din månedlige pris (ekskl. moms)</p>
+        <p className="text-4xl font-light text-navy" data-testid="price">{formatDkk(price)} / md.</p>
+        <p className="mt-1 text-xs text-muted">
           {advisors} rådgivere · ca. {meetingsPerYear} møder om året · 1.750 kr. pr. rådgiver pr. møde
         </p>
       </div>
-      <Link href="/signup" className="btn mt-4 w-full sm:w-auto">
+      <Link href="/signup" className="btn mt-6 w-full sm:w-auto">
         Kom i gang
       </Link>
     </div>

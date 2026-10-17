@@ -1,16 +1,16 @@
 import type { MeetingStatus, SubscriptionStatus } from "@prisma/client";
 
 const SUB: Record<SubscriptionStatus, [string, string]> = {
-  PENDING: ["Afventer betaling", "bg-amber-100 text-amber-800"],
-  ACTIVE: ["Aktivt", "bg-emerald-100 text-emerald-800"],
-  PAST_DUE: ["Betaling mangler", "bg-red-100 text-red-800"],
-  CANCELLED: ["Opsagt", "bg-slate-200 text-slate-700"],
+  PENDING: ["Afventer betaling", "badge-gold"],
+  ACTIVE: ["Aktivt", "badge-navy"],
+  PAST_DUE: ["Betaling mangler", "badge-danger"],
+  CANCELLED: ["Opsagt", "badge-muted"],
 };
 
 const MEET: Record<MeetingStatus, [string, string]> = {
-  BOOKED: ["Booket", "bg-sky-100 text-sky-800"],
-  COMPLETED: ["Afholdt", "bg-emerald-100 text-emerald-800"],
-  CANCELLED: ["Aflyst", "bg-slate-200 text-slate-700"],
+  BOOKED: ["Booket", "badge-outline"],
+  COMPLETED: ["Afholdt", "badge-navy"],
+  CANCELLED: ["Aflyst", "badge-muted"],
 };
 
 export function SubStatusBadge({ status }: { status: SubscriptionStatus }) {
@@ -23,10 +23,11 @@ export function MeetingStatusBadge({ status }: { status: MeetingStatus }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
+/** Rådgiverfoto eller initialer i en firkantet flade (radius 0 overalt). */
 export function Initials({ name, url }: { name: string; url?: string }) {
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={name} className="h-12 w-12 rounded-full object-cover" referrerPolicy="no-referrer" />;
+    return <img src={url} alt={name} className="h-12 w-12 object-cover" referrerPolicy="no-referrer" />;
   }
   const initials = name
     .split(" ")
@@ -34,12 +35,13 @@ export function Initials({ name, url }: { name: string; url?: string }) {
     .slice(0, 2)
     .join("");
   return (
-    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-700">
+    <span className="flex h-12 w-12 shrink-0 items-center justify-center bg-navy text-sm font-semibold uppercase text-white" aria-hidden="true">
       {initials}
     </span>
   );
 }
 
+/** Tom tilstand: firkantet panel med stiplet kant, rolig tekst. */
 export function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">{children}</p>;
+  return <p className="border border-dashed border-slate bg-white p-space-5 text-center text-muted">{children}</p>;
 }

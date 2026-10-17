@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { addBlockAction, addRuleAction, deleteBlockAction, deleteRuleAction } from "@/app/actions/advisor";
+import { DateTimeField, TimeSelect } from "@/components/date-time-field";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -20,15 +21,15 @@ export default async function AvailabilityPage({ searchParams }: { searchParams:
   return (
     <div className="space-y-6">
       <h1>Tilgængelighed</h1>
-      <p className="text-sm text-slate-600">Alle tider er dansk tid (Europe/Copenhagen). Kunder kan kun booke tider, der ligger helt inde i et af dine tidsrum.</p>
+      <p className="text-muted">Alle tider er dansk tid (Europe/Copenhagen). Datoer skrives som dd.mm.åååå og klokkeslæt i 24-timers format. Kunder kan kun booke tider, der ligger helt inde i et af dine tidsrum.</p>
       <Flash ok={ok} err={err} />
 
       <section className="card">
         <h2>Faste ugentlige tidsrum</h2>
         {rules.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">Ingen tidsrum endnu.</p>
+          <p className="mt-3 text-sm text-muted">Ingen tidsrum endnu.</p>
         ) : (
-          <ul className="mt-3 divide-y divide-slate-100 text-sm">
+          <ul className="mt-3 divide-y divide-grey-bg text-sm">
             {rules.map((r) => (
               <li key={r.id} className="flex items-center justify-between py-2">
                 <span><strong className="inline-block w-24">{WEEKDAY_NAMES[r.weekday]}</strong> {minutesToHHMM(r.startMinute)}–{minutesToHHMM(r.endMinute)}</span>
@@ -51,11 +52,11 @@ export default async function AvailabilityPage({ searchParams }: { searchParams:
           </div>
           <div>
             <label className="label" htmlFor="start">Fra</label>
-            <input className="input" id="start" name="start" type="time" defaultValue="09:00" required />
+            <TimeSelect id="start" name="start" defaultValue="09:00" />
           </div>
           <div>
             <label className="label" htmlFor="end">Til</label>
-            <input className="input" id="end" name="end" type="time" defaultValue="16:00" required />
+            <TimeSelect id="end" name="end" defaultValue="16:00" allowEndOfDay />
           </div>
           <div className="flex items-end"><button className="btn w-full" type="submit">Tilføj</button></div>
         </form>
@@ -64,12 +65,12 @@ export default async function AvailabilityPage({ searchParams }: { searchParams:
       <section className="card">
         <h2>Fravær og blokerede perioder</h2>
         {blocks.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">Ingen kommende blokeringer.</p>
+          <p className="mt-3 text-sm text-muted">Ingen kommende blokeringer.</p>
         ) : (
-          <ul className="mt-3 divide-y divide-slate-100 text-sm">
+          <ul className="mt-3 divide-y divide-grey-bg text-sm">
             {blocks.map((b) => (
               <li key={b.id} className="flex items-center justify-between gap-3 py-2">
-                <span>{formatDateTime(b.startsAt)} → {formatDateTime(b.endsAt)}{b.reason && <em className="text-slate-500"> · {b.reason}</em>}</span>
+                <span>{formatDateTime(b.startsAt)} – {formatDateTime(b.endsAt)}{b.reason && <em className="text-muted"> · {b.reason}</em>}</span>
                 <form action={deleteBlockAction}>
                   <input type="hidden" name="id" value={b.id} />
                   <button className="btn-danger btn-sm" type="submit">Fjern</button>
@@ -78,15 +79,9 @@ export default async function AvailabilityPage({ searchParams }: { searchParams:
             ))}
           </ul>
         )}
-        <form action={addBlockAction} className="mt-5 grid gap-3 sm:grid-cols-4">
-          <div>
-            <label className="label" htmlFor="from">Fra</label>
-            <input className="input" id="from" name="from" type="datetime-local" required />
-          </div>
-          <div>
-            <label className="label" htmlFor="to">Til</label>
-            <input className="input" id="to" name="to" type="datetime-local" required />
-          </div>
+        <form action={addBlockAction} className="mt-5 grid gap-4 sm:grid-cols-2">
+          <DateTimeField name="from" label="Fra" />
+          <DateTimeField name="to" label="Til" />
           <div>
             <label className="label" htmlFor="reason">Årsag (valgfri)</label>
             <input className="input" id="reason" name="reason" maxLength={200} />

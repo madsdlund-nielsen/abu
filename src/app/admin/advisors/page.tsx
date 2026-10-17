@@ -18,9 +18,9 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
       </div>
       <Flash ok={ok} err={err} />
       {invite && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+        <div className="callout text-sm">
           <p className="font-medium">Invitationslink (vises kun fordi e-mail kører i konsol-tilstand eller ikke kunne sendes):</p>
-          <p className="mt-2 break-all rounded bg-white p-2 font-mono text-xs" data-testid="invite-link">{invite}</p>
+          <p className="mt-2 break-all bg-grey-bg p-2 font-mono text-xs" data-testid="invite-link">{invite}</p>
         </div>
       )}
       <div className="table-wrap">
@@ -33,14 +33,14 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
               <tr key={a.userId}>
                 <td>
                   <p className="font-medium">{a.user.name}</p>
-                  <p className="text-xs text-slate-500">{a.user.email}</p>
+                  <p className="text-xs text-muted">{a.user.email}</p>
                 </td>
                 <td>{a.title}</td>
                 <td>
-                  <span className={`badge ${a.active ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"}`}>
+                  <span className={`badge ${a.active ? "badge-navy" : "badge-muted"}`}>
                     {a.active ? "Aktiv" : "Inaktiv"}
                   </span>
-                  {!a.user.passwordHash && <span className="badge ml-1 bg-amber-100 text-amber-800">Ikke accepteret</span>}
+                  {!a.user.passwordHash && <span className="badge badge-gold ml-1">Ikke accepteret</span>}
                 </td>
                 <td>
                   <div className="flex justify-end gap-2">

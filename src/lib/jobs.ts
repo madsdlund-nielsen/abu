@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { completePastMeetings } from "./meeting-status";
 
 type Handler = (payload: Record<string, unknown>) => Promise<void>;
 const handlers = new Map<string, Handler>();
@@ -39,6 +40,8 @@ async function claimNext() {
 
 export async function processJobs(limit = 5): Promise<number> {
   await import("./pipeline"); // registrerer handlers
+  // Idempotent oprydning: BOOKED møder, der er slut, bliver COMPLETED.
+  await completePastMeetings().catch((e) => console.error("[jobs] completePastMeetings fejlede", e));
   let done = 0;
   for (let i = 0; i < limit; i++) {
     const job = await claimNext();

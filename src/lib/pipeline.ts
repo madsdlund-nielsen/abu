@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getEnv } from "./env";
+import { statusAfterTranscription } from "./meeting-status";
 import { registerJobHandler } from "./jobs";
 import { getStorage } from "./storage";
 import { getTranscriber } from "./transcription";
@@ -31,7 +32,12 @@ export async function transcribeRecording(recordingId: string) {
       },
       update: { text: result.text, segments: segmentsJson, summary, language: result.language },
     });
-    await prisma.meeting.update({ where: { id: rec.meetingId }, data: { status: "COMPLETED" } });
+    // Kun COMPLETED hvis mødet er slut; ellers klarer completePastMeetings det, når tiden er gået.
+    const meeting = await prisma.meeting.findUnique({ where: { id: rec.meetingId }, select: { status: true, endsAt: true } });
+    if (meeting) {
+      const next = statusAfterTranscription(meeting, new Date());
+      if (next !== meeting.status) await prisma.meeting.update({ where: { id: rec.meetingId }, data: { status: next } });
+    }
 
     let deleteKey: string | null = null;
     if (getEnv().DELETE_RECORDINGS_AFTER_TRANSCRIPTION) {

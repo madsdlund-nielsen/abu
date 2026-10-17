@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
+import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
 
 export const metadata: Metadata = { title: "Vilkår" };
 
 export default function Vilkaar() {
   return (
-    <PageShell>
+    <PageShell variant="bare">
+      <Band tone="white">
+      <div className="max-w-3xl">
       <h1>Vilkår</h1>
-      <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+      <p className="callout mt-space-4 text-sm">
         Skabelon – skal gennemgås og tilpasses af jurist før lancering.
       </p>
-      <div className="mt-6 space-y-5 text-sm leading-6 text-slate-700">
+      <div className="mt-space-5 space-y-6 text-ink">
         <section>
           <h2>1. Ydelsen</h2>
           <p>Advisory Board Unlimited leverer rådgivningsmøder med et antal rådgivere og en mødefrekvens, som kunden vælger ved tilmelding.</p>
@@ -39,6 +42,8 @@ export default function Vilkaar() {
           <p>[Ansvarsbegrænsning, fortrolighed og lovvalg indsættes.]</p>
         </section>
       </div>
+      </div>
+      </Band>
     </PageShell>
   );
 }
