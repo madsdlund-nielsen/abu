@@ -10,7 +10,7 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Ikke logget ind" }, { status: 401 });
 
-  const [full, meetings, auditLog, onboardingSessions] = await Promise.all([
+  const [full, meetings, auditLog, onboardingSessions, notificationLog, marketingConsents, lead] = await Promise.all([
     prisma.user.findUniqueOrThrow({
       where: { id: user.id },
       include: {
@@ -29,12 +29,21 @@ export async function GET() {
       where: { data: { path: ["contact", "email"], equals: user.email } },
       select: { id: true, step: true, data: true, answers: true, suggestedBoard: true, createdAt: true, expiresAt: true },
     }),
+    // Beskeder (e-mail/SMS) sendt til brugeren. Samtykker og afmeldinger ligger på brugeren (recordingConsent*, emailOptOutAt, smsOptOutAt).
+    prisma.notificationLog.findMany({
+      where: { recipientUserId: user.id },
+      select: { id: true, trigger: true, templateKey: true, channel: true, recipientAddress: true, status: true, subject: true, preview: true, error: true, scheduledFor: true, sentAt: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    // Markedsføringssamtykker med den tekst og version, du accepterede, og evt. tilbagetrækning
+    prisma.marketingConsent.findMany({ where: { OR: [{ userId: user.id }, { email: { equals: user.email, mode: "insensitive" } }] }, orderBy: { consentedAt: "asc" } }),
+    prisma.lead.findUnique({ where: { email: user.email.toLowerCase() } }),
   ]);
   // passwordHash udelades bevidst
   const { passwordHash, ...profile } = full;
   void passwordHash;
   await audit(user.id, "user.export", "User", user.id);
-  return new NextResponse(JSON.stringify({ exportedAt: new Date().toISOString(), user: profile, meetings, onboardingSessions, auditLog }, null, 2), {
+  return new NextResponse(JSON.stringify({ exportedAt: new Date().toISOString(), user: profile, meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog }, null, 2), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Disposition": 'attachment; filename="abu-mine-data.json"',

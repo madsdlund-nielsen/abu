@@ -124,3 +124,27 @@ export function computeSlots(advisors: AdvisorAvailability[], opts: SlotOptions)
   }
   return result;
 }
+
+/**
+ * Hvorfor er en enkelt rådgiver ikke ledig i [start, start+varighed)? Samme regler som isSlotFreeForAll, men med en forklaring
+ * (til admins kandidatliste). null = ledig.
+ */
+export function explainSlotConflict(
+  advisor: AdvisorAvailability,
+  start: Date,
+  durationMinutes: number,
+  bufferMinutes: number = DEFAULTS.bufferMinutes,
+): string | null {
+  const end = new Date(start.getTime() + durationMinutes * 60_000);
+  const startMin = minutesSinceLocalMidnight(start);
+  const endMin = startMin + durationMinutes;
+  const weekday = isoWeekday(start);
+  if (endMin > 1440) return "Mødet krydser midnat";
+  if (!advisor.rules.some((r) => r.weekday === weekday && r.startMinute <= startMin && endMin <= r.endMinute)) return "Udenfor tilgængelighed";
+  if (advisor.blocks.some((b) => overlaps(start, end, b.startsAt, b.endsAt))) return "Har fravær";
+  const bufMs = bufferMinutes * 60_000;
+  if (advisor.meetings.some((m) => overlaps(start, end, new Date(m.startsAt.getTime() - bufMs), new Date(m.endsAt.getTime() + bufMs)))) {
+    return "Har et andet møde";
+  }
+  return null;
+}

@@ -18,10 +18,11 @@ export interface BuilderTag {
   name: string;
 }
 
-export async function loadCatalog(): Promise<{ advisors: BuilderAdvisor[]; tags: BuilderTag[] }> {
+/** `includeIds`: rådgivere, der skal med, selv om de er inaktive (admin ser et eksisterende board). */
+export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise<{ advisors: BuilderAdvisor[]; tags: BuilderTag[] }> {
   const [profiles, tags] = await Promise.all([
     prisma.advisorProfile.findMany({
-      where: { active: true },
+      where: opts.includeIds?.length ? { OR: [{ active: true }, { userId: { in: opts.includeIds } }] } : { active: true },
       include: { user: true, tags: { include: { tag: true } } },
       orderBy: { user: { name: "asc" } },
     }),

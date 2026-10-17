@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cancelMeetingAction, retryRecordingAction, uploadRecordingAction } from "@/app/actions/meetings";
 import { Flash, flashFrom, type SP } from "@/components/flash";
+import { AutoRefresh, JoinCountdown } from "@/components/join-countdown";
 import { RoomEmbed } from "@/components/room-embed";
 import { MeetingStatusBadge } from "@/components/ui";
+import Link from "next/link";
 import { canAccessMeeting } from "@/lib/access";
+import { hasRecordingConsent } from "@/lib/consent";
+import { joinEarlyMinutes, joinOpensAt, meetingJoinState } from "@/lib/meeting-join";
 import { recordingUploadDecision } from "@/lib/meeting-status";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -39,7 +43,14 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
     meeting.status === "BOOKED" &&
     meeting.startsAt > new Date() &&
     (user.role === "ADMIN" || meeting.subscription.customerId === user.id);
+  const now = new Date();
+  const join = meetingJoinState(meeting, now);
+  const opensAt = joinOpensAt(meeting, joinEarlyMinutes());
   const roomUrl = isStaff ? (meeting.hostRoomUrl ?? meeting.roomUrl) : meeting.roomUrl;
+  const processing = meeting.recordings.some((r) => r.status === "RECEIVED" || r.status === "TRANSCRIBING");
+  const consented = hasRecordingConsent(user);
+  // Et møde, hvis tid er gået, vises som afholdt, også før jobkøen har opdateret statussen
+  const shownStatus = join === "ended" && meeting.status === "BOOKED" ? "COMPLETED" : meeting.status;
   const advisors = meeting.participants.filter((p) => p.user.role === "ADVISOR");
 
   if (meeting.transcript) await audit(user.id, "transcript.view", "Transcript", meeting.transcript.id);
@@ -54,7 +65,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
             Varighed: {formatTime(meeting.startsAt)}–{formatTime(meeting.endsAt)} · {meeting.subscription.customer.companyName}
           </p>
         </div>
-        <MeetingStatusBadge status={meeting.status} />
+        <MeetingStatusBadge status={shownStatus} />
       </div>
       <Flash ok={ok} err={err} />
 
@@ -66,12 +77,73 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         </ul>
       </section>
 
-      {meeting.status !== "CANCELLED" && roomUrl && (
-        <section className="card">
-          <h2>Videomøde</h2>
-          <div className="mt-4">
-            <RoomEmbed url={roomUrl} mock={roomUrl.startsWith(MOCK_ROOM_PREFIX)} />
+      {user.role === "ADMIN" && (
+        <p className="text-sm"><Link href={`/admin/meetings/${meeting.id}`}>Administrer mødet (udskift rådgiver, flyt, aflys på kundens vegne)</Link></p>
+      )}
+
+      {join === "not_open_yet" && (
+        <section className="card" data-testid="join-not-open" data-state="not_open_yet">
+          <span className="eyebrow">Videomøde</span>
+          <h2 className="text-xl font-light">Mødet er ikke åbnet endnu</h2>
+          <span className="rule-gold mt-3" aria-hidden="true" />
+          <div className="mt-space-3">
+            <JoinCountdown opensAtIso={opensAt.toISOString()} opensAtLabel={formatTime(opensAt)} />
           </div>
+          <p className="mt-space-3 text-sm text-muted">Mødet optages og transskriberes automatisk.</p>
+        </section>
+      )}
+
+      {join === "open" && (
+        <section className="card" data-testid="join-open" data-state="open">
+          <span className="eyebrow">Videomøde</span>
+          <h2 className="text-xl font-light">Mødet er åbent</h2>
+          <span className="rule-gold mt-3" aria-hidden="true" />
+          <p className="mt-space-3 text-sm text-muted" data-testid="recording-info">Mødet optages og transskriberes automatisk.</p>
+          <div className="mt-space-3">
+            {!consented ? (
+              <div className="callout callout-error text-sm" role="alert" data-testid="consent-missing">
+                <p className="font-semibold">Du skal give samtykke til optagelse, før du kan deltage.</p>
+                <p className="mt-1 text-ink">Vi har ikke registreret dit samtykke til, at møder optages og transskriberes. Det tager et øjeblik.</p>
+                <Link className="btn mt-3" href={`/samtykke?next=${encodeURIComponent(`/meetings/${meeting.id}`)}`}>Giv samtykke</Link>
+              </div>
+            ) : roomUrl ? (
+              <RoomEmbed url={roomUrl} mock={roomUrl.startsWith(MOCK_ROOM_PREFIX)} />
+            ) : (
+              <p className="text-sm text-muted">Videorummet er ikke klar. Prøv igen om lidt.</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {join === "ended" && (
+        <section className="card" data-testid="join-ended" data-state="ended">
+          <span className="eyebrow">Afholdt</span>
+          <h2 className="text-xl font-light">Mødet er afholdt</h2>
+          <span className="rule-gold mt-3" aria-hidden="true" />
+          <p className="mt-space-3 text-sm text-muted" data-testid="ended-note">
+            {meeting.transcript
+              ? "Resumé og transskription finder du herunder."
+              : processing
+                ? "Transskription behandles. Siden opdateres automatisk, når den er klar."
+                : "Resumé og transskription foreligger, når optagelsen er modtaget og behandlet."}
+          </p>
+          {processing && !meeting.transcript && (
+            <>
+              <p className="mt-2 text-sm font-semibold text-navy" data-testid="processing">Transskription behandles …</p>
+              <AutoRefresh seconds={10} />
+            </>
+          )}
+        </section>
+      )}
+
+      {join === "cancelled" && (
+        <section className="card" data-testid="join-cancelled" data-state="cancelled">
+          <span className="eyebrow">Aflyst</span>
+          <h2 className="text-xl font-light">Mødet er aflyst</h2>
+          <span className="rule-gold mt-3" aria-hidden="true" />
+          <p className="mt-space-3 text-sm text-muted">
+            {meeting.cancelledAt ? `Aflyst ${formatDateTime(meeting.cancelledAt)}. ` : ""}Der er ikke noget videomøde til dette tidspunkt.
+          </p>
         </section>
       )}
 
@@ -88,6 +160,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         </section>
       )}
 
+      {(join === "ended" || meeting.transcript) && (
       <section className="card">
         <h2>Resumé</h2>
         {meeting.transcript?.summary ? (
@@ -96,6 +169,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
           <p className="mt-2 text-sm text-muted">Resumé foreligger, når mødet er afholdt og optagelsen er transskriberet.</p>
         )}
       </section>
+      )}
 
       {meeting.transcript && (
         <section className="card">

@@ -40,7 +40,7 @@ export class CvrapiCvr implements CvrProvider {
         signal: AbortSignal.timeout(8000),
       });
       if (res.status === 404) return { kind: "not_found" };
-      if (res.status === 429) return { kind: "error", message: "Kvoten hos cvrapi.dk er opbrugt." };
+      if (res.status === 429) return { kind: "error", message: "Kvoten hos cvrapi.dk er opbrugt.", quota: true };
       if (!res.ok) return { kind: "error", message: `cvrapi.dk svarede ${res.status}.` };
       const json = (await res.json()) as Obj;
       if (json.error) return json.error === "NOT_FOUND" ? { kind: "not_found" } : { kind: "error", message: String(json.error) };

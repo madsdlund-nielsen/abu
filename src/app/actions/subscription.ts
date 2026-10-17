@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { startCheckout } from "@/lib/checkout";
 import { resolveBoard } from "@/lib/onboarding/board";
 import { getPayments } from "@/lib/payments";
+import { subscriptionEvents } from "@/lib/notifications/service";
 import { planHandle } from "@/lib/pricing";
 import { redirectWith } from "@/lib/redirect";
 import { getCustomerSubscription } from "@/lib/subscriptions";
@@ -67,6 +68,11 @@ export async function changePlanAction(formData: FormData) {
     }),
   ]);
   await audit(user.id, "subscription.change_plan", "Subscription", sub.id);
+  const before = new Set(sub.advisors.map((a) => a.advisorId));
+  const after = new Set(board.advisors.map((a) => a.id));
+  const addedIds = [...after].filter((id) => !before.has(id));
+  const removedIds = [...before].filter((id) => !after.has(id));
+  if (addedIds.length || removedIds.length) await subscriptionEvents.boardChanged(sub.id, { addedIds, removedIds });
   redirectWith(back, "ok", "Dit board er opdateret. Allerede bookede møder med fjernede rådgivere bør aflyses og bookes igen.");
 }
 

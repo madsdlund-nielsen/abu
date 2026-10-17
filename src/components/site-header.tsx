@@ -24,6 +24,8 @@ const NAV: Record<string, NavItem[]> = {
     { href: "/admin/onboarding", label: "Onboarding" },
     { href: "/admin/tags", label: "Tags" },
     { href: "/admin/customers", label: "Kunder" },
+    { href: "/admin/leads", label: "Leads" },
+    { href: "/admin/notifikationer", label: "Notifikationer" },
     { href: "/admin/subscriptions", label: "Abonnementer" },
     { href: "/admin/meetings", label: "Møder" },
     { href: "/account", label: "Konto" },

@@ -46,6 +46,7 @@ export const accountSchema = z
     password: z.string().min(MIN_PASSWORD_LENGTH, `Adgangskoden skal være mindst ${MIN_PASSWORD_LENGTH} tegn.`),
     confirm: z.string(),
     consent: z.literal("on", { error: "Du skal acceptere vilkår og privatlivspolitik for at fortsætte." }),
+    recordingConsent: z.literal("on", { error: "Du skal give samtykke til optagelse og transskription af møder for at fortsætte." }),
   })
   .refine((v) => v.password === v.confirm, { message: "Adgangskoderne er ikke ens.", path: ["confirm"] });
 

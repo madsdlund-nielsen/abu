@@ -14,9 +14,12 @@ import {
 import { Band } from "@/components/band";
 import { BoardBuilder } from "@/components/board-builder";
 import { Flash, flashFrom, type SP } from "@/components/flash";
-import { Stepper, STEP_LABELS } from "@/components/onboarding/stepper";
+import { Stepper } from "@/components/onboarding/stepper";
+import { Rich } from "@/components/rich";
 import { PageShell } from "@/components/site-header";
 import { getCurrentUser, MIN_PASSWORD_LENGTH } from "@/lib/auth";
+import { getOnboardingTexts } from "@/lib/content/server";
+import { interpolate, type OnboardingTexts } from "@/lib/content/onboarding-texts";
 import { resolveBoard } from "@/lib/onboarding/board";
 import { loadActiveQuestions, loadCatalog } from "@/lib/onboarding/catalog";
 import { asSuggestion, getOnboardingSession, TOTAL_STEPS, type OnboardingState } from "@/lib/onboarding/session";
@@ -26,33 +29,27 @@ import { formatDate } from "@/lib/time";
 export const metadata: Metadata = { title: "Kom i gang" };
 export const dynamic = "force-dynamic";
 
-const TITLES = [
-  "Hvem er du?",
-  "Fortæl om virksomheden",
-  "Bekræft din virksomhed",
-  "Hvad har I brug for?",
-  "Sammensæt dit board",
-  "Opret konto og betal",
-];
+type T = OnboardingTexts;
 
 export default async function KomIGang({ searchParams }: { searchParams: SP }) {
   const user = await getCurrentUser();
   if (user) redirect(user.role === "ADMIN" ? "/admin" : "/dashboard");
   const { err, one, params } = await flashFrom(searchParams);
-  const state = await getOnboardingSession();
+  const [state, t] = await Promise.all([getOnboardingSession(), getOnboardingTexts()]);
   const reached = state?.step ?? 1;
   const requested = Math.min(TOTAL_STEPS, Math.max(1, Number(one(params.trin)) || reached));
   const step = state ? Math.min(requested, reached) : 1;
   const wide = step === 5;
+  const labels = [1, 2, 3, 4, 5, 6].map((n) => t[`common.stepLabel${n}`]);
 
   return (
     <PageShell variant="bare">
       <Band tone="grey" tight className="min-h-[70vh]">
         <div className="mx-auto max-w-5xl pt-space-3 sm:pt-space-4">
-          <Stepper current={step} reached={reached} />
+          <Stepper current={step} reached={reached} labels={labels} />
           <div className={wide ? "" : "mx-auto max-w-xl"}>
-            <span className="eyebrow hidden sm:block">Trin {step} af {TOTAL_STEPS} · {STEP_LABELS[step - 1]}</span>
-            <h1 className="mb-space-4">{TITLES[step - 1]}</h1>
+            <span className="eyebrow hidden sm:block">{interpolate(t["common.eyebrow"], { n: step, total: TOTAL_STEPS, trin: labels[step - 1] })}</span>
+            <h1 className="mb-space-4">{t[`step${step}.title`]}</h1>
             {err &&
               (one(params.konto) ? (
                 <div role="alert" className="callout callout-error mb-space-4 text-sm">
@@ -61,12 +58,12 @@ export default async function KomIGang({ searchParams }: { searchParams: SP }) {
               ) : (
                 <Flash err={err} />
               ))}
-            {step === 1 && <StepContact state={state} n={one(params.n)} e={one(params.e)} />}
-            {step === 2 && state && <StepCompany state={state} cvr={one(params.cvr)} tlf={one(params.tlf)} />}
-            {step === 3 && state && <StepConfirm state={state} />}
-            {step === 4 && state && <StepTest state={state} q={Number(one(params.q)) || 1} />}
-            {step === 5 && state && <StepBoard state={state} />}
-            {step === 6 && state && <StepAccount state={state} />}
+            {step === 1 && <StepContact state={state} t={t} n={one(params.n)} e={one(params.e)} />}
+            {step === 2 && state && <StepCompany state={state} t={t} cvr={one(params.cvr)} tlf={one(params.tlf)} />}
+            {step === 3 && state && <StepConfirm state={state} t={t} />}
+            {step === 4 && state && <StepTest state={state} t={t} q={Number(one(params.q)) || 1} />}
+            {step === 5 && state && <StepBoard state={state} t={t} />}
+            {step === 6 && state && <StepAccount state={state} t={t} />}
           </div>
         </div>
       </Band>
@@ -74,63 +71,66 @@ export default async function KomIGang({ searchParams }: { searchParams: SP }) {
   );
 }
 
-function Back({ step, extra = "" }: { step: number; extra?: string }) {
+function Back({ step, extra = "", t }: { step: number; extra?: string; t: T }) {
   return (
     <Link href={`/kom-i-gang?trin=${step}${extra}`} className="btn-secondary">
-      Tilbage
+      {t["common.back"]}
     </Link>
   );
 }
 
-function StepContact({ state, n, e }: { state: OnboardingState | null; n?: string; e?: string }) {
+function StepContact({ state, t, n, e }: { state: OnboardingState | null; t: T; n?: string; e?: string }) {
   const c = state?.data.contact;
   return (
     <div className="panel">
-      <p className="mb-space-4 text-muted">Vi starter med dine kontaktoplysninger. Det tager under fem minutter at sætte dit board.</p>
+      <p className="mb-space-4 text-muted">{t["step1.intro"]}</p>
       <form action={saveContactAction} className="grid gap-4">
         <div>
-          <label className="label" htmlFor="name">Dit navn</label>
+          <label className="label" htmlFor="name">{t["step1.nameLabel"]}</label>
           <input className="input" id="name" name="name" required autoComplete="name" defaultValue={n ?? c?.name} />
         </div>
         <div>
-          <label className="label" htmlFor="email">E-mail</label>
+          <label className="label" htmlFor="email">{t["step1.emailLabel"]}</label>
           <input className="input" id="email" name="email" type="email" required autoComplete="email" defaultValue={e ?? c?.email} />
         </div>
+        <label className="flex items-start gap-3 text-sm text-muted">
+          {/* Aktivt samtykke: aldrig forudkrydset (markedsføringsloven/GDPR). Teksten gemmes ordret sammen med samtykket. */}
+          <input type="checkbox" name="contactConsent" className="mt-1 h-4 w-4 shrink-0" defaultChecked={state?.marketingConsent} />
+          <span><Rich text={t["step1.consent"]} /></span>
+        </label>
         <div className="flex items-center justify-between gap-3 pt-2">
-          <p className="text-sm text-muted">
-            Har du allerede en konto? <Link href="/login">Log ind</Link>
-          </p>
-          <button className="btn" type="submit">Næste</button>
+          <p className="text-sm text-muted"><Rich text={t["step1.loginHint"]} /></p>
+          <button className="btn" type="submit">{t["step1.submit"]}</button>
         </div>
       </form>
     </div>
   );
 }
 
-function StepCompany({ state, cvr, tlf }: { state: OnboardingState; cvr?: string; tlf?: string }) {
+function StepCompany({ state, t, cvr, tlf }: { state: OnboardingState; t: T; cvr?: string; tlf?: string }) {
   const co = state.data.company;
   return (
     <div className="panel">
-      <p className="mb-space-4 text-muted">Vi henter jeres virksomhedsoplysninger i CVR-registret, så du ikke skal taste dem.</p>
+      <p className="mb-space-4 text-muted">{t["step2.intro"]}</p>
       <form action={saveCompanyAction} className="grid gap-4">
         <div>
-          <label className="label" htmlFor="cvr">CVR-nummer</label>
-          <input className="input" id="cvr" name="cvr" required inputMode="numeric" placeholder="8 cifre" autoComplete="off" defaultValue={cvr ?? co?.cvr} />
+          <label className="label" htmlFor="cvr">{t["step2.cvrLabel"]}</label>
+          <input className="input" id="cvr" name="cvr" required inputMode="numeric" placeholder={t["step2.cvrPlaceholder"]} autoComplete="off" defaultValue={cvr ?? co?.cvr} />
         </div>
         <div>
-          <label className="label" htmlFor="phone">Telefonnummer</label>
-          <input className="input" id="phone" name="phone" type="tel" required autoComplete="tel" placeholder="20 30 40 50 eller +46 70 123 45 67" defaultValue={tlf ?? co?.phone} />
+          <label className="label" htmlFor="phone">{t["step2.phoneLabel"]}</label>
+          <input className="input" id="phone" name="phone" type="tel" required autoComplete="tel" placeholder={t["step2.phonePlaceholder"]} defaultValue={tlf ?? co?.phone} />
         </div>
         <div className="flex items-center justify-between gap-3 pt-2">
-          <Back step={1} />
-          <button className="btn" type="submit">Slå virksomhed op</button>
+          <Back step={1} t={t} />
+          <button className="btn" type="submit">{t["step2.submit"]}</button>
         </div>
       </form>
     </div>
   );
 }
 
-function StepConfirm({ state }: { state: OnboardingState }) {
+function StepConfirm({ state, t }: { state: OnboardingState; t: T }) {
   const co = state.data.company;
   if (!co) redirect("/kom-i-gang?trin=2");
   const info = co.info;
@@ -159,48 +159,44 @@ function StepConfirm({ state }: { state: OnboardingState }) {
               </div>
             ))}
           </dl>
-          <p className="mt-3 text-xs text-muted">Data fra CVR-registret (Erhvervsstyrelsen). Er det den rigtige virksomhed?</p>
+          <p className="mt-3 text-xs text-muted">{t["step3.source"]}</p>
           <div className="mt-space-4 flex items-center justify-between gap-3">
-            <Back step={2} />
+            <Back step={2} t={t} />
             <form action={confirmCompanyAction}>
-              <button className="btn" type="submit">Bekræft og fortsæt</button>
+              <button className="btn" type="submit">{t["step3.confirm"]}</button>
             </form>
           </div>
-          <p className="mt-3 text-sm"><Link href="/kom-i-gang?trin=2">Forkert virksomhed? Ret CVR-nummeret.</Link></p>
+          <p className="mt-3 text-sm"><Link href="/kom-i-gang?trin=2">{t["step3.wrong"]}</Link></p>
         </div>
       )}
       {co.lookup === "ceased" && info && (
         <div className="panel">
           <div role="alert" className="callout callout-error text-sm">
-            <p className="font-semibold">Virksomheden er ophørt</p>
-            <p>CVR {co.cvr} ({info.name}) står som «{info.statusText}» i CVR-registret. Vi kan kun oprette abonnementer for aktive virksomheder.</p>
+            <p className="font-semibold">{t["step3.ceasedTitle"]}</p>
+            <p>{interpolate(t["step3.ceasedBody"], { cvr: co.cvr, navn: info.name, status: info.statusText })}</p>
           </div>
-          <div className="mt-space-4"><Back step={2} /></div>
+          <div className="mt-space-4"><Back step={2} t={t} /></div>
         </div>
       )}
       {(co.lookup === "not_found" || co.lookup === "error") && (
         <div className="panel">
           <div role="alert" className="callout callout-error text-sm">
-            <p className="font-semibold">{co.lookup === "not_found" ? "Vi kunne ikke finde CVR-nummeret" : "CVR-opslaget fejlede"}</p>
-            <p>
-              {co.lookup === "not_found"
-                ? `CVR ${co.cvr} findes ikke i CVR-registret. Tjek nummeret, eller indtast oplysningerne selv.`
-                : "Vi kunne ikke kontakte CVR-registret lige nu. Prøv igen, eller indtast oplysningerne selv."}
-            </p>
+            <p className="font-semibold">{co.lookup === "not_found" ? t["step3.notFoundTitle"] : t["step3.errorTitle"]}</p>
+            <p>{co.lookup === "not_found" ? interpolate(t["step3.notFoundBody"], { cvr: co.cvr }) : co.quota ? t["step3.quotaBody"] : t["step3.errorBody"]}</p>
           </div>
           <form action={manualCompanyAction} className="mt-space-4 grid gap-4">
-            <p className="text-sm text-muted">Indtast virksomhedens oplysninger manuelt. De markeres som «ikke verificeret», og vi kontrollerer dem.</p>
+            <p className="text-sm text-muted">{t["step3.manualIntro"]}</p>
             <div>
-              <label className="label" htmlFor="name">Virksomhedens navn</label>
+              <label className="label" htmlFor="name">{t["step3.manualName"]}</label>
               <input className="input" id="name" name="name" required defaultValue={co.manual?.name} />
             </div>
             <div>
-              <label className="label" htmlFor="address">Adresse, postnr. og by</label>
+              <label className="label" htmlFor="address">{t["step3.manualAddress"]}</label>
               <input className="input" id="address" name="address" required defaultValue={co.manual?.address} />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <Back step={2} />
-              <button className="btn" type="submit">Fortsæt uden opslag</button>
+              <Back step={2} t={t} />
+              <button className="btn" type="submit">{t["step3.manualSubmit"]}</button>
             </div>
           </form>
         </div>
@@ -209,13 +205,13 @@ function StepConfirm({ state }: { state: OnboardingState }) {
   );
 }
 
-async function StepTest({ state, q }: { state: OnboardingState; q: number }) {
+async function StepTest({ state, t, q }: { state: OnboardingState; t: T; q: number }) {
   const questions = await loadActiveQuestions();
   if (questions.length === 0) {
     return (
       <div className="panel">
-        <p className="text-muted">Vi har ingen spørgsmål lige nu, så vi laver et standardforslag til dit board.</p>
-        <form action={skipTestAction} className="mt-space-4 flex justify-between"><Back step={3} /><button className="btn" type="submit">Se forslag</button></form>
+        <p className="text-muted">{t["step4.empty"]}</p>
+        <form action={skipTestAction} className="mt-space-4 flex justify-between"><Back step={3} t={t} /><button className="btn" type="submit">{t["step4.emptySubmit"]}</button></form>
       </div>
     );
   }
@@ -228,8 +224,8 @@ async function StepTest({ state, q }: { state: OnboardingState; q: number }) {
     <div className="panel">
       <div className="mb-space-4">
         <div className="flex items-baseline justify-between text-xs font-bold uppercase tracking-wide text-navy">
-          <span>Spørgsmål {idx} af {questions.length}</span>
-          <span className="text-muted">{multi ? "Vælg gerne flere" : "Vælg ét svar"}</span>
+          <span>{interpolate(t["step4.progress"], { n: idx, total: questions.length })}</span>
+          <span className="text-muted">{multi ? t["step4.multi"] : t["step4.single"]}</span>
         </div>
         <div className="mt-2 h-1 bg-grey-bg" role="progressbar" aria-valuemin={1} aria-valuemax={questions.length} aria-valuenow={idx} aria-label="Fremdrift i testen">
           <div className="h-1 bg-navy" style={{ width: `${(idx / questions.length) * 100}%` }} />
@@ -260,15 +256,15 @@ async function StepTest({ state, q }: { state: OnboardingState; q: number }) {
           </div>
         </fieldset>
         <div className="mt-space-4 flex items-center justify-between gap-3">
-          <Back step={idx === 1 ? 3 : 4} extra={idx === 1 ? "" : `&q=${idx - 1}`} />
-          <button className="btn" type="submit">{last ? "Se dit forslag" : "Næste"}</button>
+          <Back step={idx === 1 ? 3 : 4} extra={idx === 1 ? "" : `&q=${idx - 1}`} t={t} />
+          <button className="btn" type="submit">{last ? t["step4.last"] : t["step4.next"]}</button>
         </div>
       </form>
     </div>
   );
 }
 
-async function StepBoard({ state }: { state: OnboardingState }) {
+async function StepBoard({ state, t }: { state: OnboardingState; t: T }) {
   const catalog = await loadCatalog();
   const suggestion = asSuggestion(state.suggested);
   const needs = suggestion?.needs ?? {};
@@ -283,18 +279,23 @@ async function StepBoard({ state }: { state: OnboardingState }) {
       initialAdvisorIds={ids}
       initialWeeks={state.data.board?.weeks ?? null}
       action={saveBoardAction}
-      submitLabel="Fortsæt"
+      submitLabel={t["step5.submit"]}
       backHref={`/kom-i-gang?trin=4&q=99`}
-      intro={
-        hasTest
-          ? `Ud fra jeres svar foreslår vi ${suggestedSize} rådgivere, der supplerer hinanden. Du kan udskifte, tilføje eller fjerne rådgivere, og prisen opdateres med det samme.`
-          : "Vi har sammensat et forslag. Du kan udskifte, tilføje eller fjerne rådgivere, og prisen opdateres med det samme."
-      }
+      texts={{
+        sideEyebrow: t["step5.sideEyebrow"],
+        replace: t["step5.replace"],
+        remove: t["step5.remove"],
+        add: t["step5.add"],
+        frequency: t["step5.frequency"],
+        priceLabel: t["step5.priceLabel"],
+        catalogEyebrow: t["step5.catalogEyebrow"],
+      }}
+      intro={hasTest ? interpolate(t["step5.introTest"], { antal: suggestedSize }) : t["step5.introNoTest"]}
     />
   );
 }
 
-async function StepAccount({ state }: { state: OnboardingState }) {
+async function StepAccount({ state, t }: { state: OnboardingState; t: T }) {
   const { contact, company, board: chosen } = state.data;
   if (!contact || !company?.confirmed) redirect("/kom-i-gang?trin=3");
   if (!chosen?.weeks) redirect("/kom-i-gang?trin=5");
@@ -305,7 +306,7 @@ async function StepAccount({ state }: { state: OnboardingState }) {
   return (
     <div className="space-y-space-3">
       <section className="panel" aria-label="Resumé">
-        <p className="label">Dit abonnement</p>
+        <p className="label">{t["step6.summaryLabel"]}</p>
         <dl className="mt-2 divide-y divide-grey-bg text-sm">
           <div className="grid gap-1 py-2 sm:grid-cols-[10rem_1fr]"><dt className="text-muted">Virksomhed</dt><dd className="font-semibold text-navy">{name} · CVR {company.cvr}</dd></div>
           <div className="grid gap-1 py-2 sm:grid-cols-[10rem_1fr]"><dt className="text-muted">Kontakt</dt><dd>{contact.name} · {contact.email}</dd></div>
@@ -332,23 +333,24 @@ async function StepAccount({ state }: { state: OnboardingState }) {
       </section>
       <form action={completeOnboardingAction} className="panel grid gap-4">
         <div>
-          <label className="label" htmlFor="password">Adgangskode (mindst {MIN_PASSWORD_LENGTH} tegn)</label>
+          <label className="label" htmlFor="password">{interpolate(t["step6.passwordLabel"], { min: MIN_PASSWORD_LENGTH })}</label>
           <input className="input" id="password" name="password" type="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
         </div>
         <div>
-          <label className="label" htmlFor="confirm">Gentag adgangskode</label>
+          <label className="label" htmlFor="confirm">{t["step6.confirmLabel"]}</label>
           <input className="input" id="confirm" name="confirm" type="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
         </div>
         <label className="flex items-start gap-3 text-sm text-muted">
-          <input type="checkbox" name="consent" className="mt-1 h-4 w-4" required />
-          <span>
-            Jeg accepterer <Link href="/vilkaar" target="_blank">vilkårene</Link> og har læst{" "}
-            <Link href="/privatliv" target="_blank">privatlivspolitikken</Link>, herunder at møder optages og transskriberes automatisk.
-          </span>
+          <input type="checkbox" name="consent" className="mt-1 h-4 w-4 shrink-0" required />
+          <span><Rich text={t["step6.terms"]} linkTarget="_blank" /></span>
+        </label>
+        <label className="flex items-start gap-3 border-l-4 border-gold bg-grey-bg px-4 py-3 text-sm text-ink">
+          <input type="checkbox" name="recordingConsent" className="mt-1 h-4 w-4 shrink-0" required />
+          <span><Rich text={t["step6.recordingConsent"]} /></span>
         </label>
         <div className="flex items-center justify-between gap-3">
-          <Back step={5} />
-          <button className="btn" type="submit">Opret konto og betal</button>
+          <Back step={5} t={t} />
+          <button className="btn" type="submit">{t["step6.submit"]}</button>
         </div>
       </form>
     </div>

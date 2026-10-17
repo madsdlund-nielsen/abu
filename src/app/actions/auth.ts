@@ -16,6 +16,8 @@ import {
   verifyPassword,
 } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { recordingConsentNow } from "@/lib/consent";
+import { currentConsent } from "@/lib/content/server";
 import { sendResetEmail } from "@/lib/emails";
 import { redirectWith } from "@/lib/redirect";
 
@@ -44,6 +46,8 @@ export async function loginAction(formData: FormData) {
   clearRateLimit(key);
   await createSession(user.id);
   await audit(user.id, "auth.login", "User", user.id);
+  // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login
+  if (!user.recordingConsentAt) redirect("/samtykke");
   redirect(user.role === "ADMIN" ? "/admin" : "/dashboard");
 }
 
@@ -58,7 +62,7 @@ export async function requestResetAction(formData: FormData) {
   const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
   if (user) {
     const { token } = await createPasswordToken(user.id, "RESET");
-    await sendResetEmail(user.email, user.name, token);
+    await sendResetEmail(user, token);
   }
   // Samme svar uanset om kontoen findes (ingen konto-opslag)
   redirectWith("/reset-password", "ok", "Hvis e-mailen findes hos os, har vi sendt et link til at nulstille adgangskoden.");
@@ -74,9 +78,17 @@ export async function setPasswordAction(formData: FormData) {
   const err = validatePassword(password);
   if (err) redirectWith(back, "err", err);
   if (password !== confirm) redirectWith(back, "err", "Adgangskoderne er ikke ens.");
+  // Rådgivere giver samtykke til optagelse og transskription, når de accepterer invitationen
+  const giveConsent = row.purpose === "INVITE";
+  if (giveConsent && formData.get("recordingConsent") !== "on") {
+    redirectWith(back, "err", "Du skal give samtykke til optagelse og transskription af møder for at fortsætte.");
+  }
 
   await prisma.$transaction([
-    prisma.user.update({ where: { id: row.userId }, data: { passwordHash: await hashPassword(password) } }),
+    prisma.user.update({
+      where: { id: row.userId },
+      data: { passwordHash: await hashPassword(password), ...(giveConsent ? recordingConsentNow((await currentConsent("recording")).version) : {}) },
+    }),
     prisma.passwordToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
     // Log alle andre sessioner ud
     prisma.session.deleteMany({ where: { userId: row.userId } }),

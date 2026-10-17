@@ -2,11 +2,14 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
+import { ensureNotificationDefaults } from "../src/lib/notifications/service";
 import { ADVISORS, DEMO_BOARD_EMAILS, QUESTIONS, TAGS } from "./seed-data";
 
 const prisma = new PrismaClient();
 
 async function main() {
+  // Demobrugerne har givet samtykke til optagelse (version 0 = standardteksten)
+  const consent = { recordingConsentAt: new Date(), recordingConsentVersion: "r0" };
   const adminHash = await bcrypt.hash("Admin123!", 12);
   const kundeHash = await bcrypt.hash("Kunde123!", 12);
   const advisorHash = await bcrypt.hash("Raadgiver123!", 12);
@@ -14,7 +17,7 @@ async function main() {
   await prisma.user.upsert({
     where: { email: "admin@abu.local" },
     update: {},
-    create: { email: "admin@abu.local", name: "Admin", role: "ADMIN", passwordHash: adminHash },
+    create: { email: "admin@abu.local", name: "Admin", role: "ADMIN", passwordHash: adminHash, ...consent },
   });
 
   const tagIds = new Map<string, string>();
@@ -28,7 +31,7 @@ async function main() {
   }
 
   const advisorIds = new Map<string, string>();
-  for (const a of ADVISORS) {
+  for (const [i, a] of ADVISORS.entries()) {
     const user = await prisma.user.upsert({
       where: { email: a.email },
       update: {},
@@ -36,7 +39,9 @@ async function main() {
         email: a.email,
         name: a.name,
         role: "ADVISOR",
+        phone: `+45 20 10 00 ${String(i + 1).padStart(2, "0")}`, // fiktive testnumre til SMS
         passwordHash: advisorHash,
+        ...consent,
         advisorProfile: { create: { title: a.title, bio: a.bio, active: true, pricePerMeetingDkk: a.price } },
       },
     });
@@ -69,6 +74,7 @@ async function main() {
       role: "CUSTOMER",
       passwordHash: kundeHash,
       consentAt: new Date(),
+      ...consent,
       customerProfile: {
         create: { companyName: "Demo ApS", cvr: "30000102", address: "Testvej 1, 2100 København Ø", billingEmail: "kunde@abu.local" },
       },
@@ -120,6 +126,10 @@ async function main() {
       },
     });
   }
+
+  // Danske standardtekster og -regler til notifikationer (e-mail og SMS)
+  const n = await ensureNotificationDefaults();
+  console.log(`Notifikationer: ${n.templates} skabeloner og ${n.rules} regler oprettet.`);
 
   console.log("Seed færdig.");
   console.log("  Admin:   admin@abu.local / Admin123!");

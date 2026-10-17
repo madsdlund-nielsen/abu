@@ -35,7 +35,7 @@ export default function Vilkaar() {
         </section>
         <section>
           <h2>5. Optagelse</h2>
-          <p>Møder optages og transskriberes. Deltagerne informeres inden mødet. Se privatlivspolitikken.</p>
+          <p>Møder optages og transskriberes automatisk. Kunden giver udtrykkeligt samtykke hertil ved oprettelsen af kontoen, og rådgivere ved accept af invitationen. Se privatlivspolitikken.</p>
         </section>
         <section>
           <h2>6. Ansvar og fortrolighed</h2>

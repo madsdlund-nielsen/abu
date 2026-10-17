@@ -16,6 +16,11 @@ export class MockVideo implements VideoProvider {
     };
   }
 
+  async grantHostAccess(_providerMeetingId: string | null, hostRoomUrl: string | null) {
+    void _providerMeetingId;
+    return { hostRoomUrl };
+  }
+
   async deleteMeeting() {}
 
   parseWebhook(): RecordingEvent | null {

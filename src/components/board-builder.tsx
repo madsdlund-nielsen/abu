@@ -11,6 +11,26 @@ type Mode = { kind: "replace"; targetId: string } | { kind: "add" };
 
 const nf = new Intl.NumberFormat("da-DK", { maximumFractionDigits: 1 });
 
+export interface BoardTexts {
+  sideEyebrow: string;
+  replace: string;
+  remove: string;
+  add: string;
+  frequency: string;
+  priceLabel: string;
+  catalogEyebrow: string;
+}
+
+const DEFAULT_TEXTS: BoardTexts = {
+  sideEyebrow: "Dit board",
+  replace: "Udskift",
+  remove: "Fjern",
+  add: "Tilføj rådgiver",
+  frequency: "Mødefrekvens",
+  priceLabel: "Månedspris (ekskl. moms)",
+  catalogEyebrow: "Rådgiverkatalog",
+};
+
 export interface BoardBuilderProps {
   advisors: BuilderAdvisor[];
   tags: BuilderTag[];
@@ -23,9 +43,14 @@ export interface BoardBuilderProps {
   backHref?: string;
   /** Kort forklaring over kortene */
   intro?: string;
+  /** Redigerbare tekster (onboarding-CMS). Mangler de, bruges standardtekster. */
+  texts?: Partial<BoardTexts>;
+  /** Ekstra felter i formularen under rådgiverkortene (fx admin-valg) */
+  children?: React.ReactNode;
 }
 
-export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initialWeeks, action, submitLabel, backHref, intro }: BoardBuilderProps) {
+export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initialWeeks, action, submitLabel, backHref, intro, texts, children }: BoardBuilderProps) {
+  const tx: BoardTexts = { ...DEFAULT_TEXTS, ...texts };
   const byId = useMemo(() => new Map(advisors.map((a) => [a.id, a])), [advisors]);
   const tagName = useMemo(() => new Map(tags.map((t) => [t.id, t.name])), [tags]);
   const [selected, setSelected] = useState<string[]>(() => initialAdvisorIds.filter((id) => byId.has(id)).slice(0, MAX_BOARD_SIZE));
@@ -100,7 +125,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
                     <p className="text-sm font-semibold text-navy">{formatDkk(a.priceDkk)} <span className="font-normal text-muted">pr. møde</span></p>
                     <div className="flex gap-2">
                       <button type="button" className="btn-secondary btn-sm" onClick={() => setMode({ kind: "replace", targetId: a.id })} aria-label={`Udskift ${a.name}`}>
-                        Udskift
+                        {tx.replace}
                       </button>
                       <button
                         type="button"
@@ -110,7 +135,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
                         title={board.length <= MIN_BOARD_SIZE ? "Et board har mindst 2 rådgivere" : undefined}
                         aria-label={`Fjern ${a.name}`}
                       >
-                        Fjern
+                        {tx.remove}
                       </button>
                     </div>
                   </div>
@@ -120,11 +145,12 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
             {board.length < MAX_BOARD_SIZE && (
               <li className="flex min-h-40 items-center justify-center border border-dashed border-slate bg-white p-space-3">
                 <button type="button" className="btn-secondary" onClick={() => setMode({ kind: "add" })}>
-                  Tilføj rådgiver
+                  {tx.add}
                 </button>
               </li>
             )}
           </ul>
+          {children}
         </div>
 
         {/* Sidepanel: sticky på desktop, bundbar der kan foldes ud på mobil */}
@@ -156,14 +182,14 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
             id="board-summary"
             className={`${open ? "block" : "hidden"} max-h-[65vh] overflow-y-auto border-t border-grey-bg px-4 pb-4 pt-4 lg:block lg:max-h-none lg:overflow-visible lg:border-t-0 lg:bg-white lg:p-space-4 lg:shadow-panel`}
           >
-            <span className="eyebrow !mb-2">Dit board</span>
+            <span className="eyebrow !mb-2">{tx.sideEyebrow}</span>
             <h2 className="text-xl font-light">
               {board.length} rådgivere
             </h2>
             <span className="rule-gold mt-3" aria-hidden="true" />
 
             <fieldset className="mt-space-4">
-              <legend className="label">Mødefrekvens</legend>
+              <legend className="label">{tx.frequency}</legend>
               <div className="grid grid-cols-3 gap-2">
                 {FREQUENCY_WEEKS.map((w) => (
                   <button
@@ -220,7 +246,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
             </div>
 
             <dl className="mt-space-4 border-t border-navy pt-space-3">
-              <dt className="text-sm text-muted">Månedspris (ekskl. moms)</dt>
+              <dt className="text-sm text-muted">{tx.priceLabel}</dt>
               <dd className="text-3xl font-light text-navy" data-testid="price" aria-live="polite">
                 {monthly !== null ? `${formatDkk(monthly)} / md.` : weeks === null ? "Vælg frekvens" : "Vælg 2-4 rådgivere"}
               </dd>
@@ -263,6 +289,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
       {mode && (
         <Catalog
           mode={mode}
+          eyebrow={tx.catalogEyebrow}
           advisors={advisors}
           tags={tags}
           needs={needs}
@@ -281,6 +308,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
 
 function Catalog({
   mode,
+  eyebrow,
   advisors,
   tags,
   needs,
@@ -289,6 +317,7 @@ function Catalog({
   onPick,
 }: {
   mode: Mode;
+  eyebrow: string;
   advisors: BuilderAdvisor[];
   tags: BuilderTag[];
   needs: Record<string, number>;
@@ -348,7 +377,7 @@ function Catalog({
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between gap-3 border-b border-grey-bg p-space-3 sm:p-space-4">
           <div>
-            <span className="eyebrow !mb-2">Rådgiverkatalog</span>
+            <span className="eyebrow !mb-2">{eyebrow}</span>
             <h2 id="catalog-title" className="text-xl font-light">
               {target ? `Udskift ${target.name}` : "Tilføj rådgiver"}
             </h2>

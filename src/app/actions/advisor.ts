@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirectWith } from "@/lib/redirect";
+import { normalizePhone } from "@/lib/onboarding/schemas";
 import { hhmmToMinutes, parseDanishDateTime } from "@/lib/time";
 
 export async function updateProfileAction(formData: FormData) {
@@ -12,12 +13,16 @@ export async function updateProfileAction(formData: FormData) {
     name: z.string().trim().min(2),
     title: z.string().trim().max(120),
     bio: z.string().trim().max(4000),
+    phone: z.string().trim().max(30).optional(),
     photoUrl: z.string().trim().max(500).refine((v) => v === "" || /^https:\/\//.test(v), "Foto-URL skal starte med https://"),
   });
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) redirectWith("/profile", "err", parsed.error.issues[0]?.message ?? "Ugyldige felter.");
+  const phoneRaw = parsed.data.phone ?? "";
+  const phone = phoneRaw === "" ? null : normalizePhone(phoneRaw);
+  if (phoneRaw !== "" && !phone) redirectWith("/profile", "err", "Indtast et gyldigt telefonnummer, fx 20 30 40 50 eller +46 70 123 45 67.");
   await prisma.$transaction([
-    prisma.user.update({ where: { id: user.id }, data: { name: parsed.data.name } }),
+    prisma.user.update({ where: { id: user.id }, data: { name: parsed.data.name, phone } }),
     prisma.advisorProfile.update({
       where: { userId: user.id },
       data: { title: parsed.data.title, bio: parsed.data.bio, photoUrl: parsed.data.photoUrl },

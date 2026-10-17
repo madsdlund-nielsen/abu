@@ -5,6 +5,8 @@ import { Flash, flashFrom, type SP } from "@/components/flash";
 import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
 import { findValidPasswordToken, MIN_PASSWORD_LENGTH } from "@/lib/auth";
+import { getOnboardingTexts } from "@/lib/content/server";
+import { Rich } from "@/components/rich";
 
 export const metadata: Metadata = { title: "Vælg adgangskode" };
 
@@ -12,6 +14,7 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
   const { err, one, params } = await flashFrom(searchParams);
   const token = one(params.token) ?? "";
   const row = token ? await findValidPasswordToken(token) : null;
+  const texts = await getOnboardingTexts();
   return (
     <PageShell variant="bare">
       <Band tone="grey">
@@ -37,6 +40,15 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
                   <label className="label" htmlFor="confirm">Gentag adgangskode</label>
                   <input className="input" id="confirm" name="confirm" type="password" required minLength={MIN_PASSWORD_LENGTH} autoComplete="new-password" />
                 </div>
+                {row.purpose === "INVITE" && (
+                  <label className="flex items-start gap-3 border-l-4 border-gold bg-grey-bg px-4 py-3 text-sm text-ink">
+                    <input type="checkbox" name="recordingConsent" className="mt-1 h-4 w-4 shrink-0" required />
+                    <span>
+                      <Rich text={texts["step6.recordingConsent"]} /> Se{" "}
+                      <Link href="/privatliv" target="_blank">privatlivspolitikken</Link>.
+                    </span>
+                  </label>
+                )}
                 <button className="btn w-full" type="submit">Gem adgangskode</button>
               </form>
             </>
