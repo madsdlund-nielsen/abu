@@ -129,7 +129,7 @@ Visuelt design følger `docs/design/designmanual.pdf`. Tokens ligger i `src/styl
 **Kontrast (WCAG AA, ejerens beslutning 17.10.2026).** Primærknapper har charcoal tekst på guld (`--color-on-gold`, 5,57:1), eyebrows
 på lyse flader er navy (`--color-eyebrow`), og guld som *tekst* på lyse flader bruger `--color-gold-ink` (#81693c, 5,22:1). Guld og
 guld-mørk bruges fortsat til flader, streger og kanter. Pladsholdere og kommende trin bruger `--color-placeholder`. Målinger og
-før/efter-skærmbilleder: `docs/screens/kontrast/`. Open Sans er selvhostet via `@fontsource/open-sans` (ingen Google Fonts).
+før/efter-skærmbilleder: `docs/legacy/v4-foer-produktion/screens/kontrast/`. Open Sans er selvhostet via `@fontsource/open-sans` (ingen Google Fonts).
 Logoet er de officielle SVG-filer (`docs/design/logo/` er originalerne, `public/brand/` er webkopier uden C2PA-metadata) via komponenten `src/components/logo.tsx`. Skærmbilleder: `docs/screens/` (offentlig, onboarding, kunde, rådgiver, admin og mobil; mødeside, notifikations-CMS, board- og mødeadministration, leads og onboarding-tekster er nyest) og demo-video: `docs/demo/`. Ældre skærmbilleder og demoer ligger i `docs/legacy/`.
 
 ## Arkitektur
