@@ -37,3 +37,12 @@ describe("parseLeadFilter", () => {
     expect(parseLeadFilter({ status: "hack", samtykke: ["trukket"] })).toEqual({ status: "", consent: "trukket", q: "" });
   });
 });
+
+describe("læsbar samtykkeversion (plan #25)", () => {
+  it("viser standardtekst eller versionsnummer i stedet for m0/m3", async () => {
+    const { consentVersionLabel } = await import("./leads-admin");
+    expect(consentVersionLabel("m0")).toBe("standardtekst");
+    expect(consentVersionLabel("m3")).toBe("version 3");
+    expect(consentVersionLabel(null)).toBe("");
+  });
+});

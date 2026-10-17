@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 /** CSV-eksport af leads (admin). Respekterer de samme filtre som listen. */
 export async function GET(req: Request) {
   const user = await getCurrentUser();
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Ikke tilladt" }, { status: 403 });
+  if (!user) return NextResponse.json({ error: "Ikke logget ind" }, { status: 401 });
+  if (user.role !== "ADMIN") return NextResponse.json({ error: "Ikke tilladt" }, { status: 403 });
   const params = Object.fromEntries(new URL(req.url).searchParams);
   const rows = await loadLeads(parseLeadFilter(params));
   await audit(user.id, "leads.export", "Lead", `${rows.length}`);

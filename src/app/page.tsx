@@ -16,7 +16,7 @@ export default function Home() {
       <section className="band-charcoal on-dark py-section">
         <div className="container-abu">
           <span className="eyebrow">Rådgivning på abonnement</span>
-          <h1 className="hero-title max-w-4xl">Din egen advisory board – som abonnement</h1>
+          <h1 className="hero-title max-w-4xl">Dit eget advisory board – som abonnement</h1>
           <p className="lead mt-space-4 max-w-2xl">
             Få faste møder med 2-4 erfarne rådgivere, der kender din virksomhed. Book online, mød op i videomødet og få en
             skriftlig opsummering med beslutninger og handlingspunkter bagefter.

@@ -59,6 +59,23 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
   const [open, setOpen] = useState(false);
 
   const board = selected.map((id) => byId.get(id)).filter((a): a is BuilderAdvisor => Boolean(a));
+  const frequencyButtons = () => (
+    <div className="grid grid-cols-3 gap-2">
+      {FREQUENCY_WEEKS.map((w) => (
+        <button
+          key={w}
+          type="button"
+          aria-pressed={weeks === w}
+          onClick={() => setWeeks(w)}
+          className={`whitespace-nowrap border px-1 py-2 text-[11px] font-bold uppercase tracking-wide transition-colors ${
+            weeks === w ? "border-navy bg-navy text-white" : "border-slate bg-white text-navy hover:border-navy"
+          }`}
+        >
+          Hver {w}. uge
+        </button>
+      ))}
+    </div>
+  );
   const hasNeeds = Object.values(needs).some((n) => n > 0);
   const validSize = board.length >= MIN_BOARD_SIZE && board.length <= MAX_BOARD_SIZE;
   const ready = validSize && weeks !== null;
@@ -158,6 +175,13 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
           aria-label="Resumé af dit board"
           className="fixed inset-x-0 bottom-0 z-30 border-t border-navy bg-white shadow-panel lg:static lg:sticky lg:top-6 lg:z-auto lg:border-t-0"
         >
+          {/* Mobil: frekvensen skal vælges, før man kan fortsætte – vis den direkte i bundbaren i stedet for i det sammenfoldede panel (plan #25) */}
+          {weeks === null && !open && (
+            <div className="border-b border-grey-bg px-4 pt-3 lg:hidden" role="group" aria-labelledby="mobile-frequency-label" data-testid="mobile-frequency">
+              <p id="mobile-frequency-label" className="label !mb-1">{tx.frequency}</p>
+              {frequencyButtons()}
+            </div>
+          )}
           <div className="flex items-center gap-3 px-4 py-3 lg:hidden">
             <button
               type="button"
@@ -173,10 +197,15 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
                 {monthly !== null ? `${formatDkk(monthly)} / md.` : "Vælg frekvens"}
               </span>
             </button>
-            <button className="btn shrink-0" type="submit" disabled={!ready}>
+            <button className="btn shrink-0" type="submit" disabled={!ready} aria-describedby={!ready ? "mobile-not-ready" : undefined}>
               {submitLabel}
             </button>
           </div>
+          {!ready && (
+            <p id="mobile-not-ready" className="px-4 pb-3 text-xs text-muted lg:hidden">
+              {weeks === null ? "Vælg hvor ofte I vil mødes for at fortsætte." : "Vælg 2-4 rådgivere for at fortsætte."}
+            </p>
+          )}
 
           <div
             id="board-summary"
@@ -190,21 +219,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
 
             <fieldset className="mt-space-4">
               <legend className="label">{tx.frequency}</legend>
-              <div className="grid grid-cols-3 gap-2">
-                {FREQUENCY_WEEKS.map((w) => (
-                  <button
-                    key={w}
-                    type="button"
-                    aria-pressed={weeks === w}
-                    onClick={() => setWeeks(w)}
-                    className={`whitespace-nowrap border px-1 py-2 text-[11px] font-bold uppercase tracking-wide transition-colors ${
-                      weeks === w ? "border-navy bg-navy text-white" : "border-slate bg-white text-navy hover:border-navy"
-                    }`}
-                  >
-                    Hver {w}. uge
-                  </button>
-                ))}
-              </div>
+              {frequencyButtons()}
             </fieldset>
 
             <div className="mt-space-4">

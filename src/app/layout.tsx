@@ -10,7 +10,7 @@ import { FormGuard } from "@/components/form-guard";
 
 export const metadata: Metadata = {
   title: { default: "Advisory Board Unlimited", template: "%s – Advisory Board Unlimited" },
-  description: "Din egen advisory board som abonnement. Faste møder med erfarne rådgivere – online, optaget og opsummeret.",
+  description: "Dit eget advisory board som abonnement. Faste møder med erfarne rådgivere – online, optaget og opsummeret.",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

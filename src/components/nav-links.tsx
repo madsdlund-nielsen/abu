@@ -16,7 +16,14 @@ export function NavLinks({ links }: { links: NavItem[] }) {
       {links.map((l) => {
         const active = l.exact ? pathname === l.href : pathname === l.href || pathname.startsWith(`${l.href}/`);
         return (
-          <Link key={l.href} href={l.href} className={`nav-link ${active ? "nav-link-active" : ""}`} aria-current={active ? "page" : undefined}>
+          <Link
+            key={l.href}
+            href={l.href}
+            className={`nav-link ${active ? "nav-link-active" : ""}`}
+            aria-current={active ? "page" : undefined}
+            // Luk mobilmenuen, når et punkt vælges
+            onClick={(e) => e.currentTarget.closest("details")?.removeAttribute("open")}
+          >
             {l.label}
           </Link>
         );

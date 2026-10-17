@@ -113,7 +113,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
                 <Link className="btn mt-3" href={`/samtykke?next=${encodeURIComponent(`/meetings/${meeting.id}`)}`}>Giv samtykke</Link>
               </div>
             ) : roomUrl ? (
-              <RoomEmbed url={roomUrl} mock={roomUrl.startsWith(MOCK_ROOM_PREFIX)} />
+              <RoomEmbed url={roomUrl} mock={roomUrl.startsWith(MOCK_ROOM_PREFIX)} staff={isStaff} />
             ) : (
               <p className="text-sm text-muted">Videorummet er ikke klar. Prøv igen om lidt.</p>
             )}
