@@ -1,46 +1,57 @@
 /**
- * Ordmærket "pipe divide": advisory board | unlimited. Levende tekst i Open Sans Light (300), små bogstaver.
- * Farvefordeling (manual s. 3): "advisory board" er navy på lyst og hvid på mørkt; pipen og "unlimited" er altid guld.
- *
- * Proportioner målt i manualens enheder (s. 4), omregnet til em (skrifthøjde ascender->descender = 64,56 enheder = 1 em):
- *   mellemrum 60,2 enh. = 0,93 em på hver side · pipe 2,75 enh. = 0,043 em bred, spænder hele blækhøjden
- *   (ascender til descender: 0,76 em over og 0,24 em under grundlinjen). Låsen er 12,4 : 1.
- * Brug aldrig versaler, anden farvefordeling, skygge, rotation eller strakt skala.
+ * Officielt ordmærke (lockup 22, "advisory board | unlimited") som SVG med tekst i outline.
+ * - light = navy udgave til lyse flader, dark = hvid udgave til charcoal/navy flader.
+ * - Frirum: hele ordmærkets x-højde, ca. 4,3 % af bredden, på alle sider.
+ * - Mindstebredde 300 px (manualen). Under 360 px viewport vises i stedet ab|u-ikonet (SemiBold, 32-96 px).
+ * - Lockup 03 ("open tracking") er ikke godkendt i manualen og bruges ikke.
  */
+const RATIO = 817 / 81; // viewBox for lockup 22
+export const LOGO_MIN_WIDTH = 300;
+const CLEAR_SPACE = 0.043;
+const ICON_SIZE = 48;
+
 export function Logo({
   variant = "light",
+  width = LOGO_MIN_WIDTH,
   className = "",
-  as: Tag = "span",
+  /** Tillad ikonet på smalle skærme (under 360 px). Slås fra, hvor ordmærket altid skal vises. */
+  compact = true,
 }: {
   /** light = navy tekst til lyse flader, dark = hvid tekst til charcoal/navy */
   variant?: "light" | "dark";
-  /** Størrelsen styres med font-size (fx text-[22px]); resten skalerer i em. */
+  /** Ordmærkets bredde i px (mindst 300) */
+  width?: number;
   className?: string;
-  as?: "span" | "div";
+  compact?: boolean;
 }) {
+  const w = Math.max(LOGO_MIN_WIDTH, width);
+  const h = Math.round(w / RATIO);
+  const pad = Math.round(w * CLEAR_SPACE);
+  const suffix = variant === "dark" ? "hvid" : "navy";
+  const alt = "Advisory Board Unlimited";
   return (
-    <Tag
-      className={`inline-block select-none whitespace-nowrap font-light leading-none ${className}`}
-      style={{ fontWeight: 300, textTransform: "none", letterSpacing: 0 }}
-      role="img"
-      aria-label="advisory board unlimited"
-    >
-      <span aria-hidden="true" className={variant === "dark" ? "text-white" : "text-navy"}>
-        advisory board
-      </span>
-      <span
-        aria-hidden="true"
-        className="inline-block bg-gold align-baseline"
-        style={{
-          width: "max(1px, 0.043em)",
-          height: "1em",
-          margin: "0 0.93em",
-          verticalAlign: "-0.24em",
-        }}
+    // Frirummet lægges som padding om selve logoet; det venstre frirum trækkes fra marginen, så logoet flugter med sidens indhold.
+    <span className={`inline-flex select-none items-center ${className}`} style={{ marginLeft: -pad }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`/brand/abu-lockup-22_${suffix}.svg`}
+        width={w}
+        height={h}
+        alt={alt}
+        style={{ padding: pad, boxSizing: "content-box", maxWidth: "none" }}
+        className={compact ? "hidden min-[360px]:block" : "block"}
       />
-      <span aria-hidden="true" className="text-gold">
-        unlimited
-      </span>
-    </Tag>
+      {compact && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`/brand/abu-ikon_${suffix}.svg`}
+          width={ICON_SIZE}
+          height={ICON_SIZE}
+          alt={alt}
+          style={{ padding: Math.round(ICON_SIZE * CLEAR_SPACE) }}
+          className="block min-[360px]:hidden"
+        />
+      )}
+    </span>
   );
 }

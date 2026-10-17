@@ -4,9 +4,11 @@
 Customers subscribe to an "advisory board as a service". The subscription is billed monthly and set by:
 - number of advisors: 2, 3 or 4
 - meeting frequency: every 4, 8 or 12 weeks
-- price: 1,750 DKK per advisor per meeting (assumed excl. VAT, B2B)
+- price per advisor per meeting: set per advisor by admin (`AdvisorProfile.pricePerMeetingDkk`, default 1,750 DKK). All prices are excl. VAT (confirmed by the owner).
 
-Monthly price = advisors × 1750 × (52 / weeks) / 12, rounded to whole kroner.
+Monthly price = sum(advisors' meeting prices) × (52 / weeks) / 12, rounded to whole kroner (`monthlyPriceForBoard` in `src/lib/pricing.ts`).
+The price is frozen at purchase (`SubscriptionAdvisor.pricePerMeetingDkk`); a later admin price change only affects new subscriptions and plan changes.
+The marketing pages show "from" prices, i.e. the table below with everyone at the default 1,750 DKK.
 
 | Frequency | 2 advisors | 3 advisors | 4 advisors |
 |---|---|---|---|
@@ -17,7 +19,7 @@ Monthly price = advisors × 1750 × (52 / weeks) / 12, rounded to whole kroner.
 ## Roles
 - ADMIN: creates advisor accounts (sends an invite/set-password link), assigns advisors to customers, sees everything, can upload a recording manually to start transcription.
 - ADVISOR: edits profile (bio, title, expertise, photo URL), sets weekly recurring availability + blocked dates, sees their meetings, joins meetings, reads transcripts.
-- CUSTOMER: signs up themselves (company, CVR, contact info), picks plan (advisors × frequency), picks advisors from the pool (exactly N), pays, books meetings, joins meetings, reads transcripts.
+- CUSTOMER: onboards themselves (contact, CVR lookup, short test that suggests a board of 2-4 advisors, board builder with swap/add/remove and frequency), pays, books meetings, joins meetings, reads transcripts. See `docs/PLAN-onboarding.md`.
 
 ## Vendors (EU only, Danish preferred – no US companies as data processors)
 | Need | Vendor | Country | Notes |
@@ -42,12 +44,13 @@ Everything has a `mock` mode so the app runs end-to-end locally with no accounts
 - User(id, email unique, passwordHash?, role ADMIN|ADVISOR|CUSTOMER, name, phone, createdAt)
 - Session(id = random token hash, userId, expiresAt)
 - PasswordToken(id, userId, tokenHash, purpose INVITE|RESET, expiresAt, usedAt)
-- AdvisorProfile(userId PK, title, bio, expertise string[], photoUrl, active bool)
-- CustomerProfile(userId PK, companyName, cvr, address, billingEmail)
+- AdvisorProfile(userId PK, title, bio, photoUrl, active bool, pricePerMeetingDkk) + AdvisorTag(advisorId, tagId) + Tag(slug, name, description, sortOrder, active)
+- OnboardingQuestion / OnboardingAnswer(boardSize?) / AnswerTagWeight(weight 1-5) – CMS content for the test; OnboardingSession – server-side onboarding state (7 days)
+- CustomerProfile(userId PK, companyName, cvr, address, billingEmail, cvrData Json, cvrVerified, testAnswers Json snapshot)
 - AvailabilityRule(id, advisorId, weekday 0–6 (Mon=1 ISO), startMinute, endMinute) – Copenhagen local time
 - AvailabilityBlock(id, advisorId, startsAt, endsAt, reason) – exceptions/holidays
 - Subscription(id, customerId, advisorCount, frequencyWeeks, monthlyPriceDkk, status PENDING|ACTIVE|PAST_DUE|CANCELLED, provider, providerSubscriptionId, providerCustomerId, startedAt, cancelledAt)
-- SubscriptionAdvisor(subscriptionId, advisorId) – the customer's board
+- SubscriptionAdvisor(subscriptionId, advisorId, pricePerMeetingDkk snapshot) – the customer's board
 - Meeting(id, subscriptionId, startsAt, endsAt, status BOOKED|COMPLETED|CANCELLED, roomUrl, hostRoomUrl, providerMeetingId, createdById)
 - MeetingParticipant(meetingId, userId)
 - Recording(id, meetingId, storageKey, source WEBHOOK|UPLOAD, status RECEIVED|TRANSCRIBING|DONE|FAILED, error)
@@ -71,20 +74,20 @@ Everything has a `mock` mode so the app runs end-to-end locally with no accounts
 - Jobs: simple DB-backed queue processed in-process (`src/lib/jobs.ts`) plus `/api/cron/process-jobs` protected by CRON_SECRET – no Redis needed.
 
 ## Payments (Frisbii)
-- 9 plans in Frisbii, handle convention `abu-{advisors}a-{weeks}w`, e.g. `abu-3a-8w`.
+- 3 plans in Frisbii, one per frequency: `abu-4w`, `abu-8w`, `abu-12w`. The amount is set per subscription (amount override in øre, excl. VAT; VAT is added per the Frisbii setup), because the price depends on the chosen advisors. A plan change recalculates and sends the new amount. To be verified against the Frisbii API.
 - Checkout: server creates a Frisbii checkout session (POST https://checkout-api.reepay.com/v1/session/subscription, basic auth with private key, plan handle, customer handle = user id) → redirect to the hosted checkout URL.
 - Webhook /api/webhooks/payments: verify signature (HMAC-SHA256 of timestamp+id with webhook secret), idempotent via WebhookEvent; subscription_created/renewal → ACTIVE, invoice_failed → PAST_DUE, subscription_cancelled/expired → CANCELLED.
 - Customer can change plan (new plan handle) or cancel from /account/subscription.
 - Mock provider: checkout redirects straight to a success page that activates the subscription.
 
 ## Pages
-Public: / (landing with price calculator), /priser, /login, /signup, /set-password?token=, /reset-password, /privatliv (privacy policy template), /vilkaar (terms template).
-Customer: /dashboard, /subscribe (plan wizard: advisors → frequency → pick advisors → pay), /book, /meetings, /meetings/[id], /account.
+Public: / (landing with "from" price calculator), /priser, /login, /kom-i-gang (onboarding; /signup redirects), /set-password?token=, /reset-password, /privatliv (privacy policy template), /vilkaar (terms template).
+Customer: /dashboard, /subscribe (board builder for customers without an active subscription), /account/subscription (board builder to change board and frequency), /book, /meetings, /meetings/[id], /account.
 Advisor: /dashboard, /availability, /profile, /meetings, /meetings/[id].
-Admin: /admin, /admin/advisors (+new, invite), /admin/customers, /admin/meetings, /admin/subscriptions.
+Admin: /admin, /admin/advisors (+new, invite, [id] price/tags/active), /admin/onboarding (test CMS + preview), /admin/tags, /admin/customers (+[id] CVR data and test answers), /admin/meetings, /admin/subscriptions.
 
 ## GDPR basics in the code
-- Data export (JSON) and account deletion request on /account.
+- Data export (JSON, incl. CVR data, test answers and onboarding sessions) and account deletion request on /account; deletion also removes OnboardingSession data. Expired onboarding sessions are deleted by the job queue.
 - Recordings are deleted from storage once transcription is done (configurable `DELETE_RECORDINGS_AFTER_TRANSCRIPTION=true`).
 - Consent text at signup + recording notice before joining.
 - AuditLog for admin actions and transcript access.
@@ -95,5 +98,5 @@ Admin: /admin, /admin/advisors (+new, invite), /admin/customers, /admin/meetings
 - `.env.example` with every variable documented.
 - README (Danish): setup, architecture, vendors, deployment to Hetzner.
 - docs/OPEN_ITEMS.md: accounts to create, decisions needed, known gaps.
-- Unit tests: pricing, slot computation, quota periods, webhook signature.
+- Unit tests: pricing (per advisor), matching, CVR (modulus 11, adapters), onboarding validation, slot computation, quota periods, webhook signature.
 - `npm run build`, `npm run lint`, `npm test` pass.

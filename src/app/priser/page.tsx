@@ -13,7 +13,7 @@ export default function Priser() {
       <Band tone="white">
         <SectionHeading eyebrow="Priser" title="Fast pris pr. måned" as="h1">
           <p className="text-muted">
-            Du betaler 1.750 kr. pr. rådgiver pr. møde (ekskl. moms), fordelt jævnt på en fast månedlig betaling.
+            Du betaler for de rådgivere, du vælger, pr. møde (ekskl. moms), fordelt jævnt på en fast månedlig betaling. Standardprisen er 1.750 kr. pr. rådgiver pr. møde; nogle rådgivere har en anden pris, som du ser, når du sammensætter dit board.
           </p>
         </SectionHeading>
         <div className="table-wrap mt-space-5">
@@ -31,20 +31,20 @@ export default function Priser() {
                 <tr key={w}>
                   <td className="font-semibold text-navy">Hver {w}. uge</td>
                   {ADVISOR_COUNTS.map((n) => (
-                    <td key={n}>{formatDkk(monthlyPriceDkk(n, w))} / md.</td>
+                    <td key={n}>fra {formatDkk(monthlyPriceDkk(n, w))} / md.</td>
                   ))}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="mt-space-3 text-xs text-muted">Formel: rådgivere × 1.750 kr. × (52 / uger) / 12, afrundet til hele kroner.</p>
+        <p className="mt-space-3 text-xs text-muted">Formel: summen af rådgivernes mødepriser × (52 / uger) / 12, afrundet til hele kroner. Tabellen viser «fra»-priser ved standardprisen 1.750 kr.; den endelige pris afhænger af de valgte rådgivere.</p>
       </Band>
       <Band tone="grey">
         <div className="mx-auto max-w-3xl">
           <PriceCalculator />
           <p className="mt-space-4 text-center">
-            <Link href="/signup">Opret konto og kom i gang</Link>
+            <Link href="/kom-i-gang">Opret konto og kom i gang</Link>
           </p>
         </div>
       </Band>

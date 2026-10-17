@@ -21,6 +21,8 @@ const NAV: Record<string, NavItem[]> = {
   ADMIN: [
     { href: "/admin", label: "Admin", exact: true },
     { href: "/admin/advisors", label: "Rådgivere" },
+    { href: "/admin/onboarding", label: "Onboarding" },
+    { href: "/admin/tags", label: "Tags" },
     { href: "/admin/customers", label: "Kunder" },
     { href: "/admin/subscriptions", label: "Abonnementer" },
     { href: "/admin/meetings", label: "Møder" },
@@ -31,7 +33,7 @@ const NAV: Record<string, NavItem[]> = {
 export function HeaderLogo() {
   return (
     <Link href="/" className="no-underline hover:no-underline" aria-label="Advisory Board Unlimited – forside">
-      <Logo variant="dark" className="text-[18px] sm:text-[22px]" />
+      <Logo variant="dark" />
     </Link>
   );
 }
@@ -42,7 +44,7 @@ export async function SiteHeader() {
   const links: NavItem[] = user ? NAV[user.role] : [{ href: "/priser", label: "Priser" }];
   return (
     <header className="on-dark bg-charcoal">
-      <div className="container-abu flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-4">
+      <div className="container-abu flex flex-wrap items-center justify-between gap-x-8 gap-y-1 py-2">
         <HeaderLogo />
         <nav aria-label="Hovedmenu" className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <NavLinks links={links} />
@@ -57,7 +59,7 @@ export async function SiteHeader() {
               <Link href="/login" className="nav-link">
                 Log ind
               </Link>
-              <Link href="/signup" className="btn btn-sm">
+              <Link href="/kom-i-gang" className="btn btn-sm">
                 Opret konto
               </Link>
             </>
@@ -74,7 +76,7 @@ export function SiteFooter() {
       <div className="container-abu py-space-6">
         <div className="flex flex-col gap-space-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <Logo variant="dark" className="text-[18px]" />
+            <Logo variant="dark" />
             <p className="mt-4 text-sm">Din egen advisory board som abonnement.</p>
           </div>
           <nav aria-label="Sidefod" className="flex flex-wrap gap-x-6 gap-y-2">

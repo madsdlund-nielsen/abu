@@ -4,7 +4,7 @@ import { PriceCalculator } from "@/components/price-calculator";
 import { PageShell } from "@/components/site-header";
 
 const STEPS: [string, string, string][] = [
-  ["01", "Vælg din board", "Vælg antal rådgivere og hvor ofte I mødes, og sammensæt boardet fra vores rådgiverpulje."],
+  ["01", "Fortæl om jer", "Svar på nogle få spørgsmål, så foreslår vi et board af rådgivere, der supplerer hinanden. Justér det, til det passer."],
   ["02", "Book mødet", "Se tidspunkter, hvor alle jeres rådgivere er ledige, og book med få klik."],
   ["03", "Få overblik", "Mødet afholdes online, transskriberes og opsummeres automatisk, så I kan handle på det."],
 ];
@@ -22,7 +22,7 @@ export default function Home() {
             skriftlig opsummering med beslutninger og handlingspunkter bagefter.
           </p>
           <div className="mt-space-5 flex flex-wrap gap-4">
-            <Link href="/signup" className="btn">Kom i gang</Link>
+            <Link href="/kom-i-gang" className="btn">Kom i gang</Link>
             <Link href="/priser" className="btn-outline-light">Se priser</Link>
           </div>
         </div>
@@ -49,7 +49,7 @@ export default function Home() {
           <SectionHeading eyebrow="Pris" title="Du betaler kun for møderne">
             <p className="text-muted">
               Prisen er fast pr. måned og afhænger af, hvor mange rådgivere der sidder i dit board, og hvor ofte I mødes.
-              1.750 kr. pr. rådgiver pr. møde, ekskl. moms.
+              Fra 1.750 kr. pr. rådgiver pr. møde, ekskl. moms; den endelige pris afhænger af de rådgivere, du vælger.
             </p>
           </SectionHeading>
           <PriceCalculator />
@@ -75,7 +75,7 @@ export default function Home() {
             <h2 className="section-title">Klar til at sætte dit board?</h2>
             <span className="rule-gold mt-5" aria-hidden="true" />
           </div>
-          <Link href="/signup" className="btn self-start md:self-auto">Opret konto</Link>
+          <Link href="/kom-i-gang" className="btn self-start md:self-auto">Opret konto</Link>
         </div>
       </Band>
     </PageShell>

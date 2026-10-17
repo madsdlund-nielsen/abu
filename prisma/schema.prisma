@@ -98,14 +98,98 @@ model AdvisorProfile {
   userId    String   @id
   title     String   @default("")
   bio       String   @default("")
-  expertise String[]
   photoUrl  String   @default("")
   active    Boolean  @default(true)
+  /// Pris pr. møde i hele kroner, ekskl. moms. Sættes af admin. Fastfryses på abonnementet ved køb.
+  pricePerMeetingDkk Int @default(1750)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   availabilityRules  AvailabilityRule[]
   availabilityBlocks AvailabilityBlock[]
   boards             SubscriptionAdvisor[]
+  tags               AdvisorTag[]
+}
+
+/// Kompetence-tag. Bruges til at matche kundens behov (onboarding-testen) med rådgivere.
+model Tag {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+
+  advisors AdvisorTag[]
+  weights  AnswerTagWeight[]
+}
+
+model AdvisorTag {
+  advisorId String
+  tagId     String
+  advisor   AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
+  tag       Tag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([advisorId, tagId])
+  @@index([tagId])
+}
+
+enum QuestionType {
+  SINGLE
+  MULTI
+}
+
+/// Spørgsmål i onboarding-testen (redigeres i admin-CMS).
+model OnboardingQuestion {
+  id        String       @id @default(cuid())
+  text      String
+  helpText  String?
+  type      QuestionType @default(SINGLE)
+  sortOrder Int          @default(0)
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+
+  answers OnboardingAnswer[]
+}
+
+model OnboardingAnswer {
+  id         String             @id @default(cuid())
+  questionId String
+  text       String
+  sortOrder  Int                @default(0)
+  /// Valgfri: dette svar angiver boardets størrelse (2, 3 eller 4).
+  boardSize  Int?
+  question   OnboardingQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  weights AnswerTagWeight[]
+
+  @@index([questionId])
+}
+
+model AnswerTagWeight {
+  answerId String
+  tagId    String
+  /// 1-5
+  weight   Int
+  answer   OnboardingAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  tag      Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([answerId, tagId])
+  @@index([tagId])
+}
+
+/// Server-side tilstand for en igangværende tilmelding. Slettes ved gennemført betaling og ellers efter udløb (7 dage).
+model OnboardingSession {
+  id            String   @id @default(cuid())
+  /// SHA-256 hex af cookie-tokenet
+  tokenHash     String   @unique
+  step          Int      @default(1)
+  data          Json     @default("{}")
+  answers       Json     @default("{}")
+  suggestedBoard Json    @default("{}")
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+
+  @@index([expiresAt])
 }
 
 model CustomerProfile {
@@ -114,6 +198,12 @@ model CustomerProfile {
   cvr          String
   address      String @default("")
   billingEmail String
+  /// Virksomhedsdata fra CVR-registret (snapshot ved tilmelding), eller manuelt indtastet.
+  cvrData      Json?
+  /// false = navn og adresse er indtastet manuelt (ikke verificeret mod CVR)
+  cvrVerified  Boolean @default(false)
+  /// Snapshot af onboarding-testen: spørgsmåls- og svartekster, behov og foreslået board.
+  testAnswers  Json?
   user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   subscriptions Subscription[]
@@ -168,6 +258,8 @@ model Subscription {
 model SubscriptionAdvisor {
   subscriptionId String
   advisorId      String
+  /// Rådgiverens pris pr. møde (ekskl. moms) fastfrosset på købstidspunktet / ved planskift.
+  pricePerMeetingDkk Int @default(1750)
   subscription   Subscription   @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   advisor        AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
 
