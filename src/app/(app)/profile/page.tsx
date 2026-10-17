@@ -22,6 +22,11 @@ export default async function ProfilePage({ searchParams }: { searchParams: SP }
             <input className="input" id="name" name="name" defaultValue={user.name} required />
           </div>
           <div>
+            <label className="label" htmlFor="phone">Mobilnummer (til SMS-påmindelser)</label>
+            <input className="input" id="phone" name="phone" type="tel" autoComplete="tel" defaultValue={user.phone ?? ""} placeholder="20 30 40 50" />
+            <p className="mt-1 text-xs text-muted">Valgfrit. Bruges kun til påmindelser om dine møder. Du kan slå SMS fra under Konto.</p>
+          </div>
+          <div>
             <label className="label" htmlFor="title">Titel</label>
             <input className="input" id="title" name="title" defaultValue={profile.title} maxLength={120} />
           </div>

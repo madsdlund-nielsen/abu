@@ -15,12 +15,14 @@ export default async function AdminMeetings({ searchParams }: { searchParams: SP
   });
   return (
     <div className="space-y-6">
+      <span className="eyebrow">Admin · Møder</span>
       <h1>Alle møder</h1>
       <Flash ok={ok} err={err} />
       {meetings.length === 0 ? (
         <Empty>Ingen møder endnu.</Empty>
       ) : (
         <MeetingTable
+          hrefBase="/admin/meetings"
           whoLabel="Kunde / rådgivere"
           rows={meetings.map((m) => ({
             id: m.id,

@@ -10,7 +10,7 @@ export interface MeetingRow {
   who: string;
 }
 
-export function MeetingTable({ rows, whoLabel }: { rows: MeetingRow[]; whoLabel: string }) {
+export function MeetingTable({ rows, whoLabel, hrefBase = "/meetings" }: { rows: MeetingRow[]; whoLabel: string; hrefBase?: string }) {
   return (
     <div className="table-wrap">
       <table className="table">
@@ -28,7 +28,7 @@ export function MeetingTable({ rows, whoLabel }: { rows: MeetingRow[]; whoLabel:
               <td className="whitespace-nowrap first-letter:uppercase">{formatDateTime(m.startsAt)}</td>
               <td>{m.who}</td>
               <td><MeetingStatusBadge status={m.status} /></td>
-              <td className="text-right"><Link href={`/meetings/${m.id}`}>Åbn</Link></td>
+              <td className="text-right"><Link href={`${hrefBase}/${m.id}`}>Åbn</Link></td>
             </tr>
           ))}
         </tbody>
