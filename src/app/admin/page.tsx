@@ -57,6 +57,10 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
         ))}
       </div>
       <section className="card">
+        <h2>Booking</h2>
+        <p className="mt-2 text-sm text-muted">Danske helligdage spærres automatisk for booking. <Link href="/admin/helligdage">Se og ret helligdage og lukkedage</Link>.</p>
+      </section>
+      <section className="card">
         <h2>Baggrundsjobs</h2>
         <p className="mt-2 text-sm text-muted">{pendingJobs} afventer, {failedJobs} fejlet.</p>
         <form action={processJobsAction} className="mt-3">

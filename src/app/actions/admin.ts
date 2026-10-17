@@ -9,6 +9,7 @@ import { sendInviteEmail, inviteUrl } from "@/lib/emails";
 import { getPriceBounds, savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
 import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
 import { getEnv } from "@/lib/env";
+import { setHolidayBlocked } from "@/lib/holidays";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
 import { processJobs } from "@/lib/jobs";
 import { eraseUser } from "@/lib/erasure";
@@ -137,4 +138,19 @@ export async function savePriceBoundsAction(formData: FormData) {
   await savePriceBounds(b);
   await audit(admin.id, "advisor.price_bounds", "AppSetting", "advisor.price", `${b.min}-${b.max}`);
   redirectWith("/admin/advisors", "ok", "Prisintervallet er gemt. Det gælder for nye prisændringer.");
+}
+
+/** Slå en helligdag/lukkedag til eller fra for booking (plan #24). */
+export async function setHolidayBlockedAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const date = String(formData.get("date") ?? "");
+  const blocked = formData.get("blocked") === "1";
+  try {
+    await setHolidayBlocked(date, blocked);
+  } catch {
+    redirectWith("/admin/helligdage", "err", "Datoen er ikke en kendt helligdag.");
+  }
+  await audit(admin.id, blocked ? "holiday.block" : "holiday.open", "AppSetting", date);
+  revalidatePath("/admin/helligdage");
+  redirectWith("/admin/helligdage", "ok", blocked ? `${date} er spærret for booking.` : `${date} er åbnet for booking.`);
 }
