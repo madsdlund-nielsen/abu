@@ -1,15 +1,23 @@
 /* Seed: admin, tags, 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
 import bcrypt from "bcryptjs";
+import { seedRefusal } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
 import { ensureNotificationDefaults } from "../src/lib/notifications/service";
 import { ADVISORS, DEMO_BOARD_EMAILS, QUESTIONS, TAGS } from "./seed-data";
 
 async function main() {
+  // H-1: demodata med kendte adgangskoder må aldrig ende i produktion
+  const refusal = seedRefusal(process.env);
+  if (refusal) {
+    console.error(refusal);
+    process.exitCode = 1;
+    return;
+  }
   // Demobrugerne har givet samtykke til optagelse (version 0 = standardteksten)
   const consent = { recordingConsentAt: new Date(), recordingConsentVersion: "r0" };
-  const adminHash = await bcrypt.hash("Admin123!", 12);
-  const kundeHash = await bcrypt.hash("Kunde123!", 12);
+  const adminHash = await bcrypt.hash("Admin12345!", 12);
+  const kundeHash = await bcrypt.hash("Kunde12345!", 12);
   const advisorHash = await bcrypt.hash("Raadgiver123!", 12);
 
   await prisma.user.upsert({
@@ -130,14 +138,14 @@ async function main() {
   console.log(`Notifikationer: ${n.templates} skabeloner og ${n.rules} regler oprettet.`);
 
   console.log("Seed færdig.");
-  console.log("  Admin:   admin@abu.local / Admin123!");
-  console.log("  Kunde:   kunde@abu.local / Kunde123!");
+  console.log("  Admin:   admin@abu.local / Admin12345!");
+  console.log("  Kunde:   kunde@abu.local / Kunde12345!");
   console.log("  Rådgiver (alle): <fornavn.efternavn>@abu.local / Raadgiver123!");
 }
 
 main()
   .catch((e) => {
     console.error(e);
-    process.exit(1);
+    process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());

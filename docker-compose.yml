@@ -1,7 +1,8 @@
 # Lokal/produktions-opsætning: Postgres + migrationer + app.
 #   cp .env.example .env   (justér efter behov)
 #   docker compose up --build
-#   docker compose run --rm migrate npx tsx prisma/seed.ts     # (valgfrit) demodata
+#   docker compose run --rm migrate npm run create-admin -- --email admin@firma.dk --name "Navn"   # første admin
+#   docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts                  # KUN lokalt: demodata
 services:
   postgres:
     image: postgres:16
@@ -23,7 +24,12 @@ services:
       context: .
       target: build
     command: npx prisma migrate deploy
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # Seed (demodata med kendte adgangskoder) afvises, når NODE_ENV=production. Lokalt: -e APP_ENV=development.
+      NODE_ENV: production
       DATABASE_URL: postgresql://abu:${POSTGRES_PASSWORD:-abu}@postgres:5432/abu
     depends_on:
       postgres:

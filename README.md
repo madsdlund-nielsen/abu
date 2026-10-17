@@ -27,8 +27,8 @@ Seed-brugere:
 
 | Rolle | Login | Adgangskode |
 |---|---|---|
-| Admin | `admin@abu.local` | `Admin123!` |
-| Kunde (aktivt abonnement: 3 rådgivere, hver 8. uge) | `kunde@abu.local` | `Kunde123!` |
+| Admin | `admin@abu.local` | `Admin12345!` |
+| Kunde (aktivt abonnement: 3 rådgivere, hver 8. uge) | `kunde@abu.local` | `Kunde12345!` |
 | Rådgivere (8 stk., fx `mette.lindberg@abu.local`) | se `prisma/seed-data.ts` | `Raadgiver123!` |
 
 Seed opretter også danske standardtekster og -regler til notifikationer (20 skabeloner, 20 regler).
@@ -37,12 +37,14 @@ Hele flowet virker i mock-tilstand: onboarding (`/kom-i-gang`) → "betaling" �
 rådgiver/admin) → transskription og resumé vises på mødesiden. Mails (inkl. invitationslinks) skrives til serverloggen,
 og invitationslinket vises også for admin i UI'et under *Admin → Rådgivere*.
 
-Med Docker Compose (Postgres + migration + app):
+Seed er **kun til udvikling**: det afvises, når `NODE_ENV=production` eller `APP_ENV=production` (H-1).
+
+Med Docker Compose (Postgres + migration + app) lokalt:
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # sæt APP_ENV=development i .env for at køre lokalt med mock-udbydere
 docker compose up --build
-docker compose run --rm migrate npx tsx prisma/seed.ts   # valgfrit: demodata
+docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   # valgfrit: demodata (kun lokalt)
 ```
 
 ### Scripts
@@ -56,7 +58,8 @@ docker compose run --rm migrate npx tsx prisma/seed.ts   # valgfrit: demodata
 | `npm test` | Enhedstests (vitest): pris (pr. rådgiver), matching, CVR, onboarding-validering og -tekster, slots, kvoteperioder, webhook-signaturer, mødevindue (`meetingJoinState`, sommertid), notifikationer (timing, stille timer, planlægning/idempotens/flytning/aflysning, skabeloner, SMS-segmenter, afmelding, inMobile-adapter), kandidatsortering, boardændring |
 | `npm run db:migrate` | Ny migration under udvikling |
 | `npm run db:deploy` | Anvend migrationer (produktion) |
-| `npm run db:seed` | Seed-data |
+| `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) |
+| `npm run create-admin -- --email … --name …` | Opretter første administrator og udskriver et engangslink til at vælge adgangskode |
 
 ## Onboarding og CMS
 
@@ -204,8 +207,10 @@ Valget er drevet af, at ingen amerikanske selskaber er databehandlere. Se `docs/
 3. Klon repoet, `cp .env.example .env`, og sæt som minimum `APP_URL=https://abu.example.dk`, en stærk `POSTGRES_PASSWORD`,
    `CRON_SECRET` og de rigtige providers (se ovenfor).
 4. `docker compose up -d --build` – `migrate`-servicen kører `prisma migrate deploy`, derefter starter appen.
-5. Opret admin: kør seed én gang (`docker compose run --rm migrate npx tsx prisma/seed.ts`), log ind som `admin@abu.local`,
-   **skift adgangskoden under Konto og slet/deaktiver demobrugerne**. (Alternativt opret admin direkte i databasen.)
+5. Opret den første administrator (kør **aldrig** seed i produktion – det afvises):
+   `docker compose run --rm migrate npm run create-admin -- --email admin@firma.dk --name "Fornavn Efternavn"`.
+   Scriptet udskriver et engangslink (7 dage) i terminalen; åbn det og vælg adgangskode. Der står ingen adgangskode i koden eller loggen.
+   Nyt link til en eksisterende admin: `npm run create-admin -- --email admin@firma.dk --reset`.
 6. Cron (kun hvis `IN_PROCESS_SCHEDULER=false`; ellers kører jobkøen og notifikationerne hvert minut i appen): `* * * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://abu.example.dk/api/cron/process-jobs`.
 7. Backup: `pg_dump` af Postgres-volumen dagligt (fx til Hetzner Object Storage) samt backup af `uploads`-volumen, hvis `local`-storage bruges.
 
