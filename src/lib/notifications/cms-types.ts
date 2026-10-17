@@ -33,6 +33,9 @@ export interface CmsSettings {
   smsSender: string;
   logRetentionMonths: number;
   leadRetentionMonths: number;
+  smsCountries: string[];
+  smsPerNumberCap: number;
+  smsDailyCap: number;
 }
 
 export interface CmsProviders {

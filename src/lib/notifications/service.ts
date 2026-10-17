@@ -10,7 +10,10 @@ import { toE164 } from "../phone";
 import { DEFAULT_RULES, DEFAULT_TEMPLATES } from "./defaults";
 import { buildEmail } from "./email-layout";
 import { planMeetingReminders, planNotifications, reminderDedupe, type ExistingEntry, type PlanRecipient } from "./plan";
-import { getNotificationSettings } from "./settings";
+import { getNotificationSettings, type NotificationSettings } from "./settings";
+import { isSmsDestinationAllowed, smsCapReached, smsCountryCode } from "./sms-policy";
+import { raiseAlert } from "../alerts";
+import { rateLimit } from "../rate-limit";
 import { renderTemplate } from "./template";
 import { adjustForQuietHours } from "./timing";
 import { isTriggerKey, TRIGGERS, VARIABLES, type TriggerDef, type TriggerKey } from "./triggers";
@@ -581,6 +584,37 @@ async function buildVariables(
   return { ...vars, ...extra };
 }
 
+/**
+ * SMS-politik (M-5) lige før afsendelse: kun tilladte lande, og højst N SMS pr. nummer og i alt pr. 24 timer. Ved blokering
+ * oprettes en driftsalarm (højst én pr. type pr. time). Returnerer en årsag til at springe over, ellers null.
+ */
+export async function smsBlockReason(address: string, settings: Pick<NotificationSettings, "smsCountries" | "smsPerNumberCap" | "smsDailyCap">, now = new Date()): Promise<string | null> {
+  const alertOnce = async (kind: "sms_cap_number" | "sms_cap_daily" | "sms_country_blocked", message: string) => {
+    if (await rateLimit(`alert:${kind}`, 1, 3_600_000, now)) await raiseAlert(kind, message);
+  };
+  if (!isSmsDestinationAllowed(address, settings.smsCountries)) {
+    const code = smsCountryCode(address);
+    await alertOnce("sms_country_blocked", `SMS til ${code ? `+${code}` : "ukendt landekode"} er blokeret (tilladte lande: ${settings.smsCountries.map((c) => `+${c}`).join(", ")}).`);
+    return "Landet er ikke på listen over lande, der må modtage SMS (Indstillinger)";
+  }
+  const since = new Date(now.getTime() - 24 * 3_600_000);
+  const sent = { channel: "SMS" as const, status: { in: ["SENT" as const, "DELIVERED" as const] }, sentAt: { gte: since } };
+  const [sentToNumber, sentTotal] = await Promise.all([
+    prisma.notificationLog.count({ where: { ...sent, recipientAddress: address } }),
+    prisma.notificationLog.count({ where: sent }),
+  ]);
+  const hit = smsCapReached({ sentToNumber, sentTotal, perNumberCap: settings.smsPerNumberCap, dailyCap: settings.smsDailyCap });
+  if (hit === "daily") {
+    await alertOnce("sms_cap_daily", `Dagsloftet på ${settings.smsDailyCap} SMS er nået; flere SMS sendes ikke de næste timer.`);
+    return "Dagsloftet for SMS er nået (Indstillinger)";
+  }
+  if (hit === "per_number") {
+    await alertOnce("sms_cap_number", `Et nummer har modtaget ${settings.smsPerNumberCap} SMS på et døgn; flere springes over.`);
+    return "Loftet for SMS til dette nummer er nået (Indstillinger)";
+  }
+  return null;
+}
+
 /** Sender én besked fra køen. Springer over, hvis den ikke længere er relevant, og udsætter SMS i stille timer. */
 export async function deliverLog(id: string, opts: { extraVars?: Record<string, string>; now?: Date } = {}): Promise<DeliverResult> {
   const now = opts.now ?? new Date();
@@ -628,6 +662,8 @@ export async function deliverLog(id: string, opts: { extraVars?: Record<string, 
       result = await getEmail().send({ to: log.recipientAddress, toName: vars.navn || undefined, subject, text: mail.text, html: mail.html, messageId: log.id, sensitive: def.sensitive });
     } else {
       const settings = await getNotificationSettings();
+      const blocked = await smsBlockReason(log.recipientAddress, settings, now);
+      if (blocked) return skip(id, blocked);
       sentText = def.optIn && !body.includes(vars.afmeldlink) ? `${body}\nAfmeld: ${vars.afmeldlink}` : body;
       result = await getSms().send({ to: log.recipientAddress, text: sentText, from: settings.smsSender, messageId: log.id, sensitive: def.sensitive });
     }
@@ -685,6 +721,10 @@ export async function sendTestMessage(opts: {
   const address = opts.channel === "SMS" ? toE164(opts.to) : opts.to.trim();
   if (!address || (opts.channel === "EMAIL" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address))) {
     return { ok: false, error: opts.channel === "SMS" ? "Indtast et gyldigt telefonnummer, fx 20 30 40 50." : "Indtast en gyldig e-mailadresse." };
+  }
+  if (opts.channel === "SMS") {
+    const blocked = await smsBlockReason(address, await getNotificationSettings());
+    if (blocked) return { ok: false, error: `Testen sendes ikke: ${blocked.charAt(0).toLowerCase()}${blocked.slice(1)}.` };
   }
   const vars = sampleVariables();
   const logId = randomUUID();

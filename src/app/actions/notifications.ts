@@ -12,6 +12,7 @@ import { loadNotificationLog } from "@/lib/notifications/cms-data";
 import type { CmsLogFilter, CmsLogPage, CmsRule, CmsTemplate } from "@/lib/notifications/cms-types";
 import { ensureNotificationDefaults, resendLog, sendTestMessage, syncMeetingReminders } from "@/lib/notifications/service";
 import { saveNotificationSettings } from "@/lib/notifications/settings";
+import { parseSmsCountries } from "@/lib/notifications/sms-policy";
 import { validateTemplate } from "@/lib/notifications/template";
 import { validateOffset } from "@/lib/notifications/timing";
 import { isTriggerKey, TRIGGERS } from "@/lib/notifications/triggers";
@@ -257,6 +258,9 @@ export async function saveSettingsAction(input: {
   smsSender: string;
   logRetentionMonths: number;
   leadRetentionMonths: number;
+  smsCountries: string[];
+  smsPerNumberCap: number;
+  smsDailyCap: number;
 }): R {
   const admin = await requireRole("ADMIN");
   const p = z
@@ -267,6 +271,9 @@ export async function saveSettingsAction(input: {
       smsSender: z.string().trim(),
       logRetentionMonths: z.number().int().min(1, "Log skal gemmes mindst 1 måned.").max(60, "Højst 60 måneder."),
       leadRetentionMonths: z.number().int().min(1, "Leads skal gemmes mindst 1 måned.").max(60, "Højst 60 måneder."),
+      smsCountries: z.array(z.string()).min(1, "Vælg mindst ét land, der må modtage SMS.").max(30),
+      smsPerNumberCap: z.number().int().min(1, "Loftet pr. nummer skal være mindst 1.").max(100, "Højst 100 SMS pr. nummer pr. døgn."),
+      smsDailyCap: z.number().int().min(1, "Dagsloftet skal være mindst 1.").max(100000, "Dagsloftet er for højt."),
     })
     .safeParse(input);
   if (!p.success) return err(p.error.issues[0].message);
@@ -279,6 +286,9 @@ export async function saveSettingsAction(input: {
     smsSender: s.smsSender,
     logRetentionMonths: s.logRetentionMonths,
     leadRetentionMonths: s.leadRetentionMonths,
+    smsCountries: parseSmsCountries(s.smsCountries.join(",")),
+    smsPerNumberCap: s.smsPerNumberCap,
+    smsDailyCap: s.smsDailyCap,
   });
   await audit(admin.id, "notification.settings.update", "AppSetting", "notif");
   refresh();

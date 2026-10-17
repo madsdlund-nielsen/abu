@@ -4,6 +4,7 @@ import { useState } from "react";
 import { loadDefaultsAction, saveSettingsAction } from "@/app/actions/notifications";
 import type { CmsProviders, CmsSettings } from "@/lib/notifications/cms-types";
 import { validateSmsSender } from "@/lib/messaging/sender";
+import { SMS_COUNTRIES } from "@/lib/notifications/sms-policy";
 import { Switch, type Saver } from "../primitives";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -70,6 +71,46 @@ export function SettingsTab({
           <input id="sms-sender" className={`input ${senderProblem ? "!border-danger" : ""}`} value={s.smsSender} maxLength={15} aria-invalid={senderProblem ? true : undefined}
             onChange={(e) => setS({ ...s, smsSender: e.target.value })} onBlur={() => commit(s)} />
           {senderProblem ? <p className="mt-1 text-xs font-semibold text-danger" role="alert">{senderProblem}</p> : <p className="mt-1 text-xs text-muted">3-11 tegn, kun bogstaver (a-z) og tal, fx «ABUnlimited». Et alfanumerisk navn kan ikke modtage svar.</p>}
+        </div>
+      </section>
+
+      <section className="border border-grey-bg bg-white p-space-3 sm:p-space-4" aria-labelledby="smssec-h" data-testid="sms-security">
+        <span className="eyebrow">SMS</span>
+        <h2 id="smssec-h" className="text-xl font-light">Lande og lofter</h2>
+        <span className="rule-gold mt-3" aria-hidden="true" />
+        <p className="mt-space-3 text-sm text-muted">SMS sendes kun til numre i de valgte lande (beskytter mod SMS-svindel til dyre udlandsnumre). Lofterne gælder de seneste 24 timer; når et loft nås, springes beskeden over, og der vises en alarm på admin-forsiden.</p>
+        <fieldset className="mt-space-3">
+          <legend className="label">Lande, der må modtage SMS</legend>
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+            {SMS_COUNTRIES.map((c) => {
+              const on = s.smsCountries.includes(c.code);
+              return (
+                <li key={c.code}>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={on && s.smsCountries.length === 1}
+                      onChange={() => commit({ ...s, smsCountries: on ? s.smsCountries.filter((x) => x !== c.code) : [...s.smsCountries, c.code] })}
+                    />
+                    <span>{c.name} <span className="text-muted">+{c.code}</span></span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+        <div className="mt-space-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="label" htmlFor="cap-number">Loft pr. nummer (pr. døgn)</label>
+            <input id="cap-number" className="input" type="number" min={1} max={100} value={s.smsPerNumberCap}
+              onChange={(e) => setS({ ...s, smsPerNumberCap: Number(e.target.value) })} onBlur={() => commit(s)} />
+          </div>
+          <div>
+            <label className="label" htmlFor="cap-daily">Loft i alt (pr. døgn)</label>
+            <input id="cap-daily" className="input" type="number" min={1} max={100000} value={s.smsDailyCap}
+              onChange={(e) => setS({ ...s, smsDailyCap: Number(e.target.value) })} onBlur={() => commit(s)} />
+          </div>
         </div>
       </section>
 
