@@ -21,7 +21,7 @@ export type CvrLookupResult =
   | { kind: "ok"; company: CompanyInfo }
   | { kind: "ceased"; company: CompanyInfo }
   | { kind: "not_found" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; /** Gratis kvote opbrugt (cvrapi.dk) */ quota?: boolean };
 
 export interface CvrProvider {
   readonly name: "mock" | "virk" | "cvrapi";

@@ -77,6 +77,7 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
                   <p className="font-semibold text-navy">{formatDkk(s.monthlyPriceDkk)} / md. ekskl. moms · {frequencyLabel(s.frequencyWeeks)}</p>
                   <SubStatusBadge status={s.status} />
                 </div>
+                <p className="mt-1"><Link href={`/admin/subscriptions/${s.id}`}>Rediger fast board</Link></p>
                 <p className="text-muted">
                   {s.advisors.map((a) => `${a.advisor.user.name} (${formatDkk(a.pricePerMeetingDkk)})`).join(" · ")}
                 </p>

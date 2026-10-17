@@ -6,6 +6,7 @@ const PROTECTED = [
   "/book",
   "/meetings",
   "/account",
+  "/samtykke",
   "/availability",
   "/profile",
   "/admin",

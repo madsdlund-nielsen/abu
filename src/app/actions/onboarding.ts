@@ -4,6 +4,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
+import { recordingConsentNow } from "@/lib/consent";
+import { currentConsent } from "@/lib/content/server";
+import { convertLead, upsertLead } from "@/lib/leads";
 import { createSession, hashPassword, rateLimit } from "@/lib/auth";
 import { startCheckout } from "@/lib/checkout";
 import { lookupCvr } from "@/lib/cvr";
@@ -48,12 +51,23 @@ export async function saveContactAction(formData: FormData) {
   const contact = parsed.data!;
   const exists = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
   if (exists) fail(1, "Der findes allerede en konto med den e-mail.", `&konto=1${keep}`);
+  // Lead gemmes straks (også hvis tilmeldingen aldrig gøres færdig). Samtykket er aktivt (aldrig forudkrydset)
+  // og gemmes med den præcise tekst og version, personen så.
+  const h = await headers();
+  const proof = await currentConsent("marketing");
+  const leadId = await upsertLead({
+    name: contact.name,
+    email: contact.email,
+    consent: formData.get("contactConsent") === "on",
+    proof: { ...proof, ipAddress: h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null, userAgent: h.get("user-agent") },
+  });
   const s = await getOnboardingSession();
   if (s) {
-    await updateOnboardingSession(s.id, { step: Math.max(s.step, 2), data: { ...s.data, contact } });
+    await updateOnboardingSession(s.id, { step: Math.max(s.step, 2), data: { ...s.data, contact }, leadId });
   } else {
-    await createOnboardingSession({ step: 2, data: { contact } });
+    await createOnboardingSession({ step: 2, data: { contact }, leadId });
   }
+  await prisma.lead.updateMany({ where: { id: leadId, step: { lt: 2 } }, data: { step: 2 } });
   redirect(to(2));
 }
 
@@ -74,7 +88,7 @@ export async function saveCompanyAction(formData: FormData) {
     lookup: result.kind,
     confirmed: false,
     ...(result.kind === "ok" || result.kind === "ceased" ? { info: result.company } : {}),
-    ...(result.kind === "error" ? { lookupMessage: result.message } : {}),
+    ...(result.kind === "error" ? { lookupMessage: result.message, quota: result.quota } : {}),
   };
   await updateOnboardingSession(s.id, { step: Math.max(s.step, 3), data: { ...s.data, company } });
   redirect(to(3));
@@ -173,6 +187,7 @@ export async function completeOnboardingAction(formData: FormData) {
     password: formData.get("password") ?? "",
     confirm: formData.get("confirm") ?? "",
     consent: formData.get("consent") ?? undefined,
+    recordingConsent: formData.get("recordingConsent") ?? undefined,
   });
   if (!parsed.success) fail(6, parsed.error.issues[0].message);
   if (!rateLimit(`onb-complete:${await ip()}`, 10)) fail(6, "For mange forsøg. Prøv igen senere.");
@@ -206,6 +221,7 @@ export async function completeOnboardingAction(formData: FormData) {
       role: "CUSTOMER",
       passwordHash: await hashPassword(parsed.data!.password),
       consentAt: new Date(),
+      ...recordingConsentNow((await currentConsent("recording")).version),
       customerProfile: {
         create: {
           companyName,
@@ -220,6 +236,7 @@ export async function completeOnboardingAction(formData: FormData) {
     },
   });
   await createSession(user.id);
+  await convertLead(s.leadId, user.id);
   await audit(user.id, "auth.signup", "User", user.id);
 
   try {

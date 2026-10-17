@@ -43,12 +43,13 @@ describe("manualCompanySchema", () => {
 });
 
 describe("accountSchema", () => {
-  const ok = { password: "LangtPassword1", confirm: "LangtPassword1", consent: "on" };
+  const ok = { password: "LangtPassword1", confirm: "LangtPassword1", consent: "on", recordingConsent: "on" };
   it("kræver lang nok adgangskode, ens bekræftelse og samtykke", () => {
     expect(accountSchema.safeParse(ok).success).toBe(true);
     expect(accountSchema.safeParse({ ...ok, password: "kort", confirm: "kort" }).success).toBe(false);
     expect(accountSchema.safeParse({ ...ok, confirm: "andet" }).success).toBe(false);
     expect(accountSchema.safeParse({ ...ok, consent: undefined }).success).toBe(false);
+    expect(accountSchema.safeParse({ ...ok, recordingConsent: undefined }).success).toBe(false);
   });
 });
 

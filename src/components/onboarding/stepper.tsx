@@ -1,12 +1,11 @@
 import Link from "next/link";
 
-export const STEP_LABELS = ["Kontakt", "Virksomhed", "Bekræft", "Test", "Dit board", "Konto & betaling"] as const;
 
 /**
  * Trinindikator: på bredde en rolig række af firkantede tal med en tynd linje imellem; på mobil "Trin n af 6" og en
  * segmenteret fremdriftslinje. Gennemførte trin er links tilbage.
  */
-export function Stepper({ current, reached }: { current: number; reached: number }) {
+export function Stepper({ current, reached, labels: STEP_LABELS }: { current: number; reached: number; labels: string[] }) {
   return (
     <nav aria-label="Fremdrift" className="mb-space-5">
       <ol className="hidden sm:flex">
