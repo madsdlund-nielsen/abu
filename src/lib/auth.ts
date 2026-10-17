@@ -76,24 +76,6 @@ export async function requireRole(...roles: Role[]): Promise<User> {
   return user;
 }
 
-// --- Enkel rate limiting (in-memory, pr. proces) mod brute force ---
-const attempts = new Map<string, { count: number; resetAt: number }>();
-
-export function rateLimit(key: string, max = 8, windowMs = 15 * 60_000): boolean {
-  const now = Date.now();
-  const entry = attempts.get(key);
-  if (!entry || entry.resetAt < now) {
-    attempts.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-  entry.count += 1;
-  return entry.count <= max;
-}
-
-export function clearRateLimit(key: string) {
-  attempts.delete(key);
-}
-
 // --- Password tokens (invite / reset) ---
 export async function createPasswordToken(userId: string, purpose: "INVITE" | "RESET") {
   const token = randomToken();

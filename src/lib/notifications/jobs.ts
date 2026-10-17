@@ -1,4 +1,5 @@
 import { registerJobHandler } from "../jobs";
+import { cleanupRateLimits } from "../rate-limit";
 import { cleanupLeads } from "../leads";
 import { getNotificationSettings } from "./settings";
 import { cleanupNotificationLogs, ensureRecurringJob, processDueNotifications, scanAbandonedOnboarding } from "./service";
@@ -16,11 +17,16 @@ registerJobHandler("cleanup_leads", async () => {
   if (n > 0) console.log(`[leads] slettede ${n} leads uden samtykke eller uden for opbevaringsperioden`);
 });
 
+registerJobHandler("cleanup_rate_limits", async () => {
+  await cleanupRateLimits();
+});
+
 /** Kaldes hvert minut af jobprocessoren: finder ufærdige tilmeldinger, sender forfaldne beskeder og planlægger daglig oprydning. */
 export async function runNotificationTick(now = new Date()): Promise<{ created: number; sent: number }> {
   const created = await scanAbandonedOnboarding(now);
   const sent = await processDueNotifications({ now });
   await ensureRecurringJob("cleanup_notification_logs", DAY_MS);
   await ensureRecurringJob("cleanup_leads", DAY_MS);
+  await ensureRecurringJob("cleanup_rate_limits", DAY_MS);
   return { created, sent };
 }

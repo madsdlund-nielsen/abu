@@ -1,31 +1,28 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import {
-  clearRateLimit,
   createPasswordToken,
   createSession,
   destroySession,
   findValidPasswordToken,
   hashPassword,
-  rateLimit,
   validatePassword,
   verifyPassword,
 } from "@/lib/auth";
+import { getClientIp } from "@/lib/client-ip";
+import { isLocked, LOCK_THRESHOLD, recordFailedLogin, resetLoginFailures } from "@/lib/lockout";
+import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
 import { recordingConsentNow } from "@/lib/consent";
 import { currentConsent } from "@/lib/content/server";
 import { sendResetEmail } from "@/lib/emails";
 import { redirectWith } from "@/lib/redirect";
 
-async function clientKey(extra: string) {
-  const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
-  return `${ip}:${extra}`;
-}
+/** Samme svar, uanset om kontoen findes, er spærret, eller IP'en har brugt sin kvote (ingen konto-oplysninger). */
+const TOO_MANY = "For mange forsøg. Vent et kvarter og prøv igen, eller nulstil din adgangskode.";
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 
@@ -37,14 +34,25 @@ export async function loginAction(formData: FormData) {
   const keep = `/login?e=${encodeURIComponent(String(formData.get("email") ?? "").trim())}`;
   if (!parsed.success) redirectWith(keep, "err", "Indtast e-mail og adgangskode.");
   const { email, password } = parsed.data;
-  const key = await clientKey(email);
-  if (!rateLimit(key)) redirectWith(keep, "err", "For mange forsøg. Vent et kvarter og prøv igen.");
+  // 1) Grænse pr. betroet klient-IP (mod password spraying på tværs af konti)
+  if (!(await rateLimitIp("login-ip", await getClientIp(), 50))) redirectWith(keep, "err", TOO_MANY);
 
+  // 2) Spærring pr. konto i databasen – uafhængig af IP, så skiftende X-Forwarded-For ikke hjælper (H-2)
   const user = await prisma.user.findUnique({ where: { email } });
-  const ok = await verifyPassword(password, user?.passwordHash ?? null);
-  if (!user || !ok) redirectWith(keep, "err", "Forkert e-mail eller adgangskode.");
+  if (user && isLocked(user, new Date())) redirectWith(keep, "err", TOO_MANY);
+  // Ukendte e-mails spærres efter samme antal forsøg, så svaret ikke afslører, om kontoen findes
+  if (!user && !(await rateLimit(`login-unknown:${email}`, LOCK_THRESHOLD))) redirectWith(keep, "err", TOO_MANY);
 
-  clearRateLimit(key);
+  const ok = await verifyPassword(password, user?.passwordHash ?? null);
+  if (!user || !ok) {
+    if (user) {
+      const r = await recordFailedLogin(user.id);
+      if (r.lockedNow) await audit(user.id, "auth.lockout", "User", user.id, `Spærret til ${r.lockedUntil?.toISOString()}`);
+    }
+    redirectWith(keep, "err", "Forkert e-mail eller adgangskode.");
+  }
+
+  if (user.failedLoginCount > 0 || user.lockedUntil) await resetLoginFailures(user.id);
   await createSession(user.id);
   await audit(user.id, "auth.login", "User", user.id);
   // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login
@@ -59,7 +67,9 @@ export async function logoutAction() {
 
 export async function requestResetAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  if (!rateLimit(await clientKey("reset"), 5)) redirectWith("/reset-password", "err", "For mange forsøg. Prøv igen senere.");
+  if (!(await rateLimitIp("reset-ip", await getClientIp(), 5)) || (email && !(await rateLimit(`reset-email:${email}`, 3, 60 * 60_000)))) {
+    redirectWith("/reset-password", "err", "For mange forsøg. Prøv igen senere.");
+  }
   const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
   if (user) {
     const { token } = await createPasswordToken(user.id, "RESET");
@@ -88,7 +98,14 @@ export async function setPasswordAction(formData: FormData) {
   await prisma.$transaction([
     prisma.user.update({
       where: { id: row.userId },
-      data: { passwordHash: await hashPassword(password), ...(giveConsent ? recordingConsentNow((await currentConsent("recording")).version) : {}) },
+      // Ny adgangskode via engangslink ophæver en evt. login-spærring
+      data: {
+        passwordHash: await hashPassword(password),
+        failedLoginCount: 0,
+        lastFailedLoginAt: null,
+        lockedUntil: null,
+        ...(giveConsent ? recordingConsentNow((await currentConsent("recording")).version) : {}),
+      },
     }),
     prisma.passwordToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
     // Log alle andre sessioner ud

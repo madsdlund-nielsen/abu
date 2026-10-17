@@ -14,6 +14,11 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1).default("postgresql://abu:abu@localhost:5432/abu"),
   APP_URL: z.string().url().default("http://localhost:3000"),
   COOKIE_SECURE: z.enum(["true", "false", ""]).optional(),
+  /**
+   * Antal betroede reverse proxies foran appen (fx 1 for Caddy). Klient-IP tages fra X-Forwarded-For talt fra højre,
+   * så klienten ikke kan forfalske den. 0 = ingen proxy: X-Forwarded-For ignoreres helt. Kræves ≥ 1 i produktion.
+   */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
   CRON_SECRET: z.string().default(""),
   /** Hemmelighed til signerede links (afmelding). Kræves i produktion (mindst 32 tegn). */
   APP_SECRET: z.string().default(""),
@@ -148,6 +153,7 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   if (!raw.DATABASE_URL) p.push("DATABASE_URL skal sættes eksplicit.");
   if (!env.APP_URL.startsWith("https://") || isLocalUrl(env.APP_URL)) p.push("APP_URL skal være en offentlig https://-adresse.");
   if (env.COOKIE_SECURE === "false") p.push("COOKIE_SECURE=false er ikke tilladt i produktion.");
+  if (env.TRUSTED_PROXY_HOPS < 1) p.push("TRUSTED_PROXY_HOPS skal være mindst 1 (antal reverse proxies foran appen, fx Caddy = 1).");
   secret("APP_SECRET", "signerer afmeldingslinks");
   secret("CRON_SECRET", "beskytter /api/cron/process-jobs");
 
@@ -204,6 +210,7 @@ export function describeConfig(env: Env, appEnv: AppEnv): string {
     `lager=${env.STORAGE_PROVIDER}`,
     `cvr=${env.CVR_PROVIDER}`,
     `APP_URL=${env.APP_URL}`,
+    `proxy-hop=${env.TRUSTED_PROXY_HOPS}`,
     `APP_SECRET=${set(env.APP_SECRET)}`,
     `CRON_SECRET=${set(env.CRON_SECRET)}`,
     `scheduler=${env.IN_PROCESS_SCHEDULER ? "i processen" : "ekstern cron"}`,

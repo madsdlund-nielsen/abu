@@ -67,6 +67,10 @@ model User {
   /// Afmelding af ikke-obligatoriske beskeder pr. kanal (afmeldingslink, STOP-svar eller under Konto).
   emailOptOutAt DateTime?
   smsOptOutAt   DateTime?
+  /// Login-spærring pr. konto (H-2): fejlede forsøg i træk, seneste fejl og spærret indtil.
+  failedLoginCount  Int       @default(0)
+  lastFailedLoginAt DateTime?
+  lockedUntil       DateTime?
 
   sessions        Session[]
   passwordTokens  PasswordToken[]
@@ -534,4 +538,13 @@ model AppSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// Fælles lager til rate limits (H-2/L-2): overlever genstart og deles mellem instanser. Nøglen er SHA-256 af den logiske nøgle.
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
 }
