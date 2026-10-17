@@ -11,7 +11,7 @@ export function AddRuleForm() {
   const [state, action, pending] = useActionState<FormState, FormData>(addRuleAction, EMPTY_FORM_STATE);
   const v = state.error ? state.values : undefined;
   return (
-    <form action={action} className="mt-5 grid gap-3 sm:grid-cols-4" aria-busy={pending} key={state.at ?? 0}>
+    <form data-no-guard action={action} className="mt-5 grid gap-3 sm:grid-cols-4" aria-busy={pending} key={state.at ?? 0}>
       <FormStatus state={state} className="sm:col-span-4" />
       <div>
         <label className="label" htmlFor="weekday">Ugedag</label>
@@ -39,7 +39,7 @@ export function AddBlockForm() {
   const v = state.error ? state.values : undefined;
   // Ny key pr. svar: tom formular efter gem, genudfyldt med indtastningerne efter en fejl
   return (
-    <form action={action} className="mt-5 grid gap-4 sm:grid-cols-2" aria-busy={pending} key={state.at ?? 0}>
+    <form data-no-guard action={action} className="mt-5 grid gap-4 sm:grid-cols-2" aria-busy={pending} key={state.at ?? 0}>
       <FormStatus state={state} className="sm:col-span-2" />
       <DateTimeField name="from" label="Fra" defaultDate={v?.fromDate ?? ""} defaultTime={v?.fromTime ?? "09:00"} />
       <DateTimeField name="to" label="Til" defaultDate={v?.toDate ?? ""} defaultTime={v?.toTime ?? "24:00"} allowEndOfDay />
@@ -57,7 +57,7 @@ export function ProfileForm({ initial }: { initial: { name: string; phone: strin
   const [state, action, pending] = useActionState<FormState, FormData>(updateProfileAction, EMPTY_FORM_STATE);
   const v = { ...initial, ...(state.values ?? {}) };
   return (
-    <form action={action} className="grid gap-4" aria-busy={pending}>
+    <form data-no-guard action={action} className="grid gap-4" aria-busy={pending}>
       <FormStatus state={state} />
       <div>
         <label className="label" htmlFor="name">Navn</label>

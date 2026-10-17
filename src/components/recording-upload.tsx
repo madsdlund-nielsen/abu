@@ -82,7 +82,7 @@ export function RecordingUpload({ meetingId }: { meetingId: string }) {
     );
   }
   return (
-    <form onSubmit={upload} className="mt-3 grid gap-3" aria-busy={busy}>
+    <form data-no-guard onSubmit={upload} className="mt-3 grid gap-3" aria-busy={busy}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <label className="sr-only" htmlFor="recording-file">Optagelse (lyd eller video)</label>
         <input ref={input} id="recording-file" type="file" name="file" accept="audio/*,video/*" required className="text-sm" disabled={busy} />

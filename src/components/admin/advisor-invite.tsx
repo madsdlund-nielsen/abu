@@ -32,7 +32,7 @@ export function NewAdvisorForm({ idem }: { idem: string }) {
   }
   const v = state.values;
   return (
-    <form action={action} className="grid gap-4" aria-busy={pending}>
+    <form data-no-guard action={action} className="grid gap-4" aria-busy={pending}>
       <input type="hidden" name="idem" value={idem} />
       {state.error && <p role="alert" className="callout callout-error text-sm">{state.error}</p>}
       <div>
@@ -56,7 +56,7 @@ export function ResendInviteButton({ userId }: { userId: string }) {
   const [state, action, pending] = useActionState<InviteState, FormData>(resendInviteAction, {});
   return (
     <div>
-      <form action={action}>
+      <form data-no-guard action={action}>
         <input type="hidden" name="userId" value={userId} />
         <button className="btn-secondary btn-sm" type="submit" disabled={pending}>Ny invitation</button>
       </form>

@@ -6,6 +6,7 @@ import { useEffect } from "react";
  * Global beskyttelse af server-action-formularer:
  *  - dobbeltklik/dobbelt-Enter sender ikke formularen to gange (knapperne deaktiveres, mens den sendes),
  *  - `data-confirm="..."` på en formular beder om bekræftelse, før en destruktiv handling sendes.
+ *  - `data-no-guard` slår dobbeltsubmit-spærringen fra for formularer, der selv viser «sender …» (useActionState).
  * Spærringen løftes igen efter 10 sekunder (hvis handlingen ikke navigerer væk) og når siden vises fra cache.
  */
 export function FormGuard() {
@@ -27,6 +28,9 @@ export function FormGuard() {
         e.stopImmediatePropagation();
         return;
       }
+      // Formularer, der selv styrer «sender …» (useActionState/klientformularer), spærres ikke: de skal kunne sendes igen
+      // straks efter en fejl. Bekræftelsen ovenfor gælder stadig.
+      if (form.hasAttribute("data-no-guard")) return;
       if (form.dataset.submitting) {
         e.preventDefault();
         e.stopImmediatePropagation();

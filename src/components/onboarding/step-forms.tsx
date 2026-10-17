@@ -14,7 +14,7 @@ export function ContactStepForm({ t, initial }: { t: Texts; initial: { name?: st
   const [state, action, pending] = useActionState<FormState, FormData>(saveContactAction, EMPTY_FORM_STATE);
   const v = state.values;
   return (
-    <form action={action} className="grid gap-4" key={state.at ?? 0} aria-busy={pending}>
+    <form data-no-guard action={action} className="grid gap-4" key={state.at ?? 0} aria-busy={pending}>
       <FormStatus state={state} />
       <div>
         <label className="label" htmlFor="name">{t["step1.nameLabel"]}</label>
@@ -41,7 +41,7 @@ export function CompanyStepForm({ t, initial }: { t: Texts; initial: { cvr?: str
   const [state, action, pending] = useActionState<FormState, FormData>(saveCompanyAction, EMPTY_FORM_STATE);
   const v = state.values;
   return (
-    <form action={action} className="grid gap-4" key={state.at ?? 0} aria-busy={pending}>
+    <form data-no-guard action={action} className="grid gap-4" key={state.at ?? 0} aria-busy={pending}>
       <FormStatus state={state} />
       <div>
         <label className="label" htmlFor="cvr">{t["step2.cvrLabel"]}</label>

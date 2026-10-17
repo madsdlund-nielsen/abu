@@ -9,7 +9,7 @@ import { EMPTY_FORM_STATE, type FormState } from "@/lib/form-state";
 export function LoginForm({ next, initialEmail }: { next: string | null; initialEmail?: string }) {
   const [state, action, pending] = useActionState<FormState, FormData>(loginAction, EMPTY_FORM_STATE);
   return (
-    <form action={action} className="space-y-4" key={state.at ?? 0} aria-busy={pending}>
+    <form data-no-guard action={action} className="space-y-4" key={state.at ?? 0} aria-busy={pending}>
       <FormStatus state={state} />
       {next && <input type="hidden" name="next" value={next} />}
       <div>
@@ -28,7 +28,7 @@ export function LoginForm({ next, initialEmail }: { next: string | null; initial
 export function ResetRequestForm() {
   const [state, action, pending] = useActionState<FormState, FormData>(requestResetAction, EMPTY_FORM_STATE);
   return (
-    <form action={action} className="space-y-4" key={state.at ?? 0} aria-busy={pending}>
+    <form data-no-guard action={action} className="space-y-4" key={state.at ?? 0} aria-busy={pending}>
       <FormStatus state={state} />
       <div>
         <label className="label" htmlFor="email">E-mail</label>
@@ -42,7 +42,7 @@ export function ResetRequestForm() {
 export function ChangePasswordForm({ minLength }: { minLength: number }) {
   const [state, action, pending] = useActionState<FormState, FormData>(changePasswordAction, EMPTY_FORM_STATE);
   return (
-    <form action={action} className="mt-3 grid max-w-md gap-3" key={state.at ?? 0} aria-busy={pending}>
+    <form data-no-guard action={action} className="mt-3 grid max-w-md gap-3" key={state.at ?? 0} aria-busy={pending}>
       <FormStatus state={state} />
       <div>
         <label className="label" htmlFor="current">Nuværende adgangskode</label>
@@ -60,7 +60,7 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
 export function NotificationPrefsForm({ email, sms, hasPhone, marketing }: { email: boolean; sms: boolean; hasPhone: boolean; marketing: string | null }) {
   const [state, action, pending] = useActionState<FormState, FormData>(saveNotificationPreferencesAction, EMPTY_FORM_STATE);
   return (
-    <form action={action} className="mt-3 grid gap-2 text-sm" aria-busy={pending}>
+    <form data-no-guard action={action} className="mt-3 grid gap-2 text-sm" aria-busy={pending}>
       <FormStatus state={state} />
       <label className="flex items-center gap-3">
         <input type="checkbox" name="email" className="h-4 w-4" defaultChecked={email} />
