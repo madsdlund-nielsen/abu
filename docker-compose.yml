@@ -1,0 +1,56 @@
+# Lokal/produktions-opsætning: Postgres + migrationer + app.
+#   cp .env.example .env   (justér efter behov)
+#   docker compose up --build
+#   docker compose run --rm migrate npx tsx prisma/seed.ts     # (valgfrit) demodata
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: abu
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-abu}
+      POSTGRES_DB: abu
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abu -d abu"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: build
+    command: npx prisma migrate deploy
+    environment:
+      DATABASE_URL: postgresql://abu:${POSTGRES_PASSWORD:-abu}@postgres:5432/abu
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://abu:${POSTGRES_PASSWORD:-abu}@postgres:5432/abu
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  uploads:

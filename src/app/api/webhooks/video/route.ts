@@ -1,0 +1,38 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { enqueueJob } from "@/lib/jobs";
+import { getVideo } from "@/lib/video";
+
+export const dynamic = "force-dynamic";
+
+/** Videoudbyderen melder at en optagelse er færdig -> Recording + transskriptions-job. */
+export async function POST(req: Request) {
+  const video = getVideo();
+  if (video.name === "mock") return NextResponse.json({ error: "Webhook ikke aktiv" }, { status: 404 });
+
+  const raw = await req.text();
+  let evt;
+  try {
+    evt = video.parseWebhook(raw, req.headers);
+  } catch {
+    return NextResponse.json({ error: "Ugyldig signatur" }, { status: 401 });
+  }
+  if (!evt) return NextResponse.json({ result: "ignored" });
+
+  const externalId = `video:${evt.providerMeetingId}:${evt.storageKey}`;
+  try {
+    await prisma.webhookEvent.create({ data: { provider: video.name, externalId, payload: JSON.parse(raw) } });
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") return NextResponse.json({ result: "duplicate" });
+    throw e;
+  }
+  const meeting = await prisma.meeting.findFirst({ where: { providerMeetingId: evt.providerMeetingId } });
+  if (!meeting) return NextResponse.json({ result: "unknown meeting" });
+
+  const rec = await prisma.recording.create({
+    data: { meetingId: meeting.id, storageKey: evt.storageKey, mime: evt.mime, source: "WEBHOOK" },
+  });
+  await prisma.webhookEvent.update({ where: { externalId }, data: { processedAt: new Date() } });
+  await enqueueJob("transcribe_recording", { recordingId: rec.id });
+  return NextResponse.json({ result: "queued" });
+}
