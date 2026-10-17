@@ -6,11 +6,16 @@ const bool = z
   .transform((v) => v === "true" || v === "1");
 
 const schema = z.object({
+  /**
+   * Miljø: production (fail-closed: mock/console/local er forbudt, hemmeligheder kræves), staging, development eller test.
+   * Tom = production, når NODE_ENV=production (også `next start` og Docker), ellers development.
+   */
+  APP_ENV: z.enum(["production", "staging", "development", "test"]).optional(),
   DATABASE_URL: z.string().min(1).default("postgresql://abu:abu@localhost:5432/abu"),
   APP_URL: z.string().url().default("http://localhost:3000"),
   COOKIE_SECURE: z.enum(["true", "false", ""]).optional(),
   CRON_SECRET: z.string().default(""),
-  /** Hemmelighed til signerede links (afmelding). Tom = afledt af DATABASE_URL + CRON_SECRET. Sæt en lang, tilfældig værdi i produktion. */
+  /** Hemmelighed til signerede links (afmelding). Kræves i produktion (mindst 32 tegn). */
   APP_SECRET: z.string().default(""),
   /** Kør jobkøen og notifikationer hvert minut i selve app-processen. Slå fra, hvis en ekstern cron kalder /api/cron/process-jobs. */
   IN_PROCESS_SCHEDULER: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
@@ -82,16 +87,142 @@ const schema = z.object({
 });
 
 export type Env = z.infer<typeof schema>;
+export type AppEnv = NonNullable<Env["APP_ENV"]>;
+type RawEnv = Record<string, string | undefined>;
+
+export class EnvConfigError extends Error {
+  constructor(public readonly problems: string[]) {
+    super(`Ugyldig konfiguration:\n - ${problems.join("\n - ")}`);
+    this.name = "EnvConfigError";
+  }
+}
+
+/**
+ * Parser miljøvariablerne. Tomme strenge behandles som "ikke sat" (standardværdien bruges), men en ukendt værdi
+ * (fx PAYMENT_PROVIDER=frisbi) er altid en fejl – der faldes aldrig stille tilbage til en standard.
+ */
+export function parseEnv(raw: RawEnv): Env {
+  const cleaned = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== "" && v !== undefined));
+  const r = schema.safeParse(cleaned);
+  if (r.success) return r.data;
+  throw new EnvConfigError(
+    r.error.issues.map((i) => {
+      const key = String(i.path[0] ?? "?");
+      const allowed = "values" in i && Array.isArray(i.values) ? ` (tilladt: ${i.values.join(", ")})` : "";
+      return `${key}: ugyldig værdi ${JSON.stringify(cleaned[key] ?? "")}${allowed}`;
+    }),
+  );
+}
+
+/** Miljøet appen kører i. Uden APP_ENV er NODE_ENV=production altid production (fail-closed). */
+export function resolveAppEnv(env: Pick<Env, "APP_ENV">, nodeEnv: string | undefined): AppEnv {
+  if (env.APP_ENV) return env.APP_ENV;
+  if (nodeEnv === "production") return "production";
+  return nodeEnv === "test" ? "test" : "development";
+}
+
+const MIN_SECRET_LENGTH = 32;
+
+function isLocalUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".local");
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Produktions-guard (ren funktion): hvad mangler, før appen må køre i produktion? Tom liste = OK.
+ * Mock/console/local-udbydere, manglende hemmeligheder og http-adresser afvises. Værdier logges aldrig, kun navne.
+ */
+export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
+  const p: string[] = [];
+  const need = (key: keyof Env & string, why: string) => {
+    if (!String(env[key] ?? "").trim()) p.push(`${key} mangler (${why}).`);
+  };
+  const secret = (key: "APP_SECRET" | "CRON_SECRET", why: string) => {
+    if (env[key].length < MIN_SECRET_LENGTH) p.push(`${key} skal være mindst ${MIN_SECRET_LENGTH} tilfældige tegn (${why}). Generér med: openssl rand -base64 48`);
+  };
+
+  if (!raw.DATABASE_URL) p.push("DATABASE_URL skal sættes eksplicit.");
+  if (!env.APP_URL.startsWith("https://") || isLocalUrl(env.APP_URL)) p.push("APP_URL skal være en offentlig https://-adresse.");
+  if (env.COOKIE_SECURE === "false") p.push("COOKIE_SECURE=false er ikke tilladt i produktion.");
+  secret("APP_SECRET", "signerer afmeldingslinks");
+  secret("CRON_SECRET", "beskytter /api/cron/process-jobs");
+
+  if (env.PAYMENT_PROVIDER === "mock") p.push("PAYMENT_PROVIDER=mock er ikke tilladt i produktion (giver gratis abonnementer).");
+  else {
+    need("FRISBII_PRIVATE_KEY", "betaling");
+    need("FRISBII_WEBHOOK_SECRET", "signatur på betalingswebhooks");
+  }
+  if (env.VIDEO_PROVIDER === "mock") p.push("VIDEO_PROVIDER=mock er ikke tilladt i produktion.");
+  else {
+    need("WHEREBY_API_KEY", "videomøder");
+    need("WHEREBY_WEBHOOK_SECRET", "signatur på videowebhooks");
+  }
+  if (env.TRANSCRIPTION_PROVIDER === "mock") p.push("TRANSCRIPTION_PROVIDER=mock er ikke tilladt i produktion.");
+  else need("MISTRAL_API_KEY", "transskription");
+
+  if (env.EMAIL_PROVIDER === "console") p.push("EMAIL_PROVIDER=console er ikke tilladt i produktion (mails ville kun stå i loggen).");
+  if (env.EMAIL_PROVIDER === "smtp") need("SMTP_HOST", "e-mail via SMTP");
+  if (env.SMS_PROVIDER === "console") p.push("SMS_PROVIDER=console er ikke tilladt i produktion.");
+  if (env.EMAIL_PROVIDER === "inmobile" || env.SMS_PROVIDER === "inmobile") {
+    need("INMOBILE_API_KEY", "inMobile");
+    need("INMOBILE_WEBHOOK_SECRET", "inMobile-statuswebhook");
+  }
+  if (/@abu\.local>?$/.test(env.EMAIL_FROM.trim())) p.push("EMAIL_FROM skal være en rigtig afsenderadresse.");
+
+  if (env.STORAGE_PROVIDER === "local") p.push("STORAGE_PROVIDER=local er ikke tilladt i produktion (brug s3 / Object Storage).");
+  else {
+    need("S3_ENDPOINT", "objektlager");
+    need("S3_BUCKET", "objektlager");
+    need("S3_ACCESS_KEY_ID", "objektlager");
+    need("S3_SECRET_ACCESS_KEY", "objektlager");
+    if (env.S3_ENDPOINT && !env.S3_ENDPOINT.startsWith("https://")) p.push("S3_ENDPOINT skal være https://.");
+  }
+
+  if (env.CVR_PROVIDER === "mock") p.push("CVR_PROVIDER=mock er ikke tilladt i produktion.");
+  if (env.CVR_PROVIDER === "virk") {
+    need("CVR_VIRK_USERNAME", "CVR-opslag");
+    need("CVR_VIRK_PASSWORD", "CVR-opslag");
+  }
+  if (env.CVR_PROVIDER === "cvrapi" && /example\.dk/.test(env.CVR_USER_AGENT)) p.push("CVR_USER_AGENT skal indeholde jeres rigtige kontaktadresse (kræves af cvrapi.dk).");
+  return p;
+}
+
+/** Én linje til opstartsloggen: hvilke udbydere er valgt, og hvilke hemmeligheder er sat. Aldrig værdier. */
+export function describeConfig(env: Env, appEnv: AppEnv): string {
+  const set = (v: string) => (v ? "sat" : "mangler");
+  return [
+    `APP_ENV=${appEnv}`,
+    `betaling=${env.PAYMENT_PROVIDER}`,
+    `video=${env.VIDEO_PROVIDER}`,
+    `transskription=${env.TRANSCRIPTION_PROVIDER}`,
+    `email=${env.EMAIL_PROVIDER}`,
+    `sms=${env.SMS_PROVIDER}`,
+    `lager=${env.STORAGE_PROVIDER}`,
+    `cvr=${env.CVR_PROVIDER}`,
+    `APP_URL=${env.APP_URL}`,
+    `APP_SECRET=${set(env.APP_SECRET)}`,
+    `CRON_SECRET=${set(env.CRON_SECRET)}`,
+    `scheduler=${env.IN_PROCESS_SCHEDULER ? "i processen" : "ekstern cron"}`,
+  ].join(" · ");
+}
 
 let cached: Env | null = null;
 
 export function getEnv(): Env {
-  if (!cached) {
-    // tom streng i .env behandles som "ikke sat"
-    const raw = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== ""));
-    cached = schema.parse(raw);
-  }
+  if (!cached) cached = parseEnv(process.env);
   return cached;
+}
+
+export function appEnv(): AppEnv {
+  return resolveAppEnv(getEnv(), process.env.NODE_ENV);
+}
+
+export function isProductionEnv(): boolean {
+  return appEnv() === "production";
 }
 
 export function cookieSecure(): boolean {
@@ -99,4 +230,21 @@ export function cookieSecure(): boolean {
   if (env.COOKIE_SECURE === "true") return true;
   if (env.COOKIE_SECURE === "false") return false;
   return env.APP_URL.startsWith("https://");
+}
+
+/**
+ * Kaldes én gang ved opstart (instrumentation). Kaster EnvConfigError med alle problemer, hvis konfigurationen er ugyldig,
+ * eller hvis den ikke er klar til produktion, når APP_ENV=production. Logger den valgte opsætning (uden hemmeligheder).
+ */
+export function assertBootConfig(raw: RawEnv = process.env, log: (msg: string) => void = console.log): Env {
+  const env = parseEnv(raw);
+  const mode = resolveAppEnv(env, raw.NODE_ENV);
+  log(`[config] ${describeConfig(env, mode)}`);
+  if (mode === "production") {
+    const problems = productionConfigProblems(env, raw);
+    if (problems.length) throw new EnvConfigError(problems);
+  } else if (raw.NODE_ENV === "production") {
+    log(`[config] ADVARSEL: APP_ENV=${mode} med et produktionsbuild. Mock-udbydere er tilladt – må aldrig bruges til rigtige kunder.`);
+  }
+  return env;
 }

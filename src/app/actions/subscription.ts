@@ -11,7 +11,8 @@ import { getPayments } from "@/lib/payments";
 import { subscriptionEvents } from "@/lib/notifications/service";
 import { planHandle } from "@/lib/pricing";
 import { redirectWith } from "@/lib/redirect";
-import { getCustomerSubscription } from "@/lib/subscriptions";
+import { getEnv, isProductionEnv } from "@/lib/env";
+import { afterSubscriptionActivated, getCustomerSubscription } from "@/lib/subscriptions";
 
 async function parseBoard(formData: FormData, back: string) {
   const advisorIds = [...new Set(formData.getAll("advisorIds").map(String))];
@@ -96,4 +97,20 @@ export async function cancelSubscriptionAction() {
   for (const m of future) await cancelMeeting({ meetingId: m.id, actorId: user.id }).catch(() => {});
   await audit(user.id, "subscription.cancel", "Subscription", sub.id);
   redirectWith("/account/subscription", "ok", "Dit abonnement er opsagt, og kommende møder er aflyst.");
+}
+
+/**
+ * Mock-betaling (kun udvikling/test): kunden bekræfter testbetalingen med et klik (POST). Med en rigtig udbyder sker
+ * aktivering udelukkende via den signerede webhook. Afvises altid i produktion.
+ */
+export async function completeMockPaymentAction(formData: FormData) {
+  const user = await requireRole("CUSTOMER");
+  if (getEnv().PAYMENT_PROVIDER !== "mock" || isProductionEnv()) redirectWith("/subscribe", "err", "Testbetaling er ikke tilgængelig.");
+  const id = String(formData.get("sub") ?? "");
+  const sub = await prisma.subscription.findFirst({ where: { id, customerId: user.id, status: "PENDING", provider: "mock" } });
+  if (!sub) redirectWith("/subscribe", "err", "Abonnementet blev ikke fundet.");
+  await prisma.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", startedAt: new Date() } });
+  await audit(user.id, "subscription.activate_mock", "Subscription", sub.id);
+  await afterSubscriptionActivated(sub.id);
+  redirect(`/subscribe/success?sub=${sub.id}`);
 }

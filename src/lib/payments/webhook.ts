@@ -1,6 +1,7 @@
 import type { Prisma, SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../db";
 import { subscriptionEvents } from "../notifications/service";
+import { afterSubscriptionActivated } from "../subscriptions";
 
 export interface FrisbiiEvent {
   id: string;
@@ -58,6 +59,7 @@ export async function processFrisbiiEvent(evt: FrisbiiEvent): Promise<"processed
       result = "processed";
       // Besked kun ved overgang til PAST_DUE (Frisbii gentager invoice_failed ved hvert forsøg)
       if (status === "PAST_DUE" && sub.status !== "PAST_DUE") await subscriptionEvents.paymentFailed(sub.id);
+      if (status === "ACTIVE" && sub.status === "PENDING") await afterSubscriptionActivated(sub.id);
     }
   }
   await prisma.webhookEvent.update({ where: { externalId }, data: { processedAt: new Date() } });

@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { deleteOnboardingSessionsForEmail } from "./onboarding/session";
 
 const include = {
   advisors: { include: { advisor: { include: { user: true } } } },
@@ -32,4 +33,10 @@ export async function getCustomerNeeds(userId: string): Promise<Record<string, n
   const active = new Set(tags.map((t) => t.id));
   const needs = (profile?.testAnswers as { needs?: { tagId: string; weight: number }[] } | null)?.needs ?? [];
   return Object.fromEntries(needs.filter((n) => active.has(n.tagId)).map((n) => [n.tagId, n.weight]));
+}
+
+/** Efter aktivering: onboarding-data er flyttet til kontoen og slettes (GDPR). Kaldes fra webhook og mock-betaling. */
+export async function afterSubscriptionActivated(subscriptionId: string): Promise<void> {
+  const sub = await prisma.subscription.findUnique({ where: { id: subscriptionId }, select: { customer: { select: { user: { select: { email: true } } } } } });
+  if (sub) await deleteOnboardingSessionsForEmail(sub.customer.user.email);
 }

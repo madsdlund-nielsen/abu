@@ -1,27 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Flash, flashFrom, type SP } from "@/components/flash";
-import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { deleteOnboardingSessionsForEmail } from "@/lib/onboarding/session";
 import { SubStatusBadge } from "@/components/ui";
 
+/**
+ * Landingsside efter betaling. Siden ændrer intet (ingen sideeffekter på GET): abonnementet aktiveres af den signerede
+ * webhook fra betalingsudbyderen (eller af testbetalingen i mock-tilstand).
+ */
 export default async function SubscribeSuccess({ searchParams }: { searchParams: SP }) {
   const user = await requireRole("CUSTOMER");
   const { one, params } = await flashFrom(searchParams);
   const id = one(params.sub) ?? "";
-  let sub = await prisma.subscription.findFirst({ where: { id, customerId: user.id } });
+  const sub = await prisma.subscription.findFirst({ where: { id, customerId: user.id } });
 
-  // Mock-betaling: kunden er "betalt" når de lander her. Med Frisbii sker aktivering via webhook.
-  if (sub && sub.status === "PENDING" && sub.provider === "mock") {
-    sub = await prisma.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", startedAt: new Date() } });
-    await audit(user.id, "subscription.activate_mock", "Subscription", sub.id);
-  }
-
-  if (sub && (sub.status as string) === "ACTIVE") {
-    // Tilmeldingen er gennemført: onboarding-data er flyttet til kontoen og slettes.
-    await deleteOnboardingSessionsForEmail(user.email);
+  if (sub?.status === "ACTIVE") {
     redirect("/dashboard?ok=" + encodeURIComponent("Velkommen! Dit abonnement er aktivt. Du kan nu booke dit første møde."));
   }
 
@@ -30,12 +24,6 @@ export default async function SubscribeSuccess({ searchParams }: { searchParams:
       <Flash />
       {!sub ? (
         <p>Abonnementet blev ikke fundet.</p>
-      ) : sub.status === "ACTIVE" ? (
-        <>
-          <h1>Tak – dit abonnement er aktivt</h1>
-          <p className="mt-3 text-muted">Du kan nu booke dit første møde.</p>
-          <Link href="/book" className="btn mt-6">Book møde</Link>
-        </>
       ) : (
         <>
           <h1>Vi afventer betalingsbekræftelse</h1>
