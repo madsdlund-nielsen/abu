@@ -8,8 +8,7 @@ import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
 import { getEnv } from "@/lib/env";
 import { processJobs } from "@/lib/jobs";
-import { deleteNotificationDataFor } from "@/lib/notifications/service";
-import { deleteOnboardingSessionsForEmail } from "@/lib/onboarding/session";
+import { eraseUser } from "@/lib/erasure";
 import { redirectWith } from "@/lib/redirect";
 
 async function inviteAndReport(user: User, back: string, actorId: string): Promise<never> {
@@ -83,12 +82,8 @@ export async function processDeletionAction(formData: FormData) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.role === "ADMIN") redirectWith("/admin/customers", "err", "Kan ikke slette denne bruger.");
   if (!user.deletionRequestedAt) redirectWith("/admin/customers", "err", "Brugeren har ikke anmodet om sletning.");
-  await audit(admin.id, "user.delete", "User", id);
-  // Onboarding-data, der endnu ikke er slettet (genstartede tilmeldinger), fjernes sammen med brugeren.
-  await deleteOnboardingSessionsForEmail(user.email);
-  // Notifikationslog (også rækker sendt til e-mail/telefon uden konto) slettes sammen med kontoen
-  await deleteNotificationDataFor(user);
-  await prisma.lead.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
-  await prisma.user.delete({ where: { id } });
-  redirectWith("/admin/customers", "ok", "Brugeren og tilhørende data er slettet.");
+  // Opsiger abonnementet hos udbyderen, sletter optagelser i lageret og webhook-data, og derefter kontoen (M-3)
+  const r = await eraseUser(id, admin.id);
+  if (!r.ok) redirectWith("/admin/customers", "err", r.error);
+  redirectWith("/admin/customers", "ok", "Brugeren og tilhørende data er slettet, og abonnementet er opsagt.");
 }

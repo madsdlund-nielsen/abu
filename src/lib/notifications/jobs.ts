@@ -1,4 +1,5 @@
 import { registerJobHandler } from "../jobs";
+import { cleanupWebhookPayloads } from "../erasure";
 import { cleanupRateLimits } from "../rate-limit";
 import { cleanupLeads } from "../leads";
 import { getNotificationSettings } from "./settings";
@@ -17,6 +18,11 @@ registerJobHandler("cleanup_leads", async () => {
   if (n > 0) console.log(`[leads] slettede ${n} leads uden samtykke eller uden for opbevaringsperioden`);
 });
 
+registerJobHandler("cleanup_webhook_payloads", async () => {
+  const r = await cleanupWebhookPayloads();
+  if (r.redacted || r.deleted) console.log(`[webhooks] fjernede ${r.redacted} payloads (> 30 dage) og slettede ${r.deleted} gamle rækker`);
+});
+
 registerJobHandler("cleanup_rate_limits", async () => {
   await cleanupRateLimits();
 });
@@ -28,6 +34,7 @@ export async function runNotificationTick(now = new Date()): Promise<{ created: 
   await ensureRecurringJob("cleanup_notification_logs", DAY_MS);
   await ensureRecurringJob("cleanup_leads", DAY_MS);
   await ensureRecurringJob("cleanup_rate_limits", DAY_MS);
+  await ensureRecurringJob("cleanup_webhook_payloads", DAY_MS);
   await ensureRecurringJob("cleanup_stale_uploads", DAY_MS);
   return { created, sent };
 }
