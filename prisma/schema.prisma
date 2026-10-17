@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  ADVISOR
+  CUSTOMER
+}
+
+enum TokenPurpose {
+  INVITE
+  RESET
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum MeetingStatus {
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
+enum RecordingSource {
+  WEBHOOK
+  UPLOAD
+}
+
+enum RecordingStatus {
+  RECEIVED
+  TRANSCRIBING
+  DONE
+  FAILED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String?
+  role         Role
+  name         String
+  phone        String?
+  createdAt    DateTime  @default(now())
+  /// GDPR: set when the user has asked for deletion; admin processes it.
+  deletionRequestedAt DateTime?
+  /// GDPR: timestamp of consent to terms/privacy at signup.
+  consentAt    DateTime?
+
+  sessions        Session[]
+  passwordTokens  PasswordToken[]
+  advisorProfile  AdvisorProfile?
+  customerProfile CustomerProfile?
+  participations  MeetingParticipant[]
+  auditLogs       AuditLog[]
+}
+
+model Session {
+  /// SHA-256 hex of the random cookie token.
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordToken {
+  id        String       @id @default(cuid())
+  userId    String
+  tokenHash String       @unique
+  purpose   TokenPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AdvisorProfile {
+  userId    String   @id
+  title     String   @default("")
+  bio       String   @default("")
+  expertise String[]
+  photoUrl  String   @default("")
+  active    Boolean  @default(true)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  availabilityRules  AvailabilityRule[]
+  availabilityBlocks AvailabilityBlock[]
+  boards             SubscriptionAdvisor[]
+}
+
+model CustomerProfile {
+  userId       String @id
+  companyName  String
+  cvr          String
+  address      String @default("")
+  billingEmail String
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subscriptions Subscription[]
+}
+
+model AvailabilityRule {
+  id          String         @id @default(cuid())
+  advisorId   String
+  /// ISO weekday: Monday = 1 ... Sunday = 7
+  weekday     Int
+  /// Minutes after local (Europe/Copenhagen) midnight
+  startMinute Int
+  endMinute   Int
+  advisor     AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
+
+  @@index([advisorId])
+}
+
+model AvailabilityBlock {
+  id        String         @id @default(cuid())
+  advisorId String
+  startsAt  DateTime
+  endsAt    DateTime
+  reason    String         @default("")
+  advisor   AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
+
+  @@index([advisorId, startsAt])
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  customerId             String
+  advisorCount           Int
+  frequencyWeeks         Int
+  monthlyPriceDkk        Int
+  status                 SubscriptionStatus @default(PENDING)
+  provider               String             @default("mock")
+  providerSubscriptionId String?
+  providerCustomerId     String?
+  startedAt              DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime           @default(now())
+  customer               CustomerProfile    @relation(fields: [customerId], references: [userId], onDelete: Cascade)
+
+  advisors SubscriptionAdvisor[]
+  meetings Meeting[]
+
+  @@index([customerId])
+  @@index([providerSubscriptionId])
+}
+
+model SubscriptionAdvisor {
+  subscriptionId String
+  advisorId      String
+  subscription   Subscription   @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  advisor        AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
+
+  @@id([subscriptionId, advisorId])
+}
+
+model Meeting {
+  id                String        @id @default(cuid())
+  subscriptionId    String
+  startsAt          DateTime
+  endsAt            DateTime
+  status            MeetingStatus @default(BOOKED)
+  roomUrl           String?
+  hostRoomUrl       String?
+  providerMeetingId String?
+  createdById       String?
+  cancelledAt       DateTime?
+  createdAt         DateTime      @default(now())
+  subscription      Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  participants MeetingParticipant[]
+  recordings   Recording[]
+  transcript   Transcript?
+
+  @@index([subscriptionId])
+  @@index([startsAt])
+}
+
+model MeetingParticipant {
+  meetingId String
+  userId    String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([meetingId, userId])
+  @@index([userId])
+}
+
+model Recording {
+  id         String          @id @default(cuid())
+  meetingId  String
+  storageKey String?
+  mime       String?
+  source     RecordingSource
+  status     RecordingStatus @default(RECEIVED)
+  error      String?
+  createdAt  DateTime        @default(now())
+  meeting    Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+}
+
+model Transcript {
+  id        String   @id @default(cuid())
+  meetingId String   @unique
+  text      String
+  segments  Json?
+  summary   String?
+  language  String   @default("da")
+  createdAt DateTime @default(now())
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  externalId  String    @unique
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+}
+
+model Job {
+  id        String    @id @default(cuid())
+  type      String
+  payload   Json
+  status    JobStatus @default(PENDING)
+  attempts  Int       @default(0)
+  runAt     DateTime  @default(now())
+  lockedAt  DateTime?
+  error     String?
+  createdAt DateTime  @default(now())
+
+  @@index([status, runAt])
+}
