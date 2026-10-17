@@ -6,6 +6,7 @@ import { canBookAt, quotaState } from "./quota";
 import { bookingWindow, computeSlots, DEFAULTS, isSlotFreeForAll, type AdvisorAvailability } from "./slots";
 import { getVideo } from "./video";
 import { audit } from "./audit";
+import { ADVISOR_BLOCKING_STATUSES } from "./meeting-status";
 import { cancellationFreesQuota } from "./quota";
 
 export class BookingError extends Error {}
@@ -22,7 +23,7 @@ async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Da
     tx.meetingParticipant.findMany({
       where: {
         userId: { in: advisorIds },
-        meeting: { status: "BOOKED", endsAt: { gt: new Date(from.getTime() - margin) }, startsAt: { lt: new Date(to.getTime() + margin) } },
+        meeting: { status: { in: ADVISOR_BLOCKING_STATUSES }, endsAt: { gt: new Date(from.getTime() - margin) }, startsAt: { lt: new Date(to.getTime() + margin) } },
       },
       select: { userId: true, meeting: { select: { startsAt: true, endsAt: true } } },
     }),

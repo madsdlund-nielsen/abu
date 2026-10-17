@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/env";
 import { processJobs } from "@/lib/jobs";
+import { completePastMeetings } from "@/lib/meeting-status";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,9 @@ function authorized(req: Request): boolean {
 
 async function handle(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const completed = await completePastMeetings();
   const processed = await processJobs(10);
-  return NextResponse.json({ processed });
+  return NextResponse.json({ processed, completedMeetings: completed });
 }
 
 export const GET = handle;

@@ -7,6 +7,7 @@ import { audit } from "@/lib/audit";
 import { requireRole, requireUser } from "@/lib/auth";
 import { BookingError, bookMeeting, cancelMeeting } from "@/lib/booking";
 import { prisma } from "@/lib/db";
+import { recordingUploadDecision } from "@/lib/meeting-status";
 import { enqueueJob } from "@/lib/jobs";
 import { redirectWith } from "@/lib/redirect";
 import { getStorage } from "@/lib/storage";
@@ -66,6 +67,8 @@ export async function uploadRecordingAction(formData: FormData) {
   if (!meeting || !canAccessMeeting(user, meeting.participants.map((p) => p.userId))) {
     redirectWith("/meetings", "err", "Mødet findes ikke.");
   }
+  const decision = recordingUploadDecision(meeting, new Date());
+  if (!decision.allowed) redirectWith(back, "err", decision.reason);
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) redirectWith(back, "err", "Vælg en lyd- eller videofil.");
   if (file.size > MAX_UPLOAD_BYTES) redirectWith(back, "err", "Filen er for stor (maks 500 MB).");
