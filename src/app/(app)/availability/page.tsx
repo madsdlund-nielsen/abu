@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { addBlockAction, addRuleAction, deleteBlockAction, deleteRuleAction } from "@/app/actions/advisor";
-import { DateTimeField, TimeSelect } from "@/components/date-time-field";
+import { deleteBlockAction, deleteRuleAction } from "@/app/actions/advisor";
+import { AddBlockForm, AddRuleForm } from "@/components/advisor-forms";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -41,25 +41,7 @@ export default async function AvailabilityPage({ searchParams }: { searchParams:
             ))}
           </ul>
         )}
-        <form action={addRuleAction} className="mt-5 grid gap-3 sm:grid-cols-4">
-          <div>
-            <label className="label" htmlFor="weekday">Ugedag</label>
-            <select className="input" id="weekday" name="weekday" defaultValue="1">
-              {WEEKDAY_NAMES.slice(1).map((n, i) => (
-                <option key={n} value={i + 1}>{n}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label" htmlFor="start">Fra</label>
-            <TimeSelect id="start" name="start" defaultValue="09:00" />
-          </div>
-          <div>
-            <label className="label" htmlFor="end">Til</label>
-            <TimeSelect id="end" name="end" defaultValue="16:00" allowEndOfDay />
-          </div>
-          <div className="flex items-end"><button className="btn w-full" type="submit">Tilføj</button></div>
-        </form>
+        <AddRuleForm />
       </section>
 
       <section className="card">
@@ -79,15 +61,7 @@ export default async function AvailabilityPage({ searchParams }: { searchParams:
             ))}
           </ul>
         )}
-        <form action={addBlockAction} className="mt-5 grid gap-4 sm:grid-cols-2">
-          <DateTimeField name="from" label="Fra" />
-          <DateTimeField name="to" label="Til" />
-          <div>
-            <label className="label" htmlFor="reason">Årsag (valgfri)</label>
-            <input className="input" id="reason" name="reason" maxLength={200} />
-          </div>
-          <div className="flex items-end"><button className="btn w-full" type="submit">Bloker</button></div>
-        </form>
+        <AddBlockForm />
       </section>
     </div>
   );

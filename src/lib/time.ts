@@ -87,12 +87,15 @@ export function formatDanishDateInput(d: Date): string {
   return formatInTimeZone(d, TZ, "dd.MM.yyyy");
 }
 
-/** "dd.mm.åååå" + "HH:mm" (København-tid) -> UTC-Date. Returnerer null hvis input er ugyldigt. */
-export function parseDanishDateTime(dateStr: string, timeStr: string): Date | null {
+/**
+ * "dd.mm.åååå" + "HH:mm" (København-tid) -> UTC-Date. Returnerer null hvis input er ugyldigt.
+ * Med `allowEndOfDay` betyder "24:00" slutningen af dagen (= 00:00 dagen efter, korrekt også ved sommertid).
+ */
+export function parseDanishDateTime(dateStr: string, timeStr: string, opts: { allowEndOfDay?: boolean } = {}): Date | null {
   const date = parseDanishDate(dateStr);
   const minutes = hhmmToMinutes(timeStr.trim());
-  if (!date || minutes === null || minutes >= 1440) return null;
+  if (!date || minutes === null || minutes > 1440 || (minutes === 1440 && !opts.allowEndOfDay)) return null;
   const key = `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}`;
-  const out = localToUtc(key, minutes);
+  const out = minutes === 1440 ? localToUtc(addDaysKey(key, 1), 0) : localToUtc(key, minutes);
   return Number.isNaN(out.getTime()) ? null : out;
 }

@@ -74,12 +74,15 @@ export function DateTimeField({
   defaultDate = "",
   defaultTime = "09:00",
   required = true,
+  allowEndOfDay = false,
 }: {
   name: string;
   label: string;
   defaultDate?: string;
   defaultTime?: string;
   required?: boolean;
+  /** Tillad 24:00 (slutningen af dagen), fx for fravær hele dagen */
+  allowEndOfDay?: boolean;
 }) {
   const id = useId();
   const [value, setValue] = useState(defaultDate);
@@ -116,7 +119,7 @@ export function DateTimeField({
           />
         </div>
         <div className="w-28 shrink-0">
-          <TimeSelect name={`${name}Time`} defaultValue={defaultTime} label={`${label}, klokkeslæt (24 timer)`} />
+          <TimeSelect name={`${name}Time`} defaultValue={defaultTime} label={`${label}, klokkeslæt (24 timer)`} allowEndOfDay={allowEndOfDay} />
         </div>
       </div>
       {invalid && (

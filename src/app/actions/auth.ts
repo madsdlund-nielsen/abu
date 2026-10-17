@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import {
@@ -16,7 +17,8 @@ import { getClientIp } from "@/lib/client-ip";
 import { isLocked, LOCK_THRESHOLD, recordFailedLogin, resetLoginFailures } from "@/lib/lockout";
 import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
-import { loginUrlFor, recordingConsentNow, safeNextPath } from "@/lib/consent";
+import { recordingConsentNow, safeNextPath } from "@/lib/consent";
+import type { FormState } from "@/lib/form-state";
 import { currentConsent } from "@/lib/content/server";
 import { sendResetEmail } from "@/lib/emails";
 import { redirectWith } from "@/lib/redirect";
@@ -26,23 +28,23 @@ const TOO_MANY = "For mange forsøg. Vent et kvarter og prøv igen, eller nulsti
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 
-export async function loginAction(formData: FormData) {
-  const parsed = loginSchema.safeParse({
-    email: String(formData.get("email") ?? "").trim().toLowerCase(),
-    password: String(formData.get("password") ?? ""),
-  });
+/** Login (useActionState): fejl vises på siden, e-mailen bevares, og intet havner i URL'en (plan #22). */
+export async function loginAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const rawEmail = String(formData.get("email") ?? "").trim();
+  const values = { email: rawEmail };
+  const fail = (error: string): FormState => ({ error, values, at: Date.now() });
+  const parsed = loginSchema.safeParse({ email: rawEmail.toLowerCase(), password: String(formData.get("password") ?? "") });
   const next = safeNextPath(String(formData.get("next") ?? ""));
-  const keep = `${loginUrlFor(next)}${next ? "&" : "?"}e=${encodeURIComponent(String(formData.get("email") ?? "").trim())}`;
-  if (!parsed.success) redirectWith(keep, "err", "Indtast e-mail og adgangskode.");
+  if (!parsed.success) return fail("Indtast e-mail og adgangskode.");
   const { email, password } = parsed.data;
   // 1) Grænse pr. betroet klient-IP (mod password spraying på tværs af konti)
-  if (!(await rateLimitIp("login-ip", await getClientIp(), 50))) redirectWith(keep, "err", TOO_MANY);
+  if (!(await rateLimitIp("login-ip", await getClientIp(), 50))) return fail(TOO_MANY);
 
   // 2) Spærring pr. konto i databasen – uafhængig af IP, så skiftende X-Forwarded-For ikke hjælper (H-2)
   const user = await prisma.user.findUnique({ where: { email } });
-  if (user && isLocked(user, new Date())) redirectWith(keep, "err", TOO_MANY);
+  if (user && isLocked(user, new Date())) return fail(TOO_MANY);
   // Ukendte e-mails spærres efter samme antal forsøg, så svaret ikke afslører, om kontoen findes
-  if (!user && !(await rateLimit(`login-unknown:${email}`, LOCK_THRESHOLD))) redirectWith(keep, "err", TOO_MANY);
+  if (!user && !(await rateLimit(`login-unknown:${email}`, LOCK_THRESHOLD))) return fail(TOO_MANY);
 
   const ok = await verifyPassword(password, user?.passwordHash ?? null);
   if (!user || !ok) {
@@ -50,7 +52,7 @@ export async function loginAction(formData: FormData) {
       const r = await recordFailedLogin(user.id);
       if (r.lockedNow) await audit(user.id, "auth.lockout", "User", user.id, `Spærret til ${r.lockedUntil?.toISOString()}`);
     }
-    redirectWith(keep, "err", "Forkert e-mail eller adgangskode.");
+    return fail("Forkert e-mail eller adgangskode.");
   }
 
   if (user.failedLoginCount > 0 || user.lockedUntil) await resetLoginFailures(user.id);
@@ -67,18 +69,21 @@ export async function logoutAction() {
   redirect("/");
 }
 
-export async function requestResetAction(formData: FormData) {
+export async function requestResetAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!(await rateLimitIp("reset-ip", await getClientIp(), 5)) || (email && !(await rateLimit(`reset-email:${email}`, 3, 60 * 60_000)))) {
-    redirectWith("/reset-password", "err", "For mange forsøg. Prøv igen senere.");
+    return { error: "For mange forsøg. Prøv igen senere.", values: { email }, at: Date.now() };
   }
   const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
   if (user) {
-    const { token } = await createPasswordToken(user.id, "RESET");
-    await sendResetEmail(user, token);
+    // Sendes efter svaret, så svartiden ikke afslører, om kontoen findes
+    after(async () => {
+      const { token } = await createPasswordToken(user.id, "RESET");
+      await sendResetEmail(user, token);
+    });
   }
   // Samme svar uanset om kontoen findes (ingen konto-opslag)
-  redirectWith("/reset-password", "ok", "Hvis e-mailen findes hos os, har vi sendt et link til at nulstille adgangskoden.");
+  return { ok: "Hvis e-mailen findes hos os, har vi sendt et link til at nulstille adgangskoden.", at: Date.now() };
 }
 
 export async function setPasswordAction(formData: FormData) {
@@ -118,16 +123,18 @@ export async function setPasswordAction(formData: FormData) {
   redirect(row.user.role === "ADMIN" ? "/admin" : "/dashboard");
 }
 
-export async function changePasswordAction(formData: FormData) {
+export async function changePasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const { requireUser } = await import("@/lib/auth");
   const user = await requireUser();
   const current = String(formData.get("current") ?? "");
   const next = String(formData.get("password") ?? "");
-  if (!(await verifyPassword(current, user.passwordHash))) redirectWith("/account", "err", "Nuværende adgangskode er forkert.");
+  // Samme grænse som login, så skift af adgangskode ikke kan bruges til at gætte den nuværende
+  if (!(await rateLimit(`pw-change:${user.id}`, 5))) return { error: "For mange forsøg. Prøv igen senere.", at: Date.now() };
+  if (!(await verifyPassword(current, user.passwordHash))) return { error: "Nuværende adgangskode er forkert.", at: Date.now() };
   const err = validatePassword(next);
-  if (err) redirectWith("/account", "err", err);
+  if (err) return { error: err, at: Date.now() };
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(next) } });
   await audit(user.id, "auth.password_change", "User", user.id);
-  redirectWith("/account", "ok", "Adgangskoden er ændret.");
+  return { ok: "Adgangskoden er ændret.", at: Date.now() };
 }
 

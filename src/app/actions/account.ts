@@ -1,6 +1,8 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { FormState } from "@/lib/form-state";
 import { audit } from "@/lib/audit";
 import { recordingConsentNow, safeNextPath } from "@/lib/consent";
 import { currentConsent } from "@/lib/content/server";
@@ -37,7 +39,7 @@ export async function acceptRecordingConsentAction(formData: FormData) {
 }
 
 /** Til/fra for e-mail og SMS under Konto. Gælder alt undtagen kontobeskeder (invitation, nulstilling). */
-export async function saveNotificationPreferencesAction(formData: FormData) {
+export async function saveNotificationPreferencesAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser();
   const email = formData.get("email") === "on";
   const sms = formData.get("sms") === "on";
@@ -48,5 +50,6 @@ export async function saveNotificationPreferencesAction(formData: FormData) {
     data: { emailOptOutAt: email ? null : (user.emailOptOutAt ?? new Date()), smsOptOutAt: sms ? null : (user.smsOptOutAt ?? new Date()) },
   });
   await audit(user.id, "user.notification_preferences", "User", user.id);
-  redirectWith("/account", "ok", "Dine indstillinger for beskeder er gemt.");
+  revalidatePath("/account");
+  return { ok: "Dine indstillinger for beskeder er gemt.", at: Date.now() };
 }

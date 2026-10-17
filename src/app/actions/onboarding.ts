@@ -29,6 +29,7 @@ import {
 } from "@/lib/onboarding/session";
 import { buildTestSnapshot } from "@/lib/onboarding/snapshot";
 import { accountEvents } from "@/lib/notifications/service";
+import { formValues, type FormState } from "@/lib/form-state";
 
 /**
  * M-1: om en e-mail allerede har en konto, må ikke kunne ses på siden. Ejeren får i stedet en neutral e-mail ("du har
@@ -54,13 +55,13 @@ async function need(minStep: number): Promise<OnboardingState> {
 }
 
 /** Trin 1: kontaktperson. Opretter sessionen (og cookien). */
-export async function saveContactAction(formData: FormData) {
-  if (!(await rateLimitIp("onb-contact", await getClientIp(), 30))) fail(1, "For mange forsøg. Prøv igen senere.");
+export async function saveContactAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  // Ved fejl sendes de indtastede værdier tilbage i svaret (ikke i URL'en), så kunden ikke skal skrive dem igen
+  const values = formValues(formData);
+  if (!(await rateLimitIp("onb-contact", await getClientIp(), 30))) return { error: "For mange forsøg. Prøv igen senere.", values, at: Date.now() };
   const parsed = contactSchema.safeParse({ name: formData.get("name"), email: formData.get("email") });
-  // Ved fejl sendes de indtastede værdier med tilbage, så kunden ikke skal skrive dem igen
-  const keep = `&n=${encodeURIComponent(String(formData.get("name") ?? ""))}&e=${encodeURIComponent(String(formData.get("email") ?? ""))}`;
-  if (!parsed.success) fail(1, parsed.error.issues[0].message, keep);
-  const contact = parsed.data!;
+  if (!parsed.success) return { error: parsed.error.issues[0].message, values, at: Date.now() };
+  const contact = parsed.data;
   const exists = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
   let leadId: string | null = null;
   if (exists) {
@@ -89,14 +90,14 @@ export async function saveContactAction(formData: FormData) {
 }
 
 /** Trin 2: CVR + telefon. Slår virksomheden op. */
-export async function saveCompanyAction(formData: FormData) {
+export async function saveCompanyAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const s = await need(2);
+  const values = formValues(formData);
   const parsed = companyStepSchema.safeParse({ cvr: formData.get("cvr") ?? "", phone: formData.get("phone") ?? "" });
-  const keep = `&cvr=${encodeURIComponent(String(formData.get("cvr") ?? ""))}&tlf=${encodeURIComponent(String(formData.get("phone") ?? ""))}`;
-  if (!parsed.success) fail(2, parsed.error.issues[0].message, keep);
-  const { cvr, phone } = parsed.data!;
+  if (!parsed.success) return { error: parsed.error.issues[0].message, values, at: Date.now() };
+  const { cvr, phone } = parsed.data;
   if (!(await rateLimitIp("onb-cvr", await getClientIp(), 20)) || !(await rateLimit(`onb-cvr-s:${s.id}`, 15))) {
-    fail(2, "For mange opslag. Vent lidt og prøv igen.", keep);
+    return { error: "For mange opslag. Vent lidt og prøv igen.", values, at: Date.now() };
   }
   const result = await lookupCvr(cvr);
   const company: CompanyState = {

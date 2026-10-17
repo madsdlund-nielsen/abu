@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { loginAction } from "@/app/actions/auth";
+import { LoginForm } from "@/components/auth-forms";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
@@ -23,18 +23,7 @@ export default async function LoginPage({ searchParams }: { searchParams: SP }) 
         <div className="panel mt-space-5">
           <Flash ok={ok} err={err} />
           {next && <p className="callout mb-space-4 text-sm">Log ind for at fortsætte til siden, du åbnede.</p>}
-          <form action={loginAction} className="space-y-4">
-            {next && <input type="hidden" name="next" value={next} />}
-            <div>
-              <label className="label" htmlFor="email">E-mail</label>
-              <input className="input" id="email" name="email" type="email" autoComplete="email" required defaultValue={one(params.e)} />
-            </div>
-            <div>
-              <label className="label" htmlFor="password">Adgangskode</label>
-              <input className="input" id="password" name="password" type="password" autoComplete="current-password" required />
-            </div>
-            <button className="btn w-full" type="submit">Log ind</button>
-          </form>
+          <LoginForm next={next} initialEmail={one(params.e)} />
           <p className="mt-4 text-sm text-muted">
             <Link href="/reset-password">Glemt adgangskode?</Link> · <Link href="/kom-i-gang">Opret konto</Link>
           </p>
