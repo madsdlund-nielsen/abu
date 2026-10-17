@@ -2,7 +2,7 @@
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  serverExternalPackages: ["@prisma/client", "bcryptjs"],
+  serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg", "bcryptjs"],
   experimental: { serverActions: { bodySizeLimit: "500mb" } },
   async headers() {
     return [

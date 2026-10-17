@@ -1,11 +1,9 @@
 /* Seed: admin, tags, 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { prisma } from "../src/lib/db";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
 import { ensureNotificationDefaults } from "../src/lib/notifications/service";
 import { ADVISORS, DEMO_BOARD_EMAILS, QUESTIONS, TAGS } from "./seed-data";
-
-const prisma = new PrismaClient();
 
 async function main() {
   // Demobrugerne har givet samtykke til optagelse (version 0 = standardteksten)

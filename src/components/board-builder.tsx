@@ -347,7 +347,7 @@ function Catalog({
   }, [advisors, selected, target, filter, q, needs]);
   const hasNeeds = Object.values(needs).some((n) => n > 0);
 
-  const TagChips = ({ className }: { className: string }) => (
+  const tagChips = (className: string) => (
     <ul className={className}>
       {tags.map((t) => {
         const on = filter.includes(t.id);
@@ -392,11 +392,11 @@ function Catalog({
           <input id="catalog-search" className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} placeholder="Navn, titel eller kompetence" autoFocus />
           <details className="mt-space-3 sm:hidden">
             <summary className="label !mb-0 cursor-pointer">Filtrér på kompetence{filter.length > 0 && ` (${filter.length} valgt)`}</summary>
-            <TagChips className="mt-2 flex flex-wrap gap-1" />
+            {tagChips("mt-2 flex flex-wrap gap-1")}
           </details>
           <div className="hidden sm:block">
             <p className="label mt-space-3">Filtrér på kompetence</p>
-            <TagChips className="flex flex-wrap gap-1" />
+            {tagChips("flex flex-wrap gap-1")}
           </div>
         </div>
         <ul className="flex-1 divide-y divide-grey-bg overflow-y-auto">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { resetTextAction, saveTextAction } from "@/app/actions/content";
 import { Rich } from "@/components/rich";
 import { DEFAULTS, interpolate, STEP_GROUPS, TEXT_DEFS, validateText, type TextDef } from "@/lib/content/onboarding-texts";
@@ -202,6 +202,47 @@ function TextField({
 
 // --------------------------------------------------------------------------- Forhåndsvisning
 
+// Små byggesten til forhåndsvisningen. De ligger uden for StepPreview (React må ikke oprette komponenter under render)
+// og henter tekster/fremhævning fra en kontekst.
+interface PreviewApi {
+  t: (k: string) => string;
+  hit: (...keys: string[]) => string;
+  values: Record<string, string>;
+  labels: string[];
+  eyebrow: string;
+}
+const PreviewCtx = createContext<PreviewApi>({ t: (k) => k, hit: () => "", values: {}, labels: [], eyebrow: "" });
+
+function Btn({ k, secondary }: { k: string; secondary?: boolean }) {
+  const { t, hit } = useContext(PreviewCtx);
+  return <span className={`${secondary ? "btn-secondary" : "btn"} btn-sm pointer-events-none ${hit(k)}`}>{t(k)}</span>;
+}
+function PField({ k, ph }: { k: string; ph?: string }) {
+  const { t, hit } = useContext(PreviewCtx);
+  return (
+    <div>
+      <p className={`label ${hit(k)}`}>{t(k)}</p>
+      <div className="input text-sm text-muted">{ph ? <span className={hit(ph)}>{t(ph)}</span> : " "}</div>
+    </div>
+  );
+}
+function R({ k, className = "" }: { k: string; className?: string }) {
+  const { hit, values } = useContext(PreviewCtx);
+  return <span className={`block ${className} ${hit(k)}`}><Rich text={interpolate(values[k] ?? DEFAULTS[k], SAMPLE_VARS)} /></span>;
+}
+function Box({ children }: { children: React.ReactNode }) {
+  return <div className="panel !p-4">{children}</div>;
+}
+function Head({ titleKey }: { titleKey: string }) {
+  const { t, hit, labels, eyebrow } = useContext(PreviewCtx);
+  return (
+    <>
+      <span className={`eyebrow ${hit("common.eyebrow", ...labels.map((_, i) => `common.stepLabel${i + 1}`))}`}>{eyebrow}</span>
+      <p className={`mb-3 text-2xl font-light leading-snug text-navy ${hit(titleKey)}`}>{t(titleKey)}</p>
+    </>
+  );
+}
+
 function StepPreview({ step, values, focusKey }: { step: number; values: Record<string, string>; focusKey: string | null }) {
   const t = (k: string) => interpolate(values[k] ?? DEFAULTS[k] ?? k, SAMPLE_VARS);
   const hit = (...keys: string[]) => (focusKey && keys.includes(focusKey) ? "outline outline-2 outline-offset-2 outline-gold-dark" : "");
@@ -209,27 +250,8 @@ function StepPreview({ step, values, focusKey }: { step: number; values: Record<
   const shown = step === 0 ? 1 : step;
   const eyebrow = interpolate(values["common.eyebrow"] ?? DEFAULTS["common.eyebrow"], { n: shown, total: 6, trin: labels[shown - 1] });
 
-  const Btn = ({ k, secondary }: { k: string; secondary?: boolean }) => (
-    <span className={`${secondary ? "btn-secondary" : "btn"} btn-sm pointer-events-none ${hit(k)}`}>{t(k)}</span>
-  );
-  const Field = ({ k, ph }: { k: string; ph?: string }) => (
-    <div>
-      <p className={`label ${hit(k)}`}>{t(k)}</p>
-      <div className="input text-sm text-muted">{ph ? <span className={hit(ph)}>{t(ph)}</span> : " "}</div>
-    </div>
-  );
-  const R = ({ k, className = "" }: { k: string; className?: string }) => (
-    <span className={`block ${className} ${hit(k)}`}><Rich text={interpolate(values[k] ?? DEFAULTS[k], SAMPLE_VARS)} /></span>
-  );
-  const Box = ({ children }: { children: React.ReactNode }) => <div className="panel !p-4">{children}</div>;
-  const Head = ({ titleKey }: { titleKey: string }) => (
-    <>
-      <span className={`eyebrow ${hit("common.eyebrow", ...labels.map((_, i) => `common.stepLabel${i + 1}`))}`}>{eyebrow}</span>
-      <p className={`mb-3 text-2xl font-light leading-snug text-navy ${hit(titleKey)}`}>{t(titleKey)}</p>
-    </>
-  );
-
   return (
+    <PreviewCtx.Provider value={{ t, hit, values, labels, eyebrow }}>
     <div className="text-sm">
       {step === 0 && (
         <div>
@@ -250,8 +272,8 @@ function StepPreview({ step, values, focusKey }: { step: number; values: Record<
           <Box>
             <p className={`mb-3 text-muted ${hit("step1.intro")}`}>{t("step1.intro")}</p>
             <div className="grid gap-3">
-              <Field k="step1.nameLabel" />
-              <Field k="step1.emailLabel" />
+              <PField k="step1.nameLabel" />
+              <PField k="step1.emailLabel" />
               <div className="flex items-start gap-2 text-xs text-muted">
                 <span className="mt-0.5 h-4 w-4 shrink-0 border border-slate bg-white" aria-hidden="true" />
                 <R k="step1.consent" />
@@ -267,8 +289,8 @@ function StepPreview({ step, values, focusKey }: { step: number; values: Record<
           <Box>
             <p className={`mb-3 text-muted ${hit("step2.intro")}`}>{t("step2.intro")}</p>
             <div className="grid gap-3">
-              <Field k="step2.cvrLabel" ph="step2.cvrPlaceholder" />
-              <Field k="step2.phoneLabel" ph="step2.phonePlaceholder" />
+              <PField k="step2.cvrLabel" ph="step2.cvrPlaceholder" />
+              <PField k="step2.phoneLabel" ph="step2.phonePlaceholder" />
               <div className="flex justify-between"><Btn k="common.back" secondary /><Btn k="step2.submit" /></div>
             </div>
           </Box>
@@ -298,7 +320,7 @@ function StepPreview({ step, values, focusKey }: { step: number; values: Record<
               <p className={`mt-1 ${hit("step3.quotaBody")}`}>{t("step3.quotaBody")}</p>
             </div>
             <p className={`mt-3 text-xs text-muted ${hit("step3.manualIntro")}`}>{t("step3.manualIntro")}</p>
-            <div className="mt-2 grid gap-2"><Field k="step3.manualName" /><Field k="step3.manualAddress" /></div>
+            <div className="mt-2 grid gap-2"><PField k="step3.manualName" /><PField k="step3.manualAddress" /></div>
             <div className="mt-2 flex justify-end"><Btn k="step3.manualSubmit" /></div>
           </Box>
         </div>
@@ -348,8 +370,8 @@ function StepPreview({ step, values, focusKey }: { step: number; values: Record<
             <p className="text-xs text-muted">Demo ApS · 3 rådgivere · Hver 8. uge</p>
           </Box>
           <div className="panel mt-2 grid gap-3 !p-4">
-            <Field k="step6.passwordLabel" />
-            <Field k="step6.confirmLabel" />
+            <PField k="step6.passwordLabel" />
+            <PField k="step6.confirmLabel" />
             <div className="flex items-start gap-2 text-xs text-muted"><span className="mt-0.5 h-4 w-4 shrink-0 border border-slate bg-white" aria-hidden="true" /><R k="step6.terms" /></div>
             <div className="flex items-start gap-2 border-l-4 border-gold bg-grey-bg px-3 py-2 text-xs text-ink"><span className="mt-0.5 h-4 w-4 shrink-0 border border-slate bg-white" aria-hidden="true" /><R k="step6.recordingConsent" /></div>
             <div className="flex justify-between"><Btn k="common.back" secondary /><Btn k="step6.submit" /></div>
@@ -357,5 +379,6 @@ function StepPreview({ step, values, focusKey }: { step: number; values: Record<
         </div>
       )}
     </div>
+    </PreviewCtx.Provider>
   );
 }

@@ -1,7 +1,14 @@
+# Holdes ude af build-konteksten: afhængigheder installeres med npm ci i imaget, og hemmeligheder må aldrig bages ind.
 node_modules
 .next
 .git
+.github
 .env
+.env.*
+!.env.example
 uploads
+coverage
 docs
+*.tsbuildinfo
+npm-debug.log*
 *.md

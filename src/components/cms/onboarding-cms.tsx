@@ -28,7 +28,9 @@ export function OnboardingCms({ initialQuestions, tags, advisors }: { initialQue
   const [confirmDelete, setConfirmDelete] = useState<CmsQuestion | null>(null);
   const saver = useSaver();
   const latest = useRef(questions);
-  latest.current = questions;
+  useEffect(() => {
+    latest.current = questions;
+  }, [questions]);
 
   const tagById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
   const warnings = useMemo(() => collectWarnings(questions, tags, advisors), [questions, tags, advisors]);
