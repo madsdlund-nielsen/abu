@@ -16,7 +16,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { isLocked, LOCK_THRESHOLD, recordFailedLogin, resetLoginFailures } from "@/lib/lockout";
 import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
-import { recordingConsentNow } from "@/lib/consent";
+import { loginUrlFor, recordingConsentNow, safeNextPath } from "@/lib/consent";
 import { currentConsent } from "@/lib/content/server";
 import { sendResetEmail } from "@/lib/emails";
 import { redirectWith } from "@/lib/redirect";
@@ -31,7 +31,8 @@ export async function loginAction(formData: FormData) {
     email: String(formData.get("email") ?? "").trim().toLowerCase(),
     password: String(formData.get("password") ?? ""),
   });
-  const keep = `/login?e=${encodeURIComponent(String(formData.get("email") ?? "").trim())}`;
+  const next = safeNextPath(String(formData.get("next") ?? ""));
+  const keep = `${loginUrlFor(next)}${next ? "&" : "?"}e=${encodeURIComponent(String(formData.get("email") ?? "").trim())}`;
   if (!parsed.success) redirectWith(keep, "err", "Indtast e-mail og adgangskode.");
   const { email, password } = parsed.data;
   // 1) Grænse pr. betroet klient-IP (mod password spraying på tværs af konti)
@@ -56,8 +57,9 @@ export async function loginAction(formData: FormData) {
   await createSession(user.id);
   await audit(user.id, "auth.login", "User", user.id);
   // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login
-  if (!user.recordingConsentAt) redirect("/samtykke");
-  redirect(user.role === "ADMIN" ? "/admin" : "/dashboard");
+  if (!user.recordingConsentAt) redirect(next ? `/samtykke?next=${encodeURIComponent(next)}` : "/samtykke");
+  // Tilbage til det dybe link (plan #21); rollekontrollen sker på siden selv
+  redirect(next ?? (user.role === "ADMIN" ? "/admin" : "/dashboard"));
 }
 
 export async function logoutAction() {

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { loginUrlFor } from "@/lib/consent";
 import { appEnv, getEnv } from "@/lib/env";
 import { makeNonce, securityHeaders } from "@/lib/security-headers";
 
@@ -32,10 +33,8 @@ export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PROTECTED.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
     if (!req.cookies.get("abu_session")?.value) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/login";
-      url.search = "";
-      return NextResponse.redirect(url);
+      // Dybe links (fx /meetings/<id> fra en påmindelse) bevares som ?next= (plan #21)
+      return NextResponse.redirect(new URL(loginUrlFor(`${pathname}${req.nextUrl.search}`), req.url));
     }
   }
 
@@ -53,6 +52,8 @@ export function proxy(req: NextRequest) {
   // Next.js læser noncen fra CSP-headeren på requesten og sætter den på framework-scripts og inline-scripts
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);
+  // Stien til requireUser(), så også en udløbet session sender brugeren tilbage hertil efter login
+  requestHeaders.set("x-abu-path", `${pathname}${req.nextUrl.search}`);
   requestHeaders.set("Content-Security-Policy", headers["Content-Security-Policy"]);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);

@@ -1,9 +1,10 @@
 import bcrypt from "bcryptjs";
 import type { Role, User } from "@prisma/client";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { prisma } from "./db";
+import { loginUrlFor } from "./consent";
 import { cookieSecure } from "./env";
 import { randomToken, sha256 } from "./tokens";
 
@@ -66,7 +67,7 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
 
 export async function requireUser(): Promise<User> {
   const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  if (!user) redirect(loginUrlFor((await headers()).get("x-abu-path")));
   return user;
 }
 
