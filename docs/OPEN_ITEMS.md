@@ -28,9 +28,11 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 6. E-mail og SMS via inMobile. Tekster, frekvenser og udløsere styres i CMS'en (Admin → Notifikationer).
 7. Onboarding trin 1 er en standard lead-boks med generelt markedsføringssamtykke (ikke forudkrydset), gemt som samtykkepost med tekst og version. Leads vises i Admin → Leads.
 8. Alle tekster i onboarding redigeres i CMS'en (Admin → Onboarding → Tekster).
-9. **Aktivering af rådgivere (18.10.2026):** rådgivere aktiveres manuelt af admin, når de er klar – ingen automatisk aktivering. Nye rådgivere oprettes inaktive og kan ikke vælges nogen steder (katalog, forslag, board-builder, booking, erstatning). Ved «Aktivér» vises en tjekliste (invitation accepteret, tags, ugentlig tilgængelighed, bio, pris); manglende punkter giver en advarsel, ikke en blokering. Deaktivering af en rådgiver i aktive boards advarer og viser de berørte kunder.
+9. **Aktivering af rådgivere (18.10.2026, skærpet samme dag):** rådgivere aktiveres manuelt af admin – ingen automatisk aktivering. Nye rådgivere oprettes inaktive og kan ikke vælges nogen steder (katalog, forslag, board-builder, booking, erstatning). **Aktivering er blokeret, indtil tjeklisten er opfyldt** (invitation accepteret, mindst ét kompetence-tag, ugentlig tilgængelighed, bio, pris inden for intervallet); serveren afviser også forfalskede requests. Status ændres kun med den dedikerede knap «Aktivér/Deaktivér rådgiver» (bekræftelse, audit-log); badget viser altid den gemte status. Deaktivering er altid tilladt og viser de berørte kunder. En aktiv rådgiver, der senere ikke er klar, deaktiveres ikke automatisk, men markeres «Aktiv – mangler: …». Admin kan rette rådgiverens titel, bio, foto-URL og mobilnummer.
 10. **Kontrast (18.10.2026):** forslaget er afprøvet og beholdt (charcoal på guldknapper, navy eyebrows). Endelig godkendelse af udtrykket mangler – se `docs/screens/kontrast/`.
 11. **Betalingsudbyder er stadig uafklaret (Frisbii eller Alunta).** Webhook-signaturen er bygget generisk (rå body + tidsstempel); der er ikke bygget en Alunta-adapter.
+12. **Møder holdes altid med hele boardet (18.10.2026)** – aldrig 1:1 eller med et reduceret board. Admin kan udskifte en rådgiver i et møde og tilføje ekstra deltagere, men ikke fjerne en, så mødet kommer under boardets størrelse. Slettes en rådgiver, markeres de berørte møder for admin.
+13. **Ansvarlig rådgiver (18.10.2026):** hvert board har præcis én ansvarlig rådgiver blandt rådgivere med det interne tag «Lead-kvalificeret»; rollerne fordeles automatisk efter belastning, og eksisterende boards omfordeles kun efter admins bekræftelse (`/admin/ansvarlige`).
 
 ## 2b. Beslutninger du stadig skal tage
 
@@ -49,6 +51,9 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 5. **Afbud.** Afbud senere end 48 timer før mødet tæller som brugt møde. Er det rigtigt?
 6. **Opbevaring.** Optagelser slettes efter transskribering. Hvor længe skal transskriptioner gemmes?
 7. **Honorering af rådgivere.** Der er ingen afregning eller rapport over afholdte møder pr. rådgiver endnu.
+8. **Den ansvarlige rådgivers rolle.** Får den ansvarlige rådgiver ekstra opgaver eller honorar – fx et højere mødehonorar, rollen som vært i mødet, eller at modtage resuméet først? I dag er rollen kun en markering (kundens faste kontakt), og alle i boardet behandles ens.
+9. **Tekster om ansvarlig rådgiver i onboardingen.** «Kan være ansvarlig», «Ansvarlig rådgiver: Tildeles automatisk» og blokeringsbeskeden er faste tekster i board-builderen; skal de kunne redigeres i Admin → Onboarding → Tekster?
+10. **Nye notifikationsregler efter deploy.** Udløseren «Ansvarlig rådgiver ændret» får standardregler ved seed; i en eksisterende database oprettes de med «Indlæs standarder» under Admin → Notifikationer.
 
 ## 3. Juridisk / GDPR
 

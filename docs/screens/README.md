@@ -7,6 +7,11 @@ Nyt siden sidst: kontrastdesignet (charcoal tekst på guldknapper, navy eyebrows
 notifikations-CMS, leads og redigerbare onboarding-tekster, mødets deltagelsesvindue, admin-udskiftning af rådgiver på ét møde,
 danske helligdage og sikkerhedshærdning.
 
+Opdateret 18.10.2026 (ejerens beslutninger): aktivering er blokeret, indtil tjeklisten er opfyldt, og status ændres med en
+dedikeret knap (`admin/03`–`05`, `04b`, `04c`); møder holdes altid med hele boardet (`admin/16`, `17`); hvert board har en
+ansvarlig rådgiver (`admin/24`, `25`, `onboarding/11`, `12`, `kunde/09`). Øvrige billeder er fra før disse ændringer og viser
+fx board-builderen uden markøren «Kan være ansvarlig».
+
 ## Offentlig (`offentlig/`)
 
 | Fil | Beskrivelse |
@@ -32,6 +37,8 @@ danske helligdage og sikkerhedshærdning.
 | `08-trin5-efter-udskiftning.png` | Trin 5: boardet efter udskiftning af en rådgiver. |
 | `09-trin6-konto-og-optagelsessamtykke.png` | Trin 6: konto, vilkår og samtykke til optagelse med momsresumé. |
 | `10-mock-betaling.png` | Testbetalingen (mock-udbyder), som aktiverer abonnementet. |
+| `11-trin5-kan-vaere-ansvarlig.png` | Trin 5: rådgivere med lead-tagget er markeret «Kan være ansvarlig», og sidepanelet viser «Ansvarlig rådgiver: Tildeles automatisk». |
+| `12-trin5-ingen-ansvarlig-blokeret.png` | Trin 5: ingen i boardet kan være ansvarlig – Fortsæt er spærret med en forklaring. |
 
 ## Kunde (`kunde/`)
 
@@ -46,6 +53,7 @@ danske helligdage og sikkerhedshærdning.
 | `06-moede-afsluttet-transskription-og-resume.png` | Afholdt møde med resumé og transskription. |
 | `07-konto-abonnement.png` | Abonnement: nuværende plan og skift af board og frekvens. |
 | `08-konto-notifikationer-fravalg.png` | Konto med fravalg af e-mail, SMS og markedsføring. |
+| `09-dashboard-ansvarlig-raadgiver.png` | Ny kunde efter køb: den mindst belastede kvalificerede rådgiver er tildelt som «Ansvarlig rådgiver». |
 
 ## Rådgiver (`raadgiver/`)
 
@@ -62,9 +70,11 @@ danske helligdage og sikkerhedshærdning.
 |---|---|
 | `01-dashboard.png` | Admin-dashboard med nøgletal, booking og baggrundsjobs. |
 | `02-opret-raadgiver-invitation.png` | Ny rådgiver oprettet som inaktiv, med invitationslink. |
-| `03-raadgivere-med-inaktiv.png` | Rådgiverlisten, hvor den nyoprettede rådgiver er inaktiv med klar-tjekliste og Aktivér-knap. |
-| `04-raadgiver-klar-til-aktivering.png` | Rådgiverdetalje med tjekliste og aktiveringsvalg, inkl. advarsel om det der mangler. |
-| `05-deaktivering-advarsel.png` | Advarsel ved deaktivering af en rådgiver, der sidder i aktive boards. |
+| `03-raadgivere-med-inaktiv.png` | Rådgiverlisten med gemt status (AKTIV/INAKTIV), kompakt tjekliste-indikator og interne tags; den nyoprettede rådgiver er INAKTIV, og «Aktivér» er spærret, til tjeklisten er opfyldt. |
+| `04-raadgiver-klar-til-aktivering.png` | Tjeklisten er opfyldt: «Aktivér rådgiver» gemmer straks efter bekræftelse. |
+| `04b-raadgiver-ikke-klar-blokeret.png` | Nyinviteret rådgiver: «Aktivér rådgiver» er spærret med listen over det, der mangler (serveren afviser det også). |
+| `04c-raadgiver-profil-redigeret-af-admin.png` | Admin har udfyldt titel, bio og mobilnummer i «Profil» og tilføjet et tag; tjeklisten er opdateret. Rådgiveren kan selv rette felterne. |
+| `05-deaktivering-advarsel.png` | Bekræftelse ved «Deaktivér», der lister kunder med aktive boards, som rådgiveren sidder i. |
 | `06-onboarding-cms.png` | Onboarding-CMS: spørgsmål, svar og tag-vægte. |
 | `07-onboarding-cms-traek-og-slip.png` | Træk og slip af et spørgsmål med den gyldne indsættelseslinje. |
 | `08-onboarding-cms-forhaandsvisning.png` | Forhåndsvisning af testen med foreslået board og scores. |
@@ -75,14 +85,16 @@ danske helligdage og sikkerhedshærdning.
 | `13-kunde-detalje.png` | Kundedetalje med virksomhed, kontakt og abonnement. |
 | `14-abonnementer.png` | Oversigt over abonnementer og deres boards. |
 | `15-abonnement-fast-board.png` | Editor til kundens faste board med prisvalg ved ændring. |
-| `16-moede-detalje.png` | Admin-mødedetalje med deltagere, flyt og aflys. |
-| `17-moede-erstatning-kandidater.png` | Udskiftning af en rådgiver på ét møde med rangerede kandidater. |
+| `16-moede-detalje.png` | Admin-mødedetalje: mødet holdes altid med hele boardet, så der er kun «Udskift» (ingen «Fjern») og «Tilføj ekstra deltager»; ansvarlig rådgiver vises. |
+| `17-moede-erstatning-kandidater.png` | Udskiftning af en rådgiver på ét møde med rangerede kandidater (kun kompetence-tags). |
 | `18-notifikationer-regler.png` | Notifikationer: regler pr. hændelse, kanal og modtager. |
 | `19-notifikationer-skabelon-sms.png` | SMS-skabelon med live forhåndsvisning, tegn- og segmentzæller og testudsendelse. |
 | `20-notifikationer-log.png` | Notifikationsloggen med planlagte og sendte beskeder. |
 | `21-notifikationer-indstillinger.png` | Indstillinger: stille timer, afsendernavn, tilladte SMS-lande og opbevaring. |
 | `22-leads.png` | Leads med trin, status og samtykke. |
 | `23-helligdage.png` | Helligdage og lukkedage, der spærres for booking. |
+| `24-ansvarlige-fordeling.png` | Ansvarlige rådgivere: fordeling pr. kvalificeret rådgiver og et udligningsforslag (board, fra → til), der kun anvendes efter bekræftelse. |
+| `25-abonnement-ansvarlig.png` | Abonnement: admin har skiftet ansvarlig rådgiver (kun kvalificerede i boardet kan vælges). |
 
 ## Mobil, 390 px (`mobil/`)
 

@@ -31,7 +31,7 @@ Seed-brugere:
 | Kunde (aktivt abonnement: 3 rådgivere, hver 8. uge) | `kunde@abu.local` | `Kunde12345!` |
 | Rådgivere (8 stk., fx `mette.lindberg@abu.local`) | se `prisma/seed-data.ts` | `Raadgiver123!` |
 
-Seed opretter også danske standardtekster og -regler til notifikationer (21 skabeloner, 21 regler).
+Seed opretter også danske standardtekster og -regler til notifikationer (23 skabeloner, 23 regler), og fire rådgivere får det interne tag «Lead-kvalificeret».
 
 Hele flowet virker i mock-tilstand: onboarding (`/kom-i-gang`) → testbetaling (`/subscribe/mock-betaling`, ét klik) → book → åbn
 mødet → upload optagelse (som rådgiver/admin) → transskription og resumé vises på mødesiden. Mails og SMS skrives **redigeret**
@@ -76,9 +76,10 @@ og testsvar som snapshot) og et afventende abonnement, og kunden sendes til beta
 Eksisterende kunder ændrer board og frekvens under *Konto → Abonnement* med samme board-builder.
 
 **Matching (`src/lib/matching.ts`, ren funktion).** Hvert svar har tag-vægte (1-5) og evt. `boardSize` (2/3/4). Kundens behov = sum af vægte pr. tag.
-Rådgiverens score = sum af behov for hans tags. Boardet vælges grådigt: højeste score først; tags boardet allerede dækker nedskrives til 30 % for de
+Rådgiverens score = sum af behov for hans kompetence-tags. Boardet vælges grådigt: højeste score først; tags boardet allerede dækker nedskrives til 30 % for de
 næste valg (komplementaritet); lige score → laveste pris → alfabetisk. Størrelse: største `boardSize`, ellers tilføjes rådgivere til mindst 80 % af
-behovet er dækket (2-4; standard 3 uden behov). Kun aktive rådgivere med mindst ét tag tæller med.
+behovet er dækket (2-4; standard 3 uden behov). Kun aktive rådgivere med mindst ét kompetence-tag tæller med. Har boardet ingen rådgiver, der kan være ansvarlig, erstattes medlemmet med det
+mindste bidrag af den bedst scorende kvalificerede rådgiver.
 
 *Eksempel (seed-data):* en kunde svarer «vækste hurtigere», «skalering», «nye markeder», mangler «salg og marketing» + «teknologi», 10-49 ansatte.
 Behov: Vækst & salg 13, Marketing 7, Digitalisering 6, Ledelse 5, Internationalisering 5, Strategi 2, HR 2, Økonomistyring 1 (i alt 41).
@@ -87,7 +88,7 @@ dækningen 76 % (< 80 %), så Søren (Ledelse + HR = 7) tilføjes. Resultat: Lou
 
 **CMS (admin).** `/admin/onboarding`: spørgsmålsliste (træk i grebet eller brug tastaturet til at sortere) og redigering af spørgsmål, svar, tag-vægter
 (chips med vægt 1-5) og boardstørrelse; advarsler vises, hvor de gælder, og som sum øverst; *Forhåndsvis test* viser forslag, scores og begrundelse uden at
-gemme noget. `/admin/tags`: tags med brugstal og inline omdøbning. `/admin/advisors/[id]`: pris pr. møde, tags og aktiv. `/admin/customers/[id]`:
+gemme noget. `/admin/tags`: kompetence-tags og interne admin-tags med brugstal, typefilter og inline omdøbning. `/admin/advisors/[id]`: status og aktivering, pris pr. møde, tags (interne i en separat gruppe) og profil. `/admin/customers/[id]`:
 CVR-data og testsvar. Alle ændringer skrives til audit-loggen og gælder straks for nye onboardinger; gennemførte tests gemmer et snapshot af teksterne.
 
 **CVR-opslag (`src/lib/cvr/`).** `CVR_PROVIDER=mock|virk|cvrapi` (standard `mock`: fiktive virksomheder; CVR `34000107` er ophørt, `35000100` findes ikke).
@@ -172,8 +173,27 @@ tilfældigt token, og databasen gemmer kun dets SHA-256. Cookien er `httpOnly`, 
 Rådgivere inviteres af admin og vælger selv adgangskode via et engangslink (7 dage). Login spærres pr. konto i databasen efter
 5 forkerte forsøg (15 min, derefter fordoblet, højst 24 t) uanset IP; derudover er der rate limits pr. betroet klient-IP
 (`TRUSTED_PROXY_HOPS`). Alle rate limits ligger i Postgres-tabellen `RateLimit`, så de overlever genstart og deles mellem instanser.
-Booking og «opret rådgiver» er idempotente (formular-nøgle), så dobbeltklik giver samme resultat. Rådgivere oprettes inaktive og
-aktiveres manuelt af admin (tjekliste: invitation accepteret, tags, tilgængelighed, bio, pris 500-25.000 kr.).
+Booking og «opret rådgiver» er idempotente (formular-nøgle), så dobbeltklik giver samme resultat.
+
+**Rådgivere: aktivering og profil (`src/lib/advisor-activation.ts`, `advisor-readiness.ts`).** Rådgivere oprettes inaktive og aktiveres
+manuelt af admin med en dedikeret knap («Aktivér rådgiver»/«Deaktivér rådgiver», egen server action, bekræftelse, audit-log). Aktivering
+er **blokeret**, indtil tjeklisten er opfyldt: invitation accepteret, mindst ét kompetence-tag, ugentlig tilgængelighed, bio og en pris
+inden for intervallet (standard 500-25.000 kr.). Serveren afviser også forfalskede requests med en dansk liste over det, der mangler.
+Deaktivering er altid tilladt og viser de berørte kunders boards. En aktiv rådgiver, der senere ikke er klar, deaktiveres ikke automatisk,
+men vises som «Aktiv – mangler: …». Statusbadget viser altid den gemte tilstand (AKTIV/INAKTIV). Admin kan rette rådgiverens titel, bio,
+foto-URL og mobilnummer på `/admin/advisors/[id]` med samme validering som rådgiverens egen profil (audit-logget).
+
+**Møder holdes altid med hele boardet** (ejerens beslutning). Booking kræver alle boardets pladser; admin kan udskifte en rådgiver i et
+møde eller tilføje en ekstra deltager, men ikke fjerne en rådgiver, så mødet får færre end boardet («udskift i stedet»). Slettes en
+rådgiver (GDPR), audit-logges de berørte møder, og admin-forsiden viser «Møder uden hele boardet».
+
+**Ansvarlig rådgiver (`src/lib/lead.ts`).** Hvert board har præcis én ansvarlig rådgiver blandt rådgivere med det interne admin-tag
+«Lead-kvalificeret» (systemtag, `Tag.kind = ADMIN`, `systemKey = "lead"`). Et board skal have mindst én kvalificeret rådgiver (matching,
+board-builder og server-validering). Ved køb tildeles den kvalificerede med færrest ansvarsroller (lige: færrest pladser, laveste pris,
+navn) under en advisory lock. Forlader den ansvarlige boardet, deaktiveres, slettes eller mister tagget, tildeles en ny automatisk; ellers
+vises boardet for admin. Admin kan vælge manuelt (`/admin/subscriptions/[id]`) og se fordelingen samt et udligningsforslag på
+`/admin/ansvarlige`, som kun anvendes efter bekræftelse. Interne admin-tags vises aldrig for kunder eller rådgivere og bruges ikke i
+matchingen. Skift af ansvarlig sender notifikationen «Ansvarlig rådgiver ændret» (`board_lead_changed`).
 
 **Booking.** Et tidspunkt tilbydes kun, hvis *alle* rådgivere i boardet er ledige (inden for en ugentlig regel, ingen blokering,
 intet andet møde inkl. 30 min buffer). Vindue: 2 dage – 16 uger frem. Kvote: ét møde pr. periode (frekvens i uger regnet fra
