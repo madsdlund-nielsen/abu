@@ -8,6 +8,7 @@ const PROD = {
   APP_URL: "https://abu.example.com",
   APP_SECRET: "a".repeat(48),
   CRON_SECRET: "c".repeat(48),
+  MFA_ENCRYPTION_KEY: "m".repeat(48),
   PAYMENT_PROVIDER: "frisbii",
   FRISBII_PRIVATE_KEY: "priv_x",
   FRISBII_WEBHOOK_SECRET: "whsec_x",
@@ -71,6 +72,15 @@ describe("produktions-guard (C-1)", () => {
     expect(text).toMatch(/DATABASE_URL skal sættes eksplicit/);
   });
 
+  it("kræver MFA_ENCRYPTION_KEY (mindst 32 tegn, forskellig fra APP_SECRET)", () => {
+    for (const raw of [{ ...PROD, MFA_ENCRYPTION_KEY: "" }, { ...PROD, MFA_ENCRYPTION_KEY: "kort" }]) {
+      expect(productionConfigProblems(parseEnv(raw), raw).join("\n")).toMatch(/MFA_ENCRYPTION_KEY skal være mindst 32/);
+    }
+    const same = { ...PROD, MFA_ENCRYPTION_KEY: PROD.APP_SECRET };
+    expect(productionConfigProblems(parseEnv(same), same).join("\n")).toMatch(/forskellig fra APP_SECRET/);
+    expect(() => assertBootConfig({ ...PROD, MFA_ENCRYPTION_KEY: "" }, silent)).toThrow(EnvConfigError);
+  });
+
   it("afviser localhost og COOKIE_SECURE=false", () => {
     const raw = { ...PROD, APP_URL: "https://localhost:3000", COOKIE_SECURE: "false" };
     const text = productionConfigProblems(parseEnv(raw), raw).join("\n");
@@ -103,6 +113,8 @@ describe("produktions-guard (C-1)", () => {
     expect(line).toMatch(/betaling=frisbii/);
     expect(line).toMatch(/APP_SECRET=sat/);
     expect(line).not.toContain(PROD.APP_SECRET);
+    expect(line).toMatch(/MFA_ENCRYPTION_KEY=sat/);
+    expect(line).not.toContain(PROD.MFA_ENCRYPTION_KEY);
     expect(line).not.toContain(PROD.FRISBII_PRIVATE_KEY);
     expect(line).not.toContain("x@db");
   });

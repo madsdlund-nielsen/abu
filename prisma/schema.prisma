@@ -73,8 +73,29 @@ model User {
   failedLoginCount  Int       @default(0)
   lastFailedLoginAt DateTime?
   lockedUntil       DateTime?
+  /// Seneste fuldt gennemførte login (efter evt. totrinsbekræftelse). Vises i Admin → Administratorer.
+  lastLoginAt       DateTime?
+  /// Deaktiveret (administratorer): kan ikke logge ind; sessioner og betroede enheder er tilbagekaldt.
+  deactivatedAt     DateTime?
+
+  /// Totrinsbekræftelse (TOTP, RFC 6238). Påkrævet for ADMIN, valgfri for andre. Hemmeligheden er krypteret
+  /// (AES-256-GCM, `src/lib/mfa/crypto.ts`) og aldrig i klartekst i databasen.
+  mfaEnabledAt        DateTime?
+  mfaSecretEnc        String?
+  /// Id for nøglen, hemmeligheden er krypteret med (rotation: MFA_ENCRYPTION_KEY / MFA_ENCRYPTION_KEY_PREVIOUS).
+  mfaKeyId            String?
+  /// Opsætning i gang: ny hemmelighed, der først aktiveres, når brugeren har bekræftet med en gyldig kode.
+  mfaPendingSecretEnc String?
+  mfaPendingCreatedAt DateTime?
+  /// Seneste brugte TOTP-tidstrin (afviser genbrug af en kode, replay).
+  mfaLastUsedStep     Int?
+  /// Fejlede koder i træk (egen tæller, så et korrekt password ikke nulstiller den). Spærring deles med login (lockedUntil).
+  mfaFailedCount      Int       @default(0)
+  mfaLastFailedAt     DateTime?
 
   sessions        Session[]
+  trustedDevices  TrustedDevice[]
+  recoveryCodes   MfaRecoveryCode[]
   passwordTokens  PasswordToken[]
   advisorProfile  AdvisorProfile?
   customerProfile CustomerProfile?
@@ -90,9 +111,47 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  /// true = adgangskoden er godkendt, men totrinsbekræftelsen (kode eller opsætning) mangler. Sådan en session giver
+  /// kun adgang til /mfa-siderne og log ud; den udløber efter 15 minutter og erstattes af en ny ved bekræftelse.
+  mfaPending    Boolean   @default(false)
+  /// Seneste bekræftelse med kode i denne session (følsomme admin-handlinger kræver højst 15 minutter siden).
+  mfaVerifiedAt DateTime?
+  /// Login uden kode, fordi enheden er betroet («Husk denne enhed»).
+  trustedDeviceId String?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+/// Betroet enhed («Husk denne enhed i 30 dage»): cookien `abu_device` holder et tilfældigt token, her gemmes kun dets
+/// SHA-256. Udløbet forlænges ikke ved brug. Adgangskoden kræves altid; kun koden springes over.
+model TrustedDevice {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  /// Grov beskrivelse ud fra user-agent, fx «Chrome på macOS»
+  label      String
+  /// Omtrentlig IP (IPv4 /24, IPv6 /48), fx «203.0.113.0/24»
+  ipPrefix   String?
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Engangs-gendannelseskoder til totrinsbekræftelse. Kun SHA-256 gemmes; koderne vises én gang.
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
 }
 
 model PasswordToken {

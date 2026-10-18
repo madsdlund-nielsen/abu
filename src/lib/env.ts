@@ -22,6 +22,12 @@ const schema = z.object({
   CRON_SECRET: z.string().default(""),
   /** Hemmelighed til signerede links (afmelding). Kræves i produktion (mindst 32 tegn). */
   APP_SECRET: z.string().default(""),
+  /**
+   * Nøglemateriale til kryptering af TOTP-hemmeligheder (AES-256-GCM, HKDF-afledt). Kræves i produktion (mindst 32 tegn).
+   * Tom uden for produktion = en fast udviklingsnøgle. Rotation: ny værdi her, den gamle i MFA_ENCRYPTION_KEY_PREVIOUS.
+   */
+  MFA_ENCRYPTION_KEY: z.string().default(""),
+  MFA_ENCRYPTION_KEY_PREVIOUS: z.string().default(""),
   /** Kør jobkøen og notifikationer hvert minut i selve app-processen. Slå fra, hvis en ekstern cron kalder /api/cron/process-jobs. */
   IN_PROCESS_SCHEDULER: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
   /** "Deltag i mødet" åbner så mange minutter før mødets start. */
@@ -152,7 +158,7 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   const need = (key: keyof Env & string, why: string) => {
     if (!String(env[key] ?? "").trim()) p.push(`${key} mangler (${why}).`);
   };
-  const secret = (key: "APP_SECRET" | "CRON_SECRET", why: string) => {
+  const secret = (key: "APP_SECRET" | "CRON_SECRET" | "MFA_ENCRYPTION_KEY", why: string) => {
     if (env[key].length < MIN_SECRET_LENGTH) p.push(`${key} skal være mindst ${MIN_SECRET_LENGTH} tilfældige tegn (${why}). Generér med: openssl rand -base64 48`);
   };
 
@@ -162,6 +168,8 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   if (env.TRUSTED_PROXY_HOPS < 1) p.push("TRUSTED_PROXY_HOPS skal være mindst 1 (antal reverse proxies foran appen, fx Caddy = 1).");
   secret("APP_SECRET", "signerer afmeldingslinks");
   secret("CRON_SECRET", "beskytter /api/cron/process-jobs");
+  secret("MFA_ENCRYPTION_KEY", "krypterer hemmeligheder til totrinsbekræftelse");
+  if (env.MFA_ENCRYPTION_KEY && env.MFA_ENCRYPTION_KEY === env.APP_SECRET) p.push("MFA_ENCRYPTION_KEY skal være forskellig fra APP_SECRET.");
 
   if (env.PAYMENT_PROVIDER === "mock") p.push("PAYMENT_PROVIDER=mock er ikke tilladt i produktion (giver gratis abonnementer).");
   else {
@@ -219,6 +227,7 @@ export function describeConfig(env: Env, appEnv: AppEnv): string {
     `proxy-hop=${env.TRUSTED_PROXY_HOPS}`,
     `APP_SECRET=${set(env.APP_SECRET)}`,
     `CRON_SECRET=${set(env.CRON_SECRET)}`,
+    `MFA_ENCRYPTION_KEY=${set(env.MFA_ENCRYPTION_KEY)}${env.MFA_ENCRYPTION_KEY_PREVIOUS ? " (+forrige)" : ""}`,
     `scheduler=${env.IN_PROCESS_SCHEDULER ? "i processen" : "ekstern cron"}`,
   ].join(" · ");
 }
