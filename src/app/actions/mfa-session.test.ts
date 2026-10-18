@@ -106,7 +106,7 @@ describeDb("MFA i server actions og sessioner", () => {
     expect(await redirectOf(() => deactivateAdminAction(formData({ userId: victim.user.id })))).toBe("/mfa");
     const { getCurrentUser } = await import("@/lib/auth");
     expect(await getCurrentUser()).toBeNull();
-  });
+  }, 20_000); // importerer fire store action-moduler og hasher tre adgangskoder (bcrypt 12) – over 5 s under fuld parallel testkørsel
 
   it("følsomme handlinger kræver en kode inden for 15 minutter (ellers /mfa/bekraeft eller en fejl med link)", async () => {
     const { REVERIFY_MESSAGE } = await import("@/lib/auth");
