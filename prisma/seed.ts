@@ -5,7 +5,11 @@ import { prisma } from "../src/lib/db";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
 import { ensureNotificationDefaults } from "../src/lib/notifications/service";
 import { assignLeadTx, getLeadTagId } from "../src/lib/lead";
+import { sealSecret } from "../src/lib/mfa/service";
 import { ADVISORS, DEMO_BOARD_EMAILS, LEAD_ADVISOR_EMAILS, QUESTIONS, TAGS } from "./seed-data";
+
+/** KUN lokal udvikling: TOTP-hemmelighed for admin@abu.local (base32, 160 bit). Står i README. Aldrig i produktion. */
+const DEV_ADMIN_TOTP_SECRET = "ABUDEVTOTPSECRETONLYFORLOCALDEV2";
 
 async function main() {
   // H-1: demodata med kendte adgangskoder må aldrig ende i produktion
@@ -21,11 +25,18 @@ async function main() {
   const kundeHash = await bcrypt.hash("Kunde12345!", 12);
   const advisorHash = await bcrypt.hash("Raadgiver123!", 12);
 
-  await prisma.user.upsert({
+  const admin = await prisma.user.upsert({
     where: { email: "admin@abu.local" },
     update: {},
     create: { email: "admin@abu.local", name: "Admin", role: "ADMIN", passwordHash: adminHash, ...consent },
   });
+  // Totrinsbekræftelse er påkrævet for administratorer. Demo-admin får en KENDT, kun-lokal TOTP-hemmelighed (README),
+  // så den kan logge ind lokalt og i Playwright. Seed afvises i produktion (H-1), og hemmeligheden er krypteret med
+  // udviklingsnøglen (eller MFA_ENCRYPTION_KEY, hvis den er sat lokalt).
+  if (!admin.mfaEnabledAt) {
+    const sealed = sealSecret(admin.id, DEV_ADMIN_TOTP_SECRET);
+    await prisma.user.update({ where: { id: admin.id }, data: { mfaEnabledAt: new Date(), mfaSecretEnc: sealed.enc, mfaKeyId: sealed.keyId } });
+  }
 
   const tagIds = new Map<string, string>();
   for (const [i, t] of TAGS.entries()) {
@@ -148,7 +159,7 @@ async function main() {
   console.log(`Notifikationer: ${n.templates} skabeloner og ${n.rules} regler oprettet.`);
 
   console.log("Seed færdig.");
-  console.log("  Admin:   admin@abu.local / Admin12345!");
+  console.log("  Admin:   admin@abu.local / Admin12345! + TOTP-kode fra den lokale udviklingshemmelighed (README)");
   console.log("  Kunde:   kunde@abu.local / Kunde12345!");
   console.log("  Rådgiver (alle): <fornavn.efternavn>@abu.local / Raadgiver123!");
 }

@@ -2,6 +2,12 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { completePastMeetings } from "./meeting-status";
 import { cleanupExpiredOnboarding } from "./onboarding/session";
+import { cleanupTrustedDevices } from "./mfa/service";
+
+async function cleanupAuth(now = new Date()) {
+  await cleanupTrustedDevices(now);
+  await prisma.session.deleteMany({ where: { expiresAt: { lt: now } } });
+}
 
 type Handler = (payload: Record<string, unknown>) => Promise<void>;
 const handlers = new Map<string, Handler>();
@@ -46,6 +52,8 @@ export async function processJobs(limit = 5): Promise<number> {
   await completePastMeetings().catch((e) => console.error("[jobs] completePastMeetings fejlede", e));
   // GDPR: udløbne onboarding-sessioner slettes.
   await cleanupExpiredOnboarding().catch((e) => console.error("[jobs] oprydning af onboarding fejlede", e));
+  // Udløbne betroede enheder og sessioner slettes.
+  await cleanupAuth().catch((e) => console.error("[jobs] oprydning af sessioner/enheder fejlede", e));
   // Notifikationer: ufærdige tilmeldinger, forfaldne beskeder og daglig oprydning af loggen.
   await runNotificationTick().catch((e) => console.error("[jobs] notifikationer fejlede", e));
   let done = 0;

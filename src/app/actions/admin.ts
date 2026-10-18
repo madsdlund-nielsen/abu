@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
-import { createPasswordToken, requireRole } from "@/lib/auth";
+import { createPasswordToken, requireFreshMfa, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
 import { savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
@@ -148,7 +148,8 @@ export async function processJobsAction() {
 }
 
 export async function processDeletionAction(formData: FormData) {
-  const admin = await requireRole("ADMIN");
+  // Følsom handling: kræver en kode fra appen inden for de seneste 15 minutter
+  const { user: admin } = await requireFreshMfa("/admin/customers");
   const id = String(formData.get("userId"));
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.role === "ADMIN") redirectWith("/admin/customers", "err", "Kan ikke slette denne bruger.");

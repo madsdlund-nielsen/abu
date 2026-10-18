@@ -5,7 +5,9 @@ import { prisma } from "./db";
 /**
  * GDPR-dataeksport (M-2). Hver tabel har en eksplicit `select`, så kun felter, personen har ret til, kommer med. Bevidst
  * udeladt: adgangskode-hash, sessioner, værtens mødelink (hostRoomUrl), mødelinks og udbyder-id'er (betaling/video),
- * optagelsernes lagernøgler, login-spærring og andre brugeres kontaktoplysninger.
+ * optagelsernes lagernøgler, login-spærring, TOTP-hemmeligheden, gendannelseskodernes hash, tokens for betroede
+ * enheder og andre brugeres kontaktoplysninger. Med er: om totrinsbekræftelse er slået til, og listen over betroede
+ * enheder (grov beskrivelse, omtrentlig IP, oprettet/udløber/senest brugt).
  *
  * Rådgiverens profilbillede er med som metadata (lagernøgle og tidspunkt, `profilePhoto`); selve billedet kan hentes
  * på `/api/avatar/<id>?size=512` eller rekvireres hos os. Det gemte billede har ingen EXIF/GPS-data.
@@ -23,6 +25,11 @@ export const EXPORT_USER_SELECT = {
   emailOptOutAt: true,
   smsOptOutAt: true,
   deletionRequestedAt: true,
+  lastLoginAt: true,
+  deactivatedAt: true,
+  // Totrinsbekræftelse: kun om den er slået til og hvornår – aldrig hemmeligheden eller gendannelseskoderne
+  mfaEnabledAt: true,
+  trustedDevices: { select: { label: true, ipPrefix: true, createdAt: true, expiresAt: true, lastUsedAt: true }, orderBy: { createdAt: "asc" } },
   customerProfile: {
     select: {
       companyName: true,
@@ -100,7 +107,9 @@ export async function buildDataExport(user: { id: string; email: string }) {
       select: { email: true, name: true, phone: true, step: true, source: true, createdAt: true, lastActivityAt: true, convertedAt: true },
     }),
   ]);
-  return { exportedAt: new Date().toISOString(), user: profile, profilePhoto: profilePhotoInfo(user.id, profile.advisorProfile), meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog };
+  const { mfaEnabledAt, trustedDevices, ...rest } = profile;
+  const twoFactor = { enabled: mfaEnabledAt !== null, enabledAt: mfaEnabledAt, trustedDevices };
+  return { exportedAt: new Date().toISOString(), user: rest, twoFactor, profilePhoto: profilePhotoInfo(user.id, profile.advisorProfile), meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog };
 }
 
 /** Metadata om profilbilledet + hvordan selve billedet fås (det indgår ikke i JSON-filen). */

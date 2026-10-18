@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
+import { requireFreshMfa, requireRole } from "@/lib/auth";
 import { BookingError, cancelMeeting } from "@/lib/booking";
 import { changeBoardAsAdmin } from "@/lib/board-admin";
 import { applyBalancing, setLeadManually } from "@/lib/lead";
@@ -99,7 +99,8 @@ export async function setLeadAction(formData: FormData) {
 
 /** Anvend et udligningsforslag efter bekræftelse. Flytningerne kommer som `move` = "subId:from:to". */
 export async function applyBalancingAction(formData: FormData) {
-  const admin = await requireRole("ADMIN");
+  // Følsom handling (flytter ansvar for mange boards og sender beskeder): kræver frisk kode
+  const { user: admin } = await requireFreshMfa("/admin/ansvarlige");
   const moves = formData
     .getAll("move")
     .map(String)

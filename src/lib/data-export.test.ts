@@ -7,7 +7,8 @@ describe("dataeksport vælger kun tilladte felter (M-2)", () => {
     const meetingKeys = Object.keys(EXPORT_MEETING_SELECT);
     for (const k of ["hostRoomUrl", "roomUrl", "providerMeetingId", "recordings", "createdById"]) expect(meetingKeys).not.toContain(k);
     const userKeys = Object.keys(EXPORT_USER_SELECT);
-    for (const k of ["passwordHash", "sessions", "passwordTokens", "failedLoginCount", "lockedUntil"]) expect(userKeys).not.toContain(k);
+    for (const k of ["passwordHash", "sessions", "passwordTokens", "failedLoginCount", "lockedUntil", "mfaSecretEnc", "mfaPendingSecretEnc", "mfaKeyId", "mfaLastUsedStep", "recoveryCodes"]) expect(userKeys).not.toContain(k);
+    expect(Object.keys(EXPORT_USER_SELECT.trustedDevices.select)).not.toContain("tokenHash");
     const subKeys = Object.keys(EXPORT_USER_SELECT.customerProfile.select.subscriptions.select);
     expect(subKeys).not.toContain("providerSubscriptionId");
     expect(subKeys).not.toContain("providerCustomerId");

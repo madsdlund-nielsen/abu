@@ -6,10 +6,11 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import {
   createPasswordToken,
-  createSession,
   destroySession,
   findValidPasswordToken,
   hashPassword,
+  mfaPathFor,
+  requireUser,
   validatePassword,
   verifyPassword,
 } from "@/lib/auth";
@@ -18,6 +19,8 @@ import { isLocked, LOCK_THRESHOLD, recordFailedLogin, resetLoginFailures } from 
 import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
 import { recordingConsentNow, safeNextPath } from "@/lib/consent";
+import { revokeTrustedDevices } from "@/lib/mfa/service";
+import { beginSignIn, clearDeviceCookie, landingPath } from "@/lib/sign-in";
 import type { FormState } from "@/lib/form-state";
 import { currentConsent } from "@/lib/content/server";
 import { sendResetEmail } from "@/lib/emails";
@@ -55,13 +58,16 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
     return fail("Forkert e-mail eller adgangskode.");
   }
 
+  // Deaktiverede administratorer: først efter korrekt adgangskode, så svaret ikke afslører kontoen
+  if (user.deactivatedAt) return fail("Kontoen er deaktiveret. Kontakt en administrator.");
+
   if (user.failedLoginCount > 0 || user.lockedUntil) await resetLoginFailures(user.id);
-  await createSession(user.id);
   await audit(user.id, "auth.login", "User", user.id);
-  // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login
-  if (!user.recordingConsentAt) redirect(next ? `/samtykke?next=${encodeURIComponent(next)}` : "/samtykke");
-  // Tilbage til det dybe link (plan #21); rollekontrollen sker på siden selv
-  redirect(next ?? (user.role === "ADMIN" ? "/admin" : "/dashboard"));
+  // Totrinsbekræftelse: kode (eller betroet enhed), og for administratorer opsætning, før appen kan bruges
+  const stage = await beginSignIn(user);
+  if (stage !== "full") redirect(mfaPathFor(stage, next));
+  // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login; ellers det dybe link (plan #21)
+  redirect(landingPath(user, next));
 }
 
 export async function logoutAction() {
@@ -75,7 +81,7 @@ export async function requestResetAction(_prev: FormState, formData: FormData): 
     return { error: "For mange forsøg. Prøv igen senere.", values: { email }, at: Date.now() };
   }
   const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
-  if (user) {
+  if (user && !user.deactivatedAt) {
     // Sendes efter svaret, så svartiden ikke afslører, om kontoen findes
     after(async () => {
       const { token } = await createPasswordToken(user.id, "RESET");
@@ -119,12 +125,17 @@ export async function setPasswordAction(formData: FormData) {
     prisma.session.deleteMany({ where: { userId: row.userId } }),
   ]);
   await audit(row.userId, `auth.password_${row.purpose.toLowerCase()}`, "User", row.userId);
-  await createSession(row.userId);
-  redirect(row.user.role === "ADMIN" ? "/admin" : "/dashboard");
+  // Ny adgangskode: alle betroede enheder tilbagekaldes, så koden kræves igen overalt
+  await revokeTrustedDevices(row.userId, row.purpose === "RESET" ? "password_reset" : "password_change");
+  await clearDeviceCookie();
+  // Et link i en mail giver aldrig adgang uden om totrinsbekræftelsen
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: row.userId } });
+  const stage = await beginSignIn(user);
+  if (stage !== "full") redirect(mfaPathFor(stage));
+  redirect(landingPath(user, null));
 }
 
 export async function changePasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  const { requireUser } = await import("@/lib/auth");
   const user = await requireUser();
   const current = String(formData.get("current") ?? "");
   const next = String(formData.get("password") ?? "");
@@ -135,6 +146,8 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
   if (err) return { error: err, at: Date.now() };
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(next) } });
   await audit(user.id, "auth.password_change", "User", user.id);
-  return { ok: "Adgangskoden er ændret.", at: Date.now() };
+  const revoked = await revokeTrustedDevices(user.id, "password_change");
+  if (revoked) await clearDeviceCookie();
+  return { ok: revoked ? "Adgangskoden er ændret. Dine betroede enheder er fjernet, så koden kræves igen ved næste login." : "Adgangskoden er ændret.", at: Date.now() };
 }
 

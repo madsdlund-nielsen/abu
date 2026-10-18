@@ -4,6 +4,7 @@ import { audit } from "./audit";
 import { avatarObjectKeys } from "./avatar-url";
 import { prisma } from "./db";
 import { ensureLead, LIVE_STATUSES } from "./lead";
+import { revokeTrustedDevices } from "./mfa/service";
 import { deleteNotificationDataFor } from "./notifications/service";
 import { deleteOnboardingSessionsForEmail } from "./onboarding/session";
 import { getPayments } from "./payments";
@@ -27,7 +28,8 @@ export type ErasureResult =
  *  2. Optagelser for kundens møder og en rådgivers profilbillede (512 + 96 px) slettes fra lageret (rækkerne forsvinder
  *     med kaskaden, objekterne gør ikke).
  *  3. Webhook-payloads med kundens data (betaling og video) slettes.
- *  4. Onboarding, notifikationslog, leads og samtykker for e-mailen, og til sidst brugeren (kaskade).
+ *  4. Onboarding, notifikationslog, leads og samtykker for e-mailen, al MFA-data (betroede enheder, gendannelseskoder;
+ *     hemmeligheden ligger på brugeren) og til sidst brugeren (kaskade).
  * Audit-loggen beholdes (userId sættes til null).
  */
 export async function eraseUser(userId: string, actorId: string, deps: ErasureDeps = { payments: getPayments(), storage: getStorage() }): Promise<ErasureResult> {
@@ -102,6 +104,10 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
   const ledSubs = user.role === "ADVISOR"
     ? await prisma.subscriptionAdvisor.findMany({ where: { advisorId: userId, isLead: true, subscription: { status: { in: [...LIVE_STATUSES] } } }, select: { subscriptionId: true } })
     : [];
+  // Totrinsbekræftelse: betroede enheder, gendannelseskoder og sessioner (forsvinder også med kaskaden, men eksplicit her)
+  await revokeTrustedDevices(userId, "account_deleted", actorId);
+  await prisma.mfaRecoveryCode.deleteMany({ where: { userId } });
+  await prisma.session.deleteMany({ where: { userId } });
   await prisma.user.delete({ where: { id: userId } });
   for (const s of ledSubs) await ensureLead(s.subscriptionId, "deleted", actorId);
   return { ok: true, cancelled, objects, webhookEvents };

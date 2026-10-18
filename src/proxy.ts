@@ -11,6 +11,7 @@ const PROTECTED = [
   "/meetings",
   "/account",
   "/samtykke",
+  "/mfa",
   "/availability",
   "/profile",
   "/admin",

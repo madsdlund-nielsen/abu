@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { logoutAction } from "@/app/actions/auth";
-import { getCurrentUser } from "@/lib/auth";
+import { getSessionContext } from "@/lib/auth";
 import { Logo } from "./logo";
 import { NavLinks, type NavItem } from "./nav-links";
 
@@ -42,8 +42,11 @@ export function HeaderLogo() {
 
 /** Header-bar: charcoal, logoet i invers venstrestillet, navigation i små versaler (guld på aktiv). */
 export async function SiteHeader() {
-  const user = await getCurrentUser();
-  const links: NavItem[] = user ? NAV[user.role] : [{ href: "/priser", label: "Priser" }];
+  const ctx = await getSessionContext();
+  // Venter totrinsbekræftelsen (kode eller opsætning), vises kun «Log ud» – resten af appen er ikke tilgængelig endnu
+  const pending = Boolean(ctx && ctx.stage !== "full");
+  const user = ctx?.stage === "full" ? ctx.user : null;
+  const links: NavItem[] = user ? NAV[user.role] : pending ? [] : [{ href: "/priser", label: "Priser" }];
   // Mange menupunkter (admin, rådgiver) foldes sammen bag «Menu» på mobil i stedet for at fylde flere linjer (plan #25)
   const collapse = links.length > 3;
   const logout = (
@@ -70,7 +73,7 @@ export async function SiteHeader() {
         )}
         <nav aria-label="Hovedmenu" className={`${collapse ? "hidden sm:flex" : "flex"} flex-wrap items-center gap-x-6 gap-y-2`}>
           <NavLinks links={links} />
-          {user ? (
+          {user || pending ? (
             logout
           ) : (
             <>
