@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useTransition } from "react";
-import { removeAdvisorPhotoAction, uploadAdvisorPhotoAction, type PhotoState } from "@/app/actions/advisor-photo";
+import { removeAdvisorPhotoAction, type PhotoState } from "@/app/actions/advisor-photo";
 import { AdvisorAvatar } from "@/components/advisor-avatar";
 import { ConfirmDialog } from "@/components/cms/primitives";
 
@@ -11,8 +11,9 @@ const ACCEPT = "image/jpeg,image/png,image/webp";
 
 /**
  * Profilbillede: kvadratisk forhåndsvisning (radius 0), «Vælg billede» / «Skift billede» / «Fjern billede», træk-og-slip,
- * ventetilstand og danske fejl. Filen sendes til en server action (højst 5 MB); serveren tjekker formatet ud fra
- * indholdet, fjerner metadata og gemmer et 512×512 WebP. Bruges både på /profile og af admin på /admin/advisors/[id].
+ * ventetilstand og danske fejl. Filen sendes som body i `PUT /api/avatar/<id>` (højst 5 MB; ikke en server action, så
+ * serveren kan afvise, før filen er læst ind); serveren tjekker formatet ud fra indholdet, fjerner metadata og gemmer et
+ * 512×512 WebP. Bruges både på /profile og af admin på /admin/advisors/[id].
  */
 export function AdvisorPhotoField({ advisorId, name, version, mode = "self" }: { advisorId: string; name: string; version: string | null; mode?: "self" | "admin" }) {
   const router = useRouter();
@@ -40,13 +41,12 @@ export function AdvisorPhotoField({ advisorId, name, version, mode = "self" }: {
     if (file.size > MAX_BYTES) return setState({ error: "Billedet er for stort. Vælg et billede på højst 5 MB.", at: Date.now() });
     setState({});
     setPreview(URL.createObjectURL(file));
-    const fd = new FormData();
-    if (admin) fd.set("advisorId", advisorId);
-    fd.set("photo", file);
     startTransition(async () => {
       let r: PhotoState;
       try {
-        r = await uploadAdvisorPhotoAction(fd);
+        const res = await fetch(`/api/avatar/${encodeURIComponent(advisorId)}`, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+        const body = (await res.json()) as { ok: true; version: string | null; message: string } | { ok: false; error: string };
+        r = body.ok ? { ok: body.message, version: body.version, at: Date.now() } : { error: body.error, at: Date.now() };
       } catch {
         r = { error: "Billedet kunne ikke uploades. Tjek forbindelsen, og prøv igen.", at: Date.now() };
       }

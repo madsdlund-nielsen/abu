@@ -6,11 +6,18 @@ import type { StorageProvider } from "./storage/types";
 
 type Viewer = { id: string; role: string } | null;
 
-/** Cache-politik: versionerede URL'er er uforanderlige (ny upload = ny version). */
-export const IMMUTABLE_PUBLIC = "public, max-age=31536000, immutable";
-export const IMMUTABLE_PRIVATE = "private, max-age=31536000, immutable";
+/**
+ * Cache-politik (D-1): fotoet er persondata, der kan fjernes eller slettes (GDPR), så det caches aldrig `immutable`.
+ * Den aktuelle version caches i højst AVATAR_MAX_AGE_SECONDS og genvalideres derefter med ETag (billigt 304 uden at
+ * læse lageret). Et fjernet billede holder derfor op med at blive vist inden for 5 minutter – også fra browser- og
+ * proxy-caches. Versionen i URL'en skifter stadig ved hver upload, så et nyt billede vises med det samme.
+ */
+export const AVATAR_MAX_AGE_SECONDS = 300;
+export const CACHE_PUBLIC = `public, max-age=${AVATAR_MAX_AGE_SECONDS}, must-revalidate`;
+export const CACHE_PRIVATE = `private, max-age=${AVATAR_MAX_AGE_SECONDS}, must-revalidate`;
 
-const BASE_HEADERS = { "X-Content-Type-Options": "nosniff", "Cross-Origin-Resource-Policy": "same-origin" };
+/** `Vary: Cookie` (D-4): svaret afhænger af, hvem der er logget ind (inaktive rådgivere), så en cache må aldrig blande. */
+const BASE_HEADERS = { "X-Content-Type-Options": "nosniff", "Cross-Origin-Resource-Policy": "same-origin", Vary: "Cookie" };
 
 /** Samme svar for «findes ikke», «intet billede», «ingen adgang» og ugyldig størrelse – ingen informationslæk. */
 export function avatarNotFound(): Response {
@@ -19,9 +26,11 @@ export function avatarNotFound(): Response {
 
 /**
  * `GET /api/avatar/<rådgiver-id>?size=512|96&v=<version>`. Bucketten er privat; billedet streames fra lageret gennem appen.
- *  - Aktive rådgivere: offentligt (de vises i onboarding-kataloget før login) og cachet `public, immutable`.
+ *  - Aktive rådgivere: offentligt (de vises i onboarding-kataloget før login), `public` med kort levetid + genvalidering.
  *  - Inaktive rådgivere: kun admin og rådgiveren selv (`private`); alle andre får 404.
  *  - Passer `v` ikke til det nuværende billede (eller mangler), serveres det nuværende med `no-cache`.
+ *  - Seeren slås altid op (D-3), også når rådgiveren ikke findes eller intet billede har, så svartiden ikke afslører,
+ *    om der findes en inaktiv rådgiver med billede.
  */
 export async function serveAvatar(
   advisorId: string,
@@ -34,13 +43,16 @@ export async function serveAvatar(
   const size = sizeParam === String(AVATAR_THUMB_SIZE) ? AVATAR_THUMB_SIZE : sizeParam === String(AVATAR_SIZE) ? AVATAR_SIZE : null;
   if (!size || !/^[A-Za-z0-9_-]{1,64}$/.test(advisorId)) return avatarNotFound();
 
-  const profile = await prisma.advisorProfile.findUnique({ where: { userId: advisorId }, select: { active: true, photoKey: true, photoUpdatedAt: true } });
+  const [profile, viewer] = await Promise.all([
+    prisma.advisorProfile.findUnique({ where: { userId: advisorId }, select: { active: true, photoKey: true, photoUpdatedAt: true } }),
+    getViewer(),
+  ]);
   if (!profile?.photoKey) return avatarNotFound();
-  if (!profile.active && !canViewAvatar({ id: advisorId, active: false }, await getViewer())) return avatarNotFound();
+  if (!profile.active && !canViewAvatar({ id: advisorId, active: false }, viewer)) return avatarNotFound();
 
   const version = avatarVersion(profile.photoUpdatedAt) ?? "0";
   const etag = `"${version}-${size}"`;
-  const cache = params.get("v") === version ? (profile.active ? IMMUTABLE_PUBLIC : IMMUTABLE_PRIVATE) : profile.active ? "public, no-cache" : "private, no-cache";
+  const cache = params.get("v") === version ? (profile.active ? CACHE_PUBLIC : CACHE_PRIVATE) : profile.active ? "public, no-cache" : "private, no-cache";
   if (ifNoneMatch && ifNoneMatch.split(",").map((s) => s.trim()).includes(etag)) {
     return new Response(null, { status: 304, headers: { ...BASE_HEADERS, ETag: etag, "Cache-Control": cache } });
   }

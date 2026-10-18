@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
-import { AVATAR_ERRORS, MAX_AVATAR_BYTES, removeAdvisorPhoto, saveAdvisorPhoto } from "@/lib/avatar";
+import { removeAdvisorPhoto } from "@/lib/avatar";
 
 export interface PhotoState {
   ok?: string;
@@ -25,16 +25,8 @@ function revalidate(advisorId: string) {
   revalidatePath(`/admin/advisors/${advisorId}`);
 }
 
-export async function uploadAdvisorPhotoAction(formData: FormData): Promise<PhotoState> {
-  const { actor, advisorId } = await target(formData);
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) return { error: AVATAR_ERRORS.empty, at: Date.now() };
-  if (file.size > MAX_AVATAR_BYTES) return { error: AVATAR_ERRORS.too_large, at: Date.now() };
-  const r = await saveAdvisorPhoto(actor, advisorId, Buffer.from(await file.arrayBuffer()));
-  if (!r.ok) return { error: r.error, at: Date.now() };
-  revalidate(advisorId);
-  return { ok: r.message, version: r.version, at: Date.now() };
-}
+// Upload går IKKE gennem en server action (D-2): en server action har allerede læst hele filen ind, før koden kører.
+// Brug `PUT /api/avatar/<rådgiver-id>` (src/app/api/avatar/[advisorId]/route.ts), som tjekker pladser før body'en læses.
 
 export async function removeAdvisorPhotoAction(formData: FormData): Promise<PhotoState> {
   const { actor, advisorId } = await target(formData);

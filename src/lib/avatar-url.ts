@@ -2,8 +2,8 @@
  * Billed-URL'er til rådgiverfotos (kan bruges i både server- og klientkomponenter – ingen sharp/Prisma her).
  *
  * Billedet serveres af appen selv fra det private lager: `GET /api/avatar/<rådgiver-id>?size=512|96&v=<version>`.
- * Versionen er tidspunktet for seneste upload (base 36), så URL'en skifter ved hvert nyt billede og kan caches som
- * `immutable` i et år.
+ * Versionen er tidspunktet for seneste upload (base 36), så URL'en skifter ved hvert nyt billede. Svaret caches kort og
+ * genvalideres (se `avatar-serve.ts`), så et fjernet billede ikke bliver hængende i caches.
  */
 export const AVATAR_SIZE = 512;
 export const AVATAR_THUMB_SIZE = 96;

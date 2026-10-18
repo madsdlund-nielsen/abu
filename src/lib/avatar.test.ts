@@ -1,9 +1,9 @@
 import { Readable } from "node:stream";
 import { crc32 } from "node:zlib";
 import sharp from "sharp";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { describeDb, uid, ownerDb } from "../test/db";
-import { AVATAR_ERRORS, MAX_AVATAR_BYTES, newAvatarKeys, processAvatar, validateAvatarInput } from "./avatar";
+import { AVATAR_ERRORS, MAX_AVATAR_BYTES, MAX_INPUT_PIXELS, newAvatarKeys, processAvatar, readBodyLimited, validateAvatarInput } from "./avatar";
 import { avatarObjectKeys, avatarSizeFor, avatarSrc, avatarVersion, canViewAvatar, thumbKeyFor, visibleAvatarVersion } from "./avatar-url";
 import { detectImageType } from "./media-type";
 
@@ -88,6 +88,16 @@ describe("profilbillede: validering (type, størrelse, magic bytes)", () => {
     await expect(processAvatar(bomb)).rejects.toMatchObject({ kind: "too_many_pixels" });
   });
 
+  it("D-8: loftet er 25 megapixel – et billede lige over afvises før dekodning, et 24 MP-billede accepteres", async () => {
+    expect(MAX_INPUT_PIXELS).toBe(25_000_000);
+    expect(AVATAR_ERRORS.too_many_pixels).toMatch(/højst 25 megapixel/);
+    await expect(processAvatar(pngHeader(5_001, 5_000))).rejects.toMatchObject({ kind: "too_many_pixels" });
+    // Ægte 24 MP (6.000 × 4.000) fra et almindeligt kamera går igennem
+    const real = await solid(6_000, 4_000).jpeg({ quality: 40 }).toBuffer();
+    expect(real.length).toBeLessThan(MAX_AVATAR_BYTES);
+    await expect(processAvatar(real)).resolves.toMatchObject({ source: { width: 6_000, height: 4_000 } });
+  });
+
   it("en fil med billedheader, men ødelagt indhold, afvises", async () => {
     const jpeg = await solid(300, 300).jpeg().toBuffer();
     await expect(processAvatar(Buffer.concat([jpeg.subarray(0, 40), Buffer.alloc(200, 7)]))).rejects.toMatchObject({ kind: "corrupt" });
@@ -144,6 +154,40 @@ describe("profilbillede: behandling (privatliv og ydelse)", () => {
     const m = await sharp(main).metadata();
     expect(m.hasAlpha).toBe(false);
     expect(m.pages ?? 1).toBe(1);
+  });
+});
+
+describe("profilbillede: body læses som stream med loft og tidsgrænse (D-2)", () => {
+  const stream = (chunks: number[], delayMs = 0) => {
+    let i = 0;
+    return new ReadableStream<Uint8Array>({
+      async pull(c) {
+        if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+        if (i < chunks.length) c.enqueue(new Uint8Array(chunks[i++]).fill(7));
+        else c.close();
+      },
+    });
+  };
+
+  it("samler en body under loftet", async () => {
+    expect((await readBodyLimited(stream([10, 20, 30]), 100)).length).toBe(60);
+    expect((await readBodyLimited(null, 100)).length).toBe(0);
+  });
+
+  it("afbryder, så snart loftet overskrides, og annullerer resten af streamen", async () => {
+    let pulls = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulls++;
+        c.enqueue(new Uint8Array(1000));
+      },
+    });
+    await expect(readBodyLimited(endless, 2500)).rejects.toMatchObject({ kind: "too_large" });
+    expect(pulls).toBeLessThan(6);
+  });
+
+  it("afbryder en langsom body efter tidsgrænsen", async () => {
+    await expect(readBodyLimited(stream([1, 1, 1, 1], 40), 100, 60)).rejects.toThrow("timeout");
   });
 });
 
@@ -278,10 +322,10 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     expect(storage.m.size).toBe(0);
   });
 
-  it("GET /api/avatar: aktive er offentlige og immutable; inaktive giver 404 for alle andre end admin og rådgiveren selv", async () => {
+  it("GET /api/avatar: aktive er offentlige (kort cache + genvalidering); inaktive giver 404 for alle andre end admin og rådgiveren selv", async () => {
     const { prisma } = await import("./db");
     const { saveAdvisorPhoto } = await import("./avatar");
-    const { serveAvatar, IMMUTABLE_PUBLIC, IMMUTABLE_PRIVATE } = await import("./avatar-serve");
+    const { serveAvatar, CACHE_PUBLIC, CACHE_PRIVATE } = await import("./avatar-serve");
     const storage = memStorage();
     const active = await mkUser("ADVISOR", true);
     const inactive = await mkUser("ADVISOR", false);
@@ -298,7 +342,8 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     const ok = await get(active.id, `size=96&v=${va.version}`, null);
     expect(ok.status).toBe(200);
     expect(ok.headers.get("content-type")).toBe("image/webp");
-    expect(ok.headers.get("cache-control")).toBe(IMMUTABLE_PUBLIC);
+    expect(ok.headers.get("cache-control")).toBe(CACHE_PUBLIC);
+    expect(ok.headers.get("vary")).toBe("Cookie");
     expect(ok.headers.get("x-content-type-options")).toBe("nosniff");
     const body = Buffer.from(await ok.arrayBuffer());
     expect(await sharp(body).metadata()).toMatchObject({ format: "webp", width: 96, height: 96 });
@@ -320,7 +365,8 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     for (const viewer of [admin, inactive]) {
       const r = await get(inactive.id, `size=512&v=${vi.version}`, viewer);
       expect(r.status).toBe(200);
-      expect(r.headers.get("cache-control")).toBe(IMMUTABLE_PRIVATE);
+      expect(r.headers.get("cache-control")).toBe(CACHE_PRIVATE);
+      expect(r.headers.get("vary")).toBe("Cookie");
     }
 
     // Intet billede, ugyldig størrelse eller manglende objekt: 404
@@ -330,5 +376,47 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     const key = (await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: active.id } })).photoKey!;
     storage.m.delete(key);
     expect((await get(active.id, "size=512", null)).status).toBe(404);
+  });
+
+  it("D-1: et fjernet billede caches aldrig «immutable» – efter fjernelse giver genvalideringen 404 (no-store)", async () => {
+    const { saveAdvisorPhoto, removeAdvisorPhoto } = await import("./avatar");
+    const { serveAvatar, AVATAR_MAX_AGE_SECONDS } = await import("./avatar-serve");
+    const storage = memStorage();
+    const adv = await mkUser("ADVISOR", true);
+    const up = await saveAdvisorPhoto(adv, adv.id, await solid(300, 300).jpeg().toBuffer(), { storage });
+    if (!up.ok) throw new Error("upload fejlede");
+    const q = new URLSearchParams(`size=96&v=${up.version}`);
+    const first = await serveAvatar(adv.id, q, async () => null, storage);
+    const cc = first.headers.get("cache-control") ?? "";
+    expect(cc).not.toMatch(/immutable/);
+    expect(cc).toMatch(/must-revalidate/);
+    expect(Number(/max-age=(\d+)/.exec(cc)?.[1])).toBeLessThanOrEqual(AVATAR_MAX_AGE_SECONDS);
+    expect(AVATAR_MAX_AGE_SECONDS).toBeLessThanOrEqual(300);
+    // Browserens genvalidering med ETag (If-None-Match) efter fjernelsen: 404, ikke 304
+    const etag = first.headers.get("etag")!;
+    expect((await serveAvatar(adv.id, q, async () => null, storage, etag)).status).toBe(304);
+    await removeAdvisorPhoto(adv, adv.id, { storage });
+    const after = await serveAvatar(adv.id, q, async () => null, storage, etag);
+    expect(after.status).toBe(404);
+    expect(after.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("D-3: seeren slås op i alle tilfælde (findes ikke, intet billede, aktiv, inaktiv) – ingen tidsforskel at måle", async () => {
+    const { saveAdvisorPhoto } = await import("./avatar");
+    const { serveAvatar } = await import("./avatar-serve");
+    const storage = memStorage();
+    const active = await mkUser("ADVISOR", true);
+    const inactive = await mkUser("ADVISOR", false);
+    const noPhoto = await mkUser("ADVISOR", false);
+    const img = await solid(300, 300).jpeg().toBuffer();
+    await saveAdvisorPhoto(active, active.id, img, { storage });
+    await saveAdvisorPhoto(inactive, inactive.id, img, { storage });
+    for (const id of ["findes-ikke", noPhoto.id, active.id, inactive.id]) {
+      const viewer = vi.fn(async () => null);
+      const r = await serveAvatar(id, new URLSearchParams("size=96"), viewer, storage);
+      expect(viewer).toHaveBeenCalledTimes(1);
+      expect(r.headers.get("vary")).toBe("Cookie");
+      expect(r.status).toBe(id === active.id ? 200 : 404);
+    }
   });
 });
