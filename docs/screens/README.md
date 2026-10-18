@@ -9,7 +9,8 @@ danske helligdage og sikkerhedshærdning.
 
 Opdateret 18.10.2026 (ejerens beslutninger): aktivering er blokeret, indtil tjeklisten er opfyldt, og status ændres med en
 dedikeret knap (`admin/03`–`05`, `04b`, `04c`); møder holdes altid med hele boardet (`admin/16`, `17`); hvert board har en
-ansvarlig rådgiver (`admin/24`, `25`, `onboarding/11`, `12`, `kunde/09`). Øvrige billeder er fra før disse ændringer og viser
+ansvarlig rådgiver (`admin/24`, `25`, `onboarding/11`, `12`, `kunde/09`). Rådgiverfotos uploades nu i stedet for en
+foto-URL (`raadgiver/03`, `admin/04c`, `onboarding/13`); testbillederne er genererede portrætter (ingen rigtige personer). Øvrige billeder er fra før disse ændringer og viser
 fx board-builderen uden markøren «Kan være ansvarlig».
 
 ## Offentlig (`offentlig/`)
@@ -39,6 +40,7 @@ fx board-builderen uden markøren «Kan være ansvarlig».
 | `10-mock-betaling.png` | Testbetalingen (mock-udbyder), som aktiverer abonnementet. |
 | `11-trin5-kan-vaere-ansvarlig.png` | Trin 5: rådgivere med lead-tagget er markeret «Kan være ansvarlig», og sidepanelet viser «Ansvarlig rådgiver: Tildeles automatisk». |
 | `12-trin5-ingen-ansvarlig-blokeret.png` | Trin 5: ingen i boardet kan være ansvarlig – Fortsæt er spærret med en forklaring. |
+| `13-trin5-raadgiverfotos.png` | Trin 5 før login: rådgiverkortene viser de uploadede fotos (96 px-miniaturer fra `/api/avatar`); rådgivere uden foto vises med initialer. |
 
 ## Kunde (`kunde/`)
 
@@ -61,7 +63,7 @@ fx board-builderen uden markøren «Kan være ansvarlig».
 |---|---|
 | `01-dashboard.png` | Rådgiverens dashboard med kommende møder. |
 | `02-tilgaengelighed.png` | Faste ugentlige tidsrum og fravær. |
-| `03-profil-telefon-og-tags.png` | Profil med mobilnummer til SMS og tildelte kompetence-tags. |
+| `03-profil-telefon-og-tags.png` | Min profil: rådgiveren har uploadet et mobilfoto (med EXIF-GPS og orientering i originalen – billedet er roteret opret, beskåret til kvadrat, og metadata er fjernet) med «Skift billede»/«Fjern billede», mobilnummer til SMS og tildelte kompetence-tags. |
 | `04-moeder.png` | Rådgiverens mødeoversigt. |
 
 ## Admin (`admin/`)
@@ -73,7 +75,7 @@ fx board-builderen uden markøren «Kan være ansvarlig».
 | `03-raadgivere-med-inaktiv.png` | Rådgiverlisten med gemt status (AKTIV/INAKTIV), kompakt tjekliste-indikator og interne tags; den nyoprettede rådgiver er INAKTIV, og «Aktivér» er spærret, til tjeklisten er opfyldt. |
 | `04-raadgiver-klar-til-aktivering.png` | Tjeklisten er opfyldt: «Aktivér rådgiver» gemmer straks efter bekræftelse. |
 | `04b-raadgiver-ikke-klar-blokeret.png` | Nyinviteret rådgiver: «Aktivér rådgiver» er spærret med listen over det, der mangler (serveren afviser det også). |
-| `04c-raadgiver-profil-redigeret-af-admin.png` | Admin har udfyldt titel, bio og mobilnummer i «Profil» og tilføjet et tag; tjeklisten er opdateret. Rådgiveren kan selv rette felterne. |
+| `04c-raadgiver-profil-redigeret-af-admin.png` | Admin har skiftet rådgiverens profilbillede under «Profil» (titel, bio og mobilnummer rettes samme sted); tjeklisten viser «Profilbillede (valgfrit)» ✓, som ikke er et krav for aktivering. Rådgiveren kan selv rette det hele. |
 | `05-deaktivering-advarsel.png` | Bekræftelse ved «Deaktivér», der lister kunder med aktive boards, som rådgiveren sidder i. |
 | `06-onboarding-cms.png` | Onboarding-CMS: spørgsmål, svar og tag-vægte. |
 | `07-onboarding-cms-traek-og-slip.png` | Træk og slip af et spørgsmål med den gyldne indsættelseslinje. |
