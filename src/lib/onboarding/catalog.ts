@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { visibleAvatarVersion } from "../avatar-url";
 import { prisma } from "../db";
 import { LEAD_TAG_KEY } from "../lead";
 import type { MatchAdvisor, MatchAnswer } from "../matching";
@@ -9,7 +10,8 @@ export interface BuilderAdvisor {
   name: string;
   title: string;
   bio: string;
-  photoUrl: string;
+  /** Version af profilbilledet (`/api/avatar/<id>?v=…`), eller null = initialer */
+  photo: string | null;
   priceDkk: number;
   /** Kun kompetence-tags (admin-tags vises aldrig for kunder) */
   tags: { id: string; name: string }[];
@@ -24,8 +26,11 @@ export interface BuilderTag {
   name: string;
 }
 
-/** `includeIds`: rådgivere, der skal med, selv om de er inaktive (admin ser et eksisterende board). */
-export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise<{ advisors: BuilderAdvisor[]; tags: BuilderTag[] }> {
+/**
+ * `includeIds`: rådgivere, der skal med, selv om de er inaktive (admin ser et eksisterende board). `viewer` afgør, om
+ * inaktive rådgiveres fotos må vises (kun admin); aktive rådgiveres fotos er offentlige (også før login i onboardingen).
+ */
+export async function loadCatalog(opts: { includeIds?: string[]; viewer?: { id: string; role: string } | null } = {}): Promise<{ advisors: BuilderAdvisor[]; tags: BuilderTag[] }> {
   const [profiles, tags] = await Promise.all([
     prisma.advisorProfile.findMany({
       where: opts.includeIds?.length ? { OR: [{ active: true }, { userId: { in: opts.includeIds } }] } : { active: true },
@@ -41,7 +46,7 @@ export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise
       name: p.user.name,
       title: p.title,
       bio: p.bio,
-      photoUrl: p.photoUrl,
+      photo: visibleAvatarVersion({ id: p.userId, active: p.active, photoKey: p.photoKey, photoUpdatedAt: p.photoUpdatedAt }, opts.viewer),
       priceDkk: p.pricePerMeetingDkk,
       ...(p.active ? {} : { inactive: true }),
       leadEligible: p.active && p.tags.some((t) => t.tag.systemKey === LEAD_TAG_KEY),

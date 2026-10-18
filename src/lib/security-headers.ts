@@ -38,8 +38,9 @@ export function buildCsp(i: SecurityHeaderInput): string {
     ["script-src", `'self' 'nonce-${i.nonce}' 'strict-dynamic'${i.dev ? " 'unsafe-eval'" : ""}`],
     // Inline style-attributter (fx bredden på fremdriftslinjer) kræver 'unsafe-inline' for styles; scripts er nonce-låst.
     ["style-src", "'self' 'unsafe-inline'"],
-    // Rådgiverfotos er eksterne https-billeder
-    ["img-src", `'self' data: blob: https:${i.appOrigin && !i.appOrigin.startsWith("https:") ? ` ${i.appOrigin}` : ""}`],
+    // Ingen eksterne billedværter: rådgiverfotos serveres af appen selv (/api/avatar). blob: = forhåndsvisning af et valgt
+    // billede før upload. En http-APP_URL (kun lokalt) tilføjes til logoet i e-mail-forhåndsvisningen.
+    ["img-src", `'self' data: blob:${i.appOrigin && !i.appOrigin.startsWith("https:") ? ` ${i.appOrigin}` : ""}`],
     ["font-src", "'self'"],
     ["connect-src", `'self' ${extra([i.uploadOrigin])}`.trim()],
     ["media-src", "'self' blob:"],

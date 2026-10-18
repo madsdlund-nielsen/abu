@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Flash, flashFrom, type SP } from "@/components/flash";
-import { Initials, SubStatusBadge } from "@/components/ui";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
+import { SubStatusBadge } from "@/components/ui";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
 
@@ -34,7 +36,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             </div>
             <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm" aria-label="Board">
               {s.advisors.map((a) => (
-                <li key={a.advisorId} className="flex items-center gap-2"><span className="scale-75"><Initials name={a.advisor.user.name} /></span>{a.advisor.user.name}{a.isLead && <span className="badge badge-gold" data-testid="lead-badge">Ansvarlig</span>}</li>
+                <li key={a.advisorId} className="flex items-center gap-2"><AdvisorAvatar advisorId={a.advisorId} name={a.advisor.user.name} photo={a.advisor.photoKey ? avatarVersion(a.advisor.photoUpdatedAt) : null} size="sm" />{a.advisor.user.name}{a.isLead && <span className="badge badge-gold" data-testid="lead-badge">Ansvarlig</span>}</li>
               ))}
             </ul>
             {s.status !== "CANCELLED" && !s.advisors.some((a) => a.isLead) && <p className="mt-2 text-sm font-semibold text-danger">Ingen ansvarlig rådgiver</p>}

@@ -58,6 +58,32 @@ describeDb("sletning mod databasen (M-3)", () => {
     await prisma.user.delete({ where: { id: u.id } });
   });
 
+  it("sletning af en rådgiver sletter profilbilledet (512 og 96 px) i lageret", async () => {
+    const { prisma } = await import("./db");
+    const { eraseUser } = await import("./erasure");
+    const u = await prisma.user.create({
+      data: { email: `${uid("slet-adv")}@test.dk`, name: "Rådgiver Slet", role: "ADVISOR", advisorProfile: { create: { photoKey: "avatars/x/abc.webp", photoUpdatedAt: new Date() } } },
+    });
+    await prisma.advisorProfile.update({ where: { userId: u.id }, data: { photoKey: `avatars/${u.id}/abc.webp` } });
+    const del = vi.fn().mockResolvedValue(undefined);
+    const r = await eraseUser(u.id, u.id, { payments: { cancelSubscription: vi.fn() }, storage: { delete: del } });
+    expect(r).toMatchObject({ ok: true, objects: 2 });
+    expect(del.mock.calls.map((c) => c[0]).sort()).toEqual([`avatars/${u.id}/abc-96.webp`, `avatars/${u.id}/abc.webp`]);
+    expect(await prisma.user.findUnique({ where: { id: u.id } })).toBeNull();
+    expect(await prisma.advisorProfile.findUnique({ where: { userId: u.id } })).toBeNull();
+  });
+
+  it("sletter ikke rådgiveren, hvis profilbilledet ikke kan slettes i lageret", async () => {
+    const { prisma } = await import("./db");
+    const { eraseUser } = await import("./erasure");
+    const u = await prisma.user.create({ data: { email: `${uid("slet-adv")}@test.dk`, name: "R", role: "ADVISOR", advisorProfile: { create: {} } } });
+    await prisma.advisorProfile.update({ where: { userId: u.id }, data: { photoKey: `avatars/${u.id}/abc.webp`, photoUpdatedAt: new Date() } });
+    const r = await eraseUser(u.id, u.id, { payments: { cancelSubscription: vi.fn() }, storage: { delete: vi.fn().mockRejectedValue(new Error("503")) } });
+    expect(r).toEqual({ ok: false, error: "Profilbilledet kunne ikke slettes fra lageret. Prøv igen." });
+    expect(await prisma.user.findUnique({ where: { id: u.id } })).not.toBeNull();
+    await prisma.user.delete({ where: { id: u.id } });
+  });
+
   it("fjerner webhook-payloads efter 30 dage, men beholder id'et (idempotens)", async () => {
     const { prisma } = await import("./db");
     const { cleanupWebhookPayloads } = await import("./erasure");

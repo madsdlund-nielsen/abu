@@ -114,8 +114,9 @@ export async function setAdvisorActiveAction(_prev: ActivationState, formData: F
 }
 
 /**
- * Admin retter rådgiverens profil (titel, bio, foto-URL, mobilnummer) med samme validering som rådgiverens egen
- * formular. Rådgiveren kan stadig selv rette felterne under Min profil. Audit-logges med de ændrede feltnavne.
+ * Admin retter rådgiverens profil (titel, bio, mobilnummer) med samme validering som rådgiverens egen formular.
+ * Profilbilledet uploades/fjernes for sig (`advisor-photo.ts`). Rådgiveren kan stadig selv rette felterne under Min
+ * profil. Audit-logges med de ændrede feltnavne.
  */
 export async function updateAdvisorProfileByAdminAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const admin = await requireRole("ADMIN");
@@ -126,12 +127,12 @@ export async function updateAdvisorProfileByAdminAction(_prev: FormState, formDa
   const parsed = parseAdvisorProfile(values);
   if (!parsed.ok) return { error: parsed.error, values };
   const d = parsed.data;
-  const before = { title: user.advisorProfile.title, bio: user.advisorProfile.bio, photoUrl: user.advisorProfile.photoUrl, phone: user.phone };
+  const before = { title: user.advisorProfile.title, bio: user.advisorProfile.bio, phone: user.phone };
   const changed = (Object.keys(before) as (keyof typeof before)[]).filter((k) => before[k] !== d[k]);
   if (changed.length === 0) return { ok: "Ingen ændringer at gemme.", values };
   await prisma.$transaction([
     prisma.user.update({ where: { id }, data: { phone: d.phone } }),
-    prisma.advisorProfile.update({ where: { userId: id }, data: { title: d.title, bio: d.bio, photoUrl: d.photoUrl } }),
+    prisma.advisorProfile.update({ where: { userId: id }, data: { title: d.title, bio: d.bio } }),
   ]);
   await audit(admin.id, "advisor.profile.update", "User", id, `Felter: ${changed.join(",")}`);
   revalidatePath("/admin/advisors");

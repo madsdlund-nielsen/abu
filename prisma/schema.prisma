@@ -111,7 +111,11 @@ model AdvisorProfile {
   userId    String   @id
   title     String   @default("")
   bio       String   @default("")
-  photoUrl  String   @default("")
+  /// Profilbillede i lageret (`avatars/<userId>/<tilfældig>.webp` + `-96.webp`). Null = initialer. Bucketten er privat;
+  /// billedet serveres af `/api/avatar/<userId>`.
+  photoKey       String?
+  /// Tidspunkt for seneste upload – bruges som version i billed-URL'en (?v=…), så den kan caches som immutable.
+  photoUpdatedAt DateTime?
   /// Rådgivere aktiveres manuelt af admin, når de er klar (QA #13). Indtil da kan kunder ikke vælge dem.
   active    Boolean  @default(false)
   /// Pris pr. møde i hele kroner, ekskl. moms. Sættes af admin. Fastfryses på abonnementet ved køb.

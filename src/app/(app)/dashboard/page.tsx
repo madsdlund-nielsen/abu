@@ -3,8 +3,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { MeetingTable } from "@/components/meeting-list";
-import { Empty, Initials, SubStatusBadge } from "@/components/ui";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
+import { Empty, SubStatusBadge } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
+import { visibleAvatarVersion } from "@/lib/avatar-url";
 import { getQuotaInfo } from "@/lib/booking";
 import { prisma } from "@/lib/db";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
@@ -112,7 +114,7 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {sub.advisors.map((a) => (
               <div key={a.advisorId} className="flex items-center gap-3 border border-grey-bg p-3">
-                <Initials name={a.advisor.user.name} url={a.advisor.photoUrl} />
+                <AdvisorAvatar advisorId={a.advisorId} name={a.advisor.user.name} photo={visibleAvatarVersion({ id: a.advisorId, ...a.advisor }, user)} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{a.advisor.user.name}</p>
                   <p className="truncate text-xs text-muted">{a.advisor.title}</p>

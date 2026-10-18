@@ -7,7 +7,7 @@ import { toMatchAdvisors } from "./onboarding/catalog";
 describe("aktivering af rådgivere (QA #13, ejerens beslutning)", () => {
   it("tjeklisten viser hvad der mangler", () => {
     const items = advisorReadiness({ inviteAccepted: false, tagCount: 0, ruleCount: 2, bio: " ", priceDkk: 1750, priceBounds: { min: 500, max: 25000 } });
-    expect(items.map((i) => [i.key, i.ok])).toEqual([["invite", false], ["tags", false], ["availability", true], ["bio", false], ["price", true]]);
+    expect(items.map((i) => [i.key, i.ok])).toEqual([["invite", false], ["tags", false], ["availability", true], ["bio", false], ["price", true], ["photo", false]]);
     expect(missingReadiness(items)).toEqual(["invitation accepteret", "mindst ét kompetence-tag", "præsentation (bio)"]);
     expect(advisorReadiness({ inviteAccepted: true, tagCount: 1, ruleCount: 1, bio: "x", priceDkk: 100, priceBounds: { min: 500, max: 25000 } }).find((i) => i.key === "price")?.ok).toBe(false);
   });
@@ -28,6 +28,16 @@ describe("aktivering af rådgivere (QA #13, ejerens beslutning)", () => {
     expect(canActivate([])).toBe(false);
   });
 
+  it("profilbilledet er valgfrit: vises på tjeklisten, men blokerer aldrig aktivering", () => {
+    const ready = { inviteAccepted: true, tagCount: 1, ruleCount: 1, bio: "Erfaren", priceDkk: 1750 };
+    const without = advisorReadiness(ready);
+    expect(without.find((i) => i.key === "photo")).toEqual({ key: "photo", label: "Profilbillede (valgfrit)", ok: false, optional: true });
+    expect(canActivate(without)).toBe(true);
+    expect(missingReadiness(without)).toEqual([]);
+    expect(advisorReadiness({ ...ready, hasPhoto: true }).find((i) => i.key === "photo")?.ok).toBe(true);
+    expect(missingReadiness(advisorReadiness({ ...ready, bio: "" }))).toEqual(["præsentation (bio)"]);
+  });
+
   it("afvist aktivering giver en dansk besked med det, der mangler", () => {
     const items = advisorReadiness({ inviteAccepted: true, tagCount: 0, ruleCount: 0, bio: "x", priceDkk: 1750 });
     expect(activationBlockedMessage("Mette", missingReadiness(items))).toBe("Mette kan ikke aktiveres endnu. Mangler: mindst ét kompetence-tag, ugentlig tilgængelighed.");
@@ -35,8 +45,8 @@ describe("aktivering af rådgivere (QA #13, ejerens beslutning)", () => {
 
   it("inaktive foreslås aldrig i matching", () => {
     const m = toMatchAdvisors([
-      { id: "a", name: "A", title: "", bio: "", photoUrl: "", priceDkk: 1, leadEligible: false, tags: [{ id: "t", name: "T" }] },
-      { id: "b", name: "B", title: "", bio: "", photoUrl: "", priceDkk: 1, leadEligible: false, tags: [{ id: "t", name: "T" }], inactive: true },
+      { id: "a", name: "A", title: "", bio: "", photo: null, priceDkk: 1, leadEligible: false, tags: [{ id: "t", name: "T" }] },
+      { id: "b", name: "B", title: "", bio: "", photo: null, priceDkk: 1, leadEligible: false, tags: [{ id: "t", name: "T" }], inactive: true },
     ]);
     expect(m.map((x) => x.id)).toEqual(["a"]);
   });

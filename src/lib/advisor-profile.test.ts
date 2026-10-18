@@ -1,21 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { advisorOwnProfileSchema, parseAdvisorProfile } from "./advisor-profile";
 
-const ok = { title: "Bestyrelsesformand", bio: "Erfaren leder.", phone: "", photoUrl: "" };
+const ok = { title: "Bestyrelsesformand", bio: "Erfaren leder.", phone: "" };
 
 describe("rådgiverprofil: samme validering for admin og rådgiver", () => {
   it("godtager gyldige felter og normaliserer telefonnummeret", () => {
-    expect(parseAdvisorProfile({ ...ok, phone: "20 30 40 50", photoUrl: "https://example.dk/foto.jpg" })).toEqual({
+    expect(parseAdvisorProfile({ ...ok, phone: "20 30 40 50" })).toEqual({
       ok: true,
-      data: { title: "Bestyrelsesformand", bio: "Erfaren leder.", phone: "+45 20 30 40 50", photoUrl: "https://example.dk/foto.jpg" },
+      data: { title: "Bestyrelsesformand", bio: "Erfaren leder.", phone: "+45 20 30 40 50" },
     });
     expect(parseAdvisorProfile({ ...ok, title: "  Titel  " })).toMatchObject({ ok: true, data: { title: "Titel", phone: null } });
   });
 
-  it("foto-URL skal være https", () => {
-    expect(parseAdvisorProfile({ ...ok, photoUrl: "http://example.dk/foto.jpg" })).toEqual({ ok: false, error: "Foto-URL skal starte med https://" });
-    expect(parseAdvisorProfile({ ...ok, photoUrl: "javascript:alert(1)" })).toEqual({ ok: false, error: "Foto-URL skal starte med https://" });
-    expect(parseAdvisorProfile({ ...ok, photoUrl: `https://x.dk/${"a".repeat(500)}` })).toMatchObject({ ok: false });
+  it("der er ingen foto-URL længere: et gammelt felt ignoreres og gemmes aldrig", () => {
+    const r = parseAdvisorProfile({ ...ok, photoUrl: "https://tracker.example.com/pixel.jpg" });
+    expect(r).toEqual({ ok: true, data: { title: "Bestyrelsesformand", bio: "Erfaren leder.", phone: null } });
   });
 
   it("længdegrænser og ugyldigt telefonnummer", () => {

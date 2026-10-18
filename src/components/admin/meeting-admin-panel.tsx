@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addAdvisorAction, cancelOnBehalfAction, removeAdvisorAction, replaceAdvisorAction, rescheduleMeetingAction } from "@/app/actions/admin-meetings";
 import { DateTimeField } from "@/components/date-time-field";
 import { ConfirmDialog, SaveIndicator, useSaver } from "@/components/cms/primitives";
-import { Initials } from "@/components/ui";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
 import { formatDkk } from "@/lib/pricing";
 import type { RankedCandidate } from "@/lib/substitutes";
 
@@ -14,6 +14,8 @@ export interface PanelAdvisor {
   name: string;
   title: string;
   priceDkk: number | null;
+  /** Version af profilbilledet */
+  photo: string | null;
 }
 
 export interface PanelProps {
@@ -88,7 +90,7 @@ export function MeetingAdminPanel(props: PanelProps) {
         <ul className="mt-space-3 divide-y divide-grey-bg" data-testid="participants">
           {advisors.map((a) => (
             <li key={a.id} className="flex flex-wrap items-center gap-3 py-3" data-advisor={a.name}>
-              <Initials name={a.name} />
+              <AdvisorAvatar advisorId={a.id} name={a.name} photo={a.photo} />
               <div className="min-w-0 flex-1">
                 <p className="font-semibold text-navy">{a.name}</p>
                 <p className="text-sm text-muted">{a.title}{a.priceDkk !== null && ` · honorar-grundlag ${formatDkk(a.priceDkk)}`}</p>
@@ -291,7 +293,7 @@ function CandidateDialog({
               {rows.length === 0 && <li className="p-space-4 text-center text-muted">Ingen rådgivere at vælge.</li>}
               {rows.map((c, i) => (
                 <li key={c.id} className={`flex gap-3 p-space-3 sm:px-space-4 ${c.available ? "" : "bg-grey-bg/60"}`} data-candidate={c.name} data-available={c.available}>
-                  <Initials name={c.name} />
+                  <AdvisorAvatar advisorId={c.id} name={c.name} photo={c.photo} />
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold leading-snug text-navy">
                       {c.name}

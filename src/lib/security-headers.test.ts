@@ -16,6 +16,13 @@ describe("sikkerhedsheaders (M-6)", () => {
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
   });
 
+  it("img-src: ingen eksterne billedværter (rådgiverfotos serveres af /api/avatar)", () => {
+    expect(buildCsp(base)).toMatch(/img-src 'self' data: blob:;/);
+    expect(buildCsp(base)).not.toMatch(/img-src[^;]*https:/);
+    // Kun lokalt med http-APP_URL: appens egen origin (logo i e-mail-forhåndsvisning)
+    expect(buildCsp({ ...base, appOrigin: "http://localhost:3000", production: false })).toMatch(/img-src 'self' data: blob: http:\/\/localhost:3000;/);
+  });
+
   it("mock-video: frame-src kun 'self'; dev tillader unsafe-eval; direkte upload til S3 i connect-src", () => {
     const csp = buildCsp({ ...base, videoProvider: "mock", production: false, dev: true, uploadOrigin: "https://fsn1.your-objectstorage.com" });
     expect(csp).toContain("frame-src 'self'");

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MeetingAdminPanel } from "@/components/admin/meeting-admin-panel";
 import { LeadLabel, MeetingStatusBadge } from "@/components/ui";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { listSubstituteCandidates } from "@/lib/meeting-admin";
 import { formatDanishDateInput, formatDateTime, formatTime } from "@/lib/time";
@@ -26,7 +27,13 @@ export default async function AdminMeeting({ params }: { params: Promise<{ id: s
   ]);
   const advisors = meeting.participants
     .filter((p) => p.user.role === "ADVISOR")
-    .map((p) => ({ id: p.userId, name: p.user.name, title: p.user.advisorProfile?.title ?? "", priceDkk: p.pricePerMeetingDkk }));
+    .map((p) => ({
+      id: p.userId,
+      name: p.user.name,
+      title: p.user.advisorProfile?.title ?? "",
+      priceDkk: p.pricePerMeetingDkk,
+      photo: p.user.advisorProfile?.photoKey ? avatarVersion(p.user.advisorProfile.photoUpdatedAt) : null,
+    }));
 
   return (
     <div className="space-y-space-4">

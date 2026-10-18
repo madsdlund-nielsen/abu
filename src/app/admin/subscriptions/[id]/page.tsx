@@ -5,6 +5,7 @@ import { adminChangeBoardAction, setLeadAction } from "@/app/actions/admin-meeti
 import { BoardBuilder } from "@/components/board-builder";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { SubStatusBadge } from "@/components/ui";
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { loadCatalog } from "@/lib/onboarding/catalog";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
@@ -26,7 +27,7 @@ export default async function AdminSubscription({ params, searchParams }: { para
     },
   });
   if (!sub) notFound();
-  const [catalog, needs] = await Promise.all([loadCatalog({ includeIds: sub.advisors.map((a) => a.advisorId) }), getCustomerNeeds(sub.customerId)]);
+  const [catalog, needs] = await Promise.all([loadCatalog({ includeIds: sub.advisors.map((a) => a.advisorId), viewer: await requireRole("ADMIN") }), getCustomerNeeds(sub.customerId)]);
   const editable = sub.status !== "CANCELLED";
   const lead = sub.advisors.find((a) => a.isLead) ?? null;
   const eligibleMembers = sub.advisors.filter((a) => catalog.advisors.find((c) => c.id === a.advisorId)?.leadEligible);

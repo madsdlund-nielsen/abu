@@ -12,6 +12,8 @@ export interface SubstituteCandidate {
   conflict?: string | null;
   /** Ikke aktiveret af admin: vises, men kan ikke vælges (QA #13) */
   inactive?: boolean;
+  /** Version af profilbilledet (kun admin ser listen) */
+  photo?: string | null;
 }
 
 export interface RankedCandidate extends SubstituteCandidate {

@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { avatarVersion } from "./avatar-url";
 import { audit } from "./audit";
 import { getEnv } from "./env";
 import { BookingError, loadAvailability } from "./booking";
@@ -62,7 +63,7 @@ export async function listSubstituteCandidates(meetingId: string): Promise<Ranke
   const candidates: SubstituteCandidate[] = profiles.map((p) => {
     const av = availability.find((a) => a.id === p.userId)!;
     const conflict = p.active ? explainSlotConflict(av, meeting.startsAt, dur) : "Inaktiv";
-    return { id: p.userId, name: p.user.name, title: p.title, priceDkk: p.pricePerMeetingDkk, tagIds: p.tags.map((t) => t.tagId), available: p.active && conflict === null, conflict, ...(p.active ? {} : { inactive: true }) };
+    return { id: p.userId, name: p.user.name, title: p.title, photo: p.photoKey ? avatarVersion(p.photoUpdatedAt) : null, priceDkk: p.pricePerMeetingDkk, tagIds: p.tags.map((t) => t.tagId), available: p.active && conflict === null, conflict, ...(p.active ? {} : { inactive: true }) };
   });
   const needsList = (profile?.testAnswers as { needs?: { tagId: string; weight: number }[] } | null)?.needs ?? [];
   const needs = Object.fromEntries(needsList.map((n) => [n.tagId, n.weight]));

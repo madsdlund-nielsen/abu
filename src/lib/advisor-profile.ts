@@ -3,13 +3,13 @@ import { normalizePhone } from "./onboarding/schemas";
 
 /**
  * Rådgiverens profilfelter. Samme validering, uanset om rådgiveren selv (`/profile`) eller admin
- * (`/admin/advisors/[id]`) redigerer: titel, præsentation, foto-URL (kun https) og mobilnummer.
+ * (`/admin/advisors/[id]`) redigerer: titel, præsentation og mobilnummer. Profilbilledet uploades for sig (`src/lib/avatar.ts`);
+ * der er ikke længere en foto-URL (eksterne billeder lækkede besøgendes IP-adresser til tredjepart).
  */
 export const advisorProfileSchema = z.object({
   title: z.string().trim().max(120, "Titlen må højst være 120 tegn."),
   bio: z.string().trim().max(4000, "Præsentationen må højst være 4.000 tegn."),
   phone: z.string().trim().max(30, "Telefonnummeret er for langt.").optional(),
-  photoUrl: z.string().trim().max(500, "Foto-URL'en er for lang.").refine((v) => v === "" || /^https:\/\//.test(v), "Foto-URL skal starte med https://"),
 });
 
 /** Rådgiverens egen formular har også navnet. */
@@ -17,12 +17,11 @@ export const advisorOwnProfileSchema = advisorProfileSchema.extend({
   name: z.string().trim().min(2, "Indtast dit navn (mindst 2 tegn)."),
 });
 
-export const PROFILE_FIELDS = ["title", "bio", "phone", "photoUrl"] as const;
+export const PROFILE_FIELDS = ["title", "bio", "phone"] as const;
 
 export interface ParsedAdvisorProfile {
   title: string;
   bio: string;
-  photoUrl: string;
   /** Normaliseret (+45 20 30 40 50) eller null, når feltet er tomt */
   phone: string | null;
 }
@@ -43,5 +42,5 @@ export function parseAdvisorProfile(values: Record<string, string | undefined>):
   if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "Ugyldige felter." };
   const ph = profilePhone(p.data.phone);
   if ("error" in ph) return { ok: false, error: ph.error };
-  return { ok: true, data: { title: p.data.title, bio: p.data.bio, photoUrl: p.data.photoUrl, phone: ph.phone } };
+  return { ok: true, data: { title: p.data.title, bio: p.data.bio, phone: ph.phone } };
 }

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BuilderAdvisor, BuilderTag } from "@/lib/onboarding/catalog";
 import { advisorScore, boardCoverage } from "@/lib/matching";
 import { FREQUENCY_WEEKS, MAX_BOARD_SIZE, MIN_BOARD_SIZE, formatDkk, frequencyLabel, monthlyPriceForBoard, vatBreakdown } from "@/lib/pricing";
-import { Initials } from "./ui";
+import { AdvisorAvatar } from "./advisor-avatar";
 
 type Mode = { kind: "replace"; targetId: string } | { kind: "add" };
 
@@ -136,7 +136,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
               return (
                 <li key={a.id} className="flex flex-col border border-grey-bg bg-white p-space-3 shadow-panel" data-testid="board-card" data-advisor={a.name}>
                   <div className="flex items-start gap-3">
-                    <Initials name={a.name} url={a.photoUrl} />
+                    <AdvisorAvatar advisorId={a.id} name={a.name} photo={a.photo} />
                     <div className="min-w-0">
                       <p className="font-semibold leading-snug text-navy">{a.name}{a.inactive && <span className="badge badge-muted ml-2 align-middle">Inaktiv</span>}</p>
                       <p className="text-sm leading-snug text-muted">{a.title}</p>
@@ -458,7 +458,7 @@ function Catalog({
             const delta = target ? a.priceDkk - target.priceDkk : null;
             return (
               <li key={a.id} className="flex gap-3 p-space-3 sm:px-space-4" data-testid="catalog-row" data-advisor={a.name}>
-                <Initials name={a.name} url={a.photoUrl} />
+                <AdvisorAvatar advisorId={a.id} name={a.name} photo={a.photo} />
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold leading-snug text-navy">
                     {a.name}

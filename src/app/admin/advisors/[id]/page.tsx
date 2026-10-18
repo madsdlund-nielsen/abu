@@ -7,6 +7,7 @@ import { AdvisorStatusBadge, ReadinessList } from "@/components/admin/readiness"
 import { AdvisorForm } from "@/components/cms/advisor-form";
 import { getPriceBounds } from "@/lib/advisor-price";
 import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Rediger rådgiver" };
@@ -84,7 +85,8 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
           <ProfileForm
             mode="admin"
             advisorId={id}
-            initial={{ name, phone: profile.user.phone ?? "", title: profile.title, bio: profile.bio, photoUrl: profile.photoUrl }}
+            photoVersion={profile.photoKey ? avatarVersion(profile.photoUpdatedAt) : null}
+            initial={{ name, phone: profile.user.phone ?? "", title: profile.title, bio: profile.bio }}
           />
         </div>
       </section>

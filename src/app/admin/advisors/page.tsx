@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { savePriceBoundsAction } from "@/app/actions/admin";
 import { AdvisorActivationControl } from "@/components/admin/advisor-activation";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
 import { getPriceBounds } from "@/lib/advisor-price";
 import { ResendInviteButton } from "@/components/admin/advisor-invite";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { AdvisorStatusBadge, ReadinessSummary } from "@/components/admin/readiness";
 import { loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { formatDkk } from "@/lib/pricing";
 
@@ -60,8 +62,13 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
             {advisors.map((a) => (
               <tr key={a.userId}>
                 <td>
-                  <p className="font-medium">{a.user.name}</p>
-                  <p className="text-xs text-muted">{a.user.email}</p>
+                  <div className="flex items-center gap-3">
+                    <AdvisorAvatar advisorId={a.userId} name={a.user.name} photo={a.photoKey ? avatarVersion(a.photoUpdatedAt) : null} size="sm" />
+                    <div className="min-w-0">
+                      <p className="font-medium">{a.user.name}</p>
+                      <p className="text-xs text-muted">{a.user.email}</p>
+                    </div>
+                  </div>
                 </td>
                 <td>{a.title}</td>
                 <td className="max-w-[18rem]">

@@ -1,10 +1,14 @@
 import type { Prisma } from "@prisma/client";
+import { AVATAR_SIZE, avatarObjectKeys, avatarSrc, avatarVersion } from "./avatar-url";
 import { prisma } from "./db";
 
 /**
  * GDPR-dataeksport (M-2). Hver tabel har en eksplicit `select`, så kun felter, personen har ret til, kommer med. Bevidst
  * udeladt: adgangskode-hash, sessioner, værtens mødelink (hostRoomUrl), mødelinks og udbyder-id'er (betaling/video),
- * lagernøgler, login-spærring og andre brugeres kontaktoplysninger.
+ * optagelsernes lagernøgler, login-spærring og andre brugeres kontaktoplysninger.
+ *
+ * Rådgiverens profilbillede er med som metadata (lagernøgle og tidspunkt, `profilePhoto`); selve billedet kan hentes
+ * på `/api/avatar/<id>?size=512` eller rekvireres hos os. Det gemte billede har ingen EXIF/GPS-data.
  */
 export const EXPORT_USER_SELECT = {
   id: true,
@@ -47,7 +51,8 @@ export const EXPORT_USER_SELECT = {
     select: {
       title: true,
       bio: true,
-      photoUrl: true,
+      photoKey: true,
+      photoUpdatedAt: true,
       active: true,
       pricePerMeetingDkk: true,
       availabilityRules: { select: { weekday: true, startMinute: true, endMinute: true } },
@@ -95,5 +100,16 @@ export async function buildDataExport(user: { id: string; email: string }) {
       select: { email: true, name: true, phone: true, step: true, source: true, createdAt: true, lastActivityAt: true, convertedAt: true },
     }),
   ]);
-  return { exportedAt: new Date().toISOString(), user: profile, meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog };
+  return { exportedAt: new Date().toISOString(), user: profile, profilePhoto: profilePhotoInfo(user.id, profile.advisorProfile), meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog };
+}
+
+/** Metadata om profilbilledet + hvordan selve billedet fås (det indgår ikke i JSON-filen). */
+export function profilePhotoInfo(userId: string, profile: { photoKey: string | null; photoUpdatedAt: Date | null } | null | undefined) {
+  if (!profile?.photoKey) return null;
+  return {
+    storageKeys: avatarObjectKeys(profile.photoKey),
+    updatedAt: profile.photoUpdatedAt,
+    format: "WebP, 512 × 512 og 96 × 96 pixels, uden EXIF/GPS-metadata",
+    note: `Selve billedet er ikke med i filen. Hent det som indlogget på ${avatarSrc(userId, avatarVersion(profile.photoUpdatedAt) ?? "0", AVATAR_SIZE)}, eller skriv til os, så sender vi det.`,
+  };
 }

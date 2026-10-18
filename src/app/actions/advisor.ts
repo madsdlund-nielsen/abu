@@ -21,7 +21,7 @@ export async function updateProfileAction(_prev: FormState, formData: FormData):
     prisma.user.update({ where: { id: user.id }, data: { name: parsed.data.name, phone } }),
     prisma.advisorProfile.update({
       where: { userId: user.id },
-      data: { title: parsed.data.title, bio: parsed.data.bio, photoUrl: parsed.data.photoUrl },
+      data: { title: parsed.data.title, bio: parsed.data.bio },
     }),
   ]);
   revalidatePath("/profile");

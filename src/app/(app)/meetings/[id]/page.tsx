@@ -6,6 +6,7 @@ import { AutoRefresh, JoinCountdown } from "@/components/join-countdown";
 import { RecordingUpload } from "@/components/recording-upload";
 import { UPLOAD_TTL_SECONDS } from "@/lib/recording-upload";
 import { RoomEmbed } from "@/components/room-embed";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
 import { LeadLabel, MeetingStatusBadge } from "@/components/ui";
 import Link from "next/link";
 import { canAccessMeeting } from "@/lib/access";
@@ -14,6 +15,7 @@ import { joinEarlyMinutes, joinOpensAt, meetingJoinState } from "@/lib/meeting-j
 import { recordingUploadDecision } from "@/lib/meeting-status";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
+import { visibleAvatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { LATE_CANCEL_HOURS } from "@/lib/quota";
 import { formatDateTime, formatTime } from "@/lib/time";
@@ -31,7 +33,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   const meeting = await prisma.meeting.findUnique({
     where: { id },
     include: {
-      participants: { include: { user: true } },
+      participants: { include: { user: { include: { advisorProfile: { select: { active: true, photoKey: true, photoUpdatedAt: true } } } } } },
       subscription: { include: { customer: { include: { user: true } }, advisors: { where: { isLead: true }, include: { advisor: { include: { user: { select: { name: true } } } } } } } },
       recordings: { orderBy: { createdAt: "desc" } },
       transcript: true,
@@ -82,7 +84,17 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         <h2>Deltagere</h2>
         <ul className="mt-3 space-y-1 text-sm">
           <li><span className="text-muted">Kunde:</span> {meeting.subscription.customer.user.name}, {meeting.subscription.customer.companyName}</li>
-          <li><span className="text-muted">Rådgivere (hele boardet):</span> {advisors.map((a) => a.user.name).join(", ")}</li>
+          <li>
+            <span className="text-muted">Rådgivere (hele boardet):</span>
+            <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-2" data-testid="meeting-advisors">
+              {advisors.map((a) => (
+                <li key={a.userId} className="flex items-center gap-2">
+                  <AdvisorAvatar advisorId={a.userId} name={a.user.name} photo={a.user.advisorProfile ? visibleAvatarVersion({ id: a.userId, ...a.user.advisorProfile }, user) : null} size="sm" />
+                  <span>{a.user.name}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
           <li data-testid="meeting-lead">
             {leadId === user.id ? (
               <span className="font-semibold text-navy">Du er ansvarlig rådgiver for dette board.</span>

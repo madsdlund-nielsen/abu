@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { raiseAlert } from "./alerts";
 import { audit } from "./audit";
+import { avatarObjectKeys } from "./avatar-url";
 import { prisma } from "./db";
 import { ensureLead, LIVE_STATUSES } from "./lead";
 import { deleteNotificationDataFor } from "./notifications/service";
@@ -23,7 +24,8 @@ export type ErasureResult =
  * GDPR-sletning (M-3). Rækkefølge:
  *  1. Aktive abonnementer opsiges hos betalingsudbyderen (lykkes det ikke, slettes intet – ellers kunne der blive ved med
  *     at blive trukket penge).
- *  2. Optagelser for kundens møder slettes fra lageret (rækkerne forsvinder med kaskaden, objekterne gør ikke).
+ *  2. Optagelser for kundens møder og en rådgivers profilbillede (512 + 96 px) slettes fra lageret (rækkerne forsvinder
+ *     med kaskaden, objekterne gør ikke).
  *  3. Webhook-payloads med kundens data (betaling og video) slettes.
  *  4. Onboarding, notifikationslog, leads og samtykker for e-mailen, og til sidst brugeren (kaskade).
  * Audit-loggen beholdes (userId sættes til null).
@@ -63,6 +65,18 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
     }
   }
 
+  // 2b) Rådgiverens profilbillede (begge størrelser)
+  const profile = user.role === "ADVISOR" ? await prisma.advisorProfile.findUnique({ where: { userId }, select: { photoKey: true } }) : null;
+  for (const key of avatarObjectKeys(profile?.photoKey)) {
+    try {
+      await deps.storage.delete(key);
+      objects++;
+    } catch (e) {
+      console.error("[erasure] profilbillede kunne ikke slettes", e instanceof Error ? e.message : e);
+      return { ok: false, error: "Profilbilledet kunne ikke slettes fra lageret. Prøv igen." };
+    }
+  }
+
   // 3) Webhook-payloads (betaling: abonnement/kunde; video: mødets rum)
   const subIds = subs.flatMap((s) => [s.id, s.providerSubscriptionId]).filter((x): x is string => Boolean(x));
   const customerIds = [userId, ...subs.map((s) => s.providerCustomerId)].filter((x): x is string => Boolean(x));
@@ -79,7 +93,7 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
   if (user.role === "ADVISOR") await flagAdvisorErasure(userId, actorId);
 
   // 4) Øvrige data om personen og selve kontoen
-  await audit(actorId, "user.delete", "User", userId, `Opsagt: ${cancelled}, optagelser: ${objects}, webhooks: ${webhookEvents}`);
+  await audit(actorId, "user.delete", "User", userId, `Opsagt: ${cancelled}, lagerobjekter: ${objects}, webhooks: ${webhookEvents}`);
   await deleteOnboardingSessionsForEmail(user.email);
   await deleteNotificationDataFor(user);
   await prisma.marketingConsent.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
