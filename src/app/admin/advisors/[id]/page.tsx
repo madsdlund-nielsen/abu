@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { ProfileForm } from "@/components/advisor-forms";
 import { AdvisorActivationControl } from "@/components/admin/advisor-activation";
 import { ResendInviteButton } from "@/components/admin/advisor-invite";
 import { AdvisorStatusBadge, ReadinessList } from "@/components/admin/readiness";
@@ -55,7 +56,7 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
           <div>
             <p className="label !mb-0">Klar til aktivering</p>
             <ReadinessList items={readiness} />
-            <p className="mt-space-3 text-xs text-muted">Tjeklisten viser den gemte tilstand. Gem ændringer i pris og tags, før du aktiverer.</p>
+            <p className="mt-space-3 text-xs text-muted">Tjeklisten viser den gemte tilstand. Gem ændringer i profil, pris og tags, før du aktiverer.</p>
             {!profile.user.passwordHash && (
               <div className="mt-space-3">
                 <ResendInviteButton userId={id} />
@@ -73,6 +74,20 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
         priceBounds={bounds}
       />
 
+      <section className="mt-space-4 border border-grey-bg bg-white p-space-3 sm:p-space-4" aria-labelledby="profile-h" data-testid="admin-profile">
+        <h2 id="profile-h" className="text-xl font-light">Profil</h2>
+        <span className="rule-gold mt-3" aria-hidden="true" />
+        <p className="callout mt-space-3 text-sm">
+          {name} kan også selv redigere disse felter under <strong>Min profil</strong>. Det, du gemmer her, ser rådgiveren næste gang, og rådgiveren kan rette det igen. Ændringer skrives til audit-loggen.
+        </p>
+        <div className="mt-space-4 max-w-2xl">
+          <ProfileForm
+            mode="admin"
+            advisorId={id}
+            initial={{ name, phone: profile.user.phone ?? "", title: profile.title, bio: profile.bio, photoUrl: profile.photoUrl }}
+          />
+        </div>
+      </section>
     </div>
   );
 }

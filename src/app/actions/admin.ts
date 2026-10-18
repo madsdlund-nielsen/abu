@@ -8,6 +8,8 @@ import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
 import { savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
 import { setAdvisorActive } from "@/lib/advisor-activation";
+import { parseAdvisorProfile } from "@/lib/advisor-profile";
+import { formValues, type FormState } from "@/lib/form-state";
 import { getEnv } from "@/lib/env";
 import { setHolidayBlocked } from "@/lib/holidays";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
@@ -109,6 +111,32 @@ export async function setAdvisorActiveAction(_prev: ActivationState, formData: F
   revalidatePath("/admin/advisors");
   revalidatePath(`/admin/advisors/${id}`);
   return r.ok ? { ok: r.message, at: Date.now() } : { error: r.error, at: Date.now() };
+}
+
+/**
+ * Admin retter rådgiverens profil (titel, bio, foto-URL, mobilnummer) med samme validering som rådgiverens egen
+ * formular. Rådgiveren kan stadig selv rette felterne under Min profil. Audit-logges med de ændrede feltnavne.
+ */
+export async function updateAdvisorProfileByAdminAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requireRole("ADMIN");
+  const values = formValues(formData);
+  const id = String(formData.get("userId") ?? "");
+  const user = await prisma.user.findFirst({ where: { id, role: "ADVISOR" }, include: { advisorProfile: true } });
+  if (!user?.advisorProfile) return { error: "Rådgiveren findes ikke.", values };
+  const parsed = parseAdvisorProfile(values);
+  if (!parsed.ok) return { error: parsed.error, values };
+  const d = parsed.data;
+  const before = { title: user.advisorProfile.title, bio: user.advisorProfile.bio, photoUrl: user.advisorProfile.photoUrl, phone: user.phone };
+  const changed = (Object.keys(before) as (keyof typeof before)[]).filter((k) => before[k] !== d[k]);
+  if (changed.length === 0) return { ok: "Ingen ændringer at gemme.", values };
+  await prisma.$transaction([
+    prisma.user.update({ where: { id }, data: { phone: d.phone } }),
+    prisma.advisorProfile.update({ where: { userId: id }, data: { title: d.title, bio: d.bio, photoUrl: d.photoUrl } }),
+  ]);
+  await audit(admin.id, "advisor.profile.update", "User", id, `Felter: ${changed.join(",")}`);
+  revalidatePath("/admin/advisors");
+  revalidatePath(`/admin/advisors/${id}`);
+  return { ok: `Profilen er gemt. ${user.name} kan se og rette ændringerne under Min profil.`, values: { ...values, phone: d.phone ?? "" } };
 }
 
 export async function processJobsAction() {

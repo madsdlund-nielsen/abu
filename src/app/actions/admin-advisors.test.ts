@@ -121,3 +121,47 @@ describeDb("aktivering af rådgivere via server action (blokeret indtil klar)", 
     expect(await activeOf(id)).toBe(false);
   });
 });
+
+describeDb("admin retter rådgiverens profil", () => {
+  const ids: string[] = [];
+  beforeAll(async () => {
+    const { prisma } = await import("@/lib/db");
+    const admin = await prisma.user.create({ data: { email: `${uid("adm")}@test.dk`, name: "Admin", role: "ADMIN" } });
+    adminRef.id = admin.id;
+    ids.push(admin.id);
+  });
+  afterAll(async () => {
+    const { prisma } = await import("@/lib/db");
+    await prisma.auditLog.deleteMany({ where: { userId: adminRef.id } });
+    await prisma.user.deleteMany({ where: { id: { in: ids } } });
+  });
+
+  it("validerer som rådgiverens egen formular og beholder værdierne ved fejl", async () => {
+    const { prisma } = await import("@/lib/db");
+    const { updateAdvisorProfileByAdminAction } = await import("./admin");
+    const u = await prisma.user.create({ data: { email: `${uid("adv")}@test.dk`, name: "Rikke", role: "ADVISOR", advisorProfile: { create: {} } } });
+    ids.push(u.id);
+    const input = { userId: u.id, title: "Partner", bio: "Ny bio", phone: "", photoUrl: "http://x.dk/a.jpg" };
+    const bad = await updateAdvisorProfileByAdminAction({}, fd(input));
+    expect(bad.error).toBe("Foto-URL skal starte med https://");
+    expect(bad.values).toMatchObject({ title: "Partner", bio: "Ny bio", photoUrl: "http://x.dk/a.jpg" });
+    expect((await updateAdvisorProfileByAdminAction({}, fd({ ...input, photoUrl: "", phone: "12" }))).error).toMatch(/gyldigt telefonnummer/);
+    expect((await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: u.id } })).bio).toBe("");
+
+    const good = await updateAdvisorProfileByAdminAction({}, fd({ ...input, photoUrl: "https://x.dk/a.jpg", phone: "20304050" }));
+    expect(good.ok).toMatch(/Profilen er gemt/);
+    const saved = await prisma.user.findUniqueOrThrow({ where: { id: u.id }, include: { advisorProfile: true } });
+    expect(saved).toMatchObject({ name: "Rikke", phone: "+45 20 30 40 50", advisorProfile: { title: "Partner", bio: "Ny bio", photoUrl: "https://x.dk/a.jpg" } });
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityId: u.id, action: "advisor.profile.update" } });
+    expect(log.detail).toBe("Felter: title,bio,photoUrl,phone");
+    expect(log.userId).toBe(adminRef.id);
+  });
+
+  it("kan kun rette rådgivere", async () => {
+    const { prisma } = await import("@/lib/db");
+    const { updateAdvisorProfileByAdminAction } = await import("./admin");
+    const c = await prisma.user.create({ data: { email: `${uid("k")}@test.dk`, name: "K", role: "CUSTOMER" } });
+    ids.push(c.id);
+    expect((await updateAdvisorProfileByAdminAction({}, fd({ userId: c.id, title: "", bio: "", phone: "", photoUrl: "" }))).error).toBe("Rådgiveren findes ikke.");
+  });
+});

@@ -1,11 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { formValues, type FormState } from "@/lib/form-state";
-import { normalizePhone } from "@/lib/onboarding/schemas";
+import { advisorOwnProfileSchema, profilePhone } from "@/lib/advisor-profile";
 import { overlapsExistingRule } from "@/lib/availability-rules";
 import { hhmmToMinutes, parseDanishDateTime } from "@/lib/time";
 
@@ -13,18 +12,11 @@ import { hhmmToMinutes, parseDanishDateTime } from "@/lib/time";
 export async function updateProfileAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireRole("ADVISOR");
   const values = formValues(formData);
-  const schema = z.object({
-    name: z.string().trim().min(2, "Indtast dit navn (mindst 2 tegn)."),
-    title: z.string().trim().max(120, "Titlen må højst være 120 tegn."),
-    bio: z.string().trim().max(4000, "Præsentationen må højst være 4.000 tegn."),
-    phone: z.string().trim().max(30).optional(),
-    photoUrl: z.string().trim().max(500).refine((v) => v === "" || /^https:\/\//.test(v), "Foto-URL skal starte med https://"),
-  });
-  const parsed = schema.safeParse(values);
+  const parsed = advisorOwnProfileSchema.safeParse(values);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Ugyldige felter.", values };
-  const phoneRaw = parsed.data.phone ?? "";
-  const phone = phoneRaw === "" ? null : normalizePhone(phoneRaw);
-  if (phoneRaw !== "" && !phone) return { error: "Indtast et gyldigt telefonnummer, fx 20 30 40 50 eller +46 70 123 45 67.", values };
+  const ph = profilePhone(parsed.data.phone);
+  if ("error" in ph) return { error: ph.error, values };
+  const phone = ph.phone;
   await prisma.$transaction([
     prisma.user.update({ where: { id: user.id }, data: { name: parsed.data.name, phone } }),
     prisma.advisorProfile.update({
