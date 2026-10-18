@@ -1,27 +1,29 @@
 import { prisma } from "./db";
+import { userDirectory } from "./user-directory";
 import { deleteOnboardingSessionsForEmail } from "./onboarding/session";
 
 const include = {
-  advisors: { include: { advisor: { include: { user: true } } } },
+  advisors: { include: { advisor: true } },
   customer: { include: { user: true } },
 } as const;
 
-/** Kundens aktuelle (ikke opsagte) abonnement; nyeste først, aktive foran afventende. */
+/**
+ * Kundens aktuelle (ikke opsagte) abonnement; nyeste først, aktive foran afventende. Rådgivernes navne kommer fra
+ * kataloget (RLS: kunden kan ikke læse rådgivernes User-rækker, kun navn og rolle via rls.user_directory).
+ */
 export async function getCustomerSubscription(userId: string) {
   const subs = await prisma.subscription.findMany({
     where: { customerId: userId, status: { in: ["ACTIVE", "PAST_DUE", "PENDING"] } },
     include,
     orderBy: { createdAt: "desc" },
   });
-  return subs.find((s) => s.status !== "PENDING") ?? subs[0] ?? null;
-}
-
-export async function listActiveAdvisors() {
-  return prisma.advisorProfile.findMany({
-    where: { active: true },
-    include: { user: true },
-    orderBy: { user: { name: "asc" } },
-  });
+  const sub = subs.find((s) => s.status !== "PENDING") ?? subs[0] ?? null;
+  if (!sub) return null;
+  const names = await userDirectory(sub.advisors.map((a) => a.advisorId));
+  return {
+    ...sub,
+    advisors: sub.advisors.map((a) => ({ ...a, advisor: { ...a.advisor, user: names.get(a.advisorId) ?? { id: a.advisorId, name: "", role: "ADVISOR" as const } } })),
+  };
 }
 
 /** Kundens behov fra onboarding-testen (snapshot på kundeprofilen), begrænset til aktive tags. */

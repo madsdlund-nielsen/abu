@@ -18,6 +18,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { isLocked, LOCK_THRESHOLD, recordFailedLogin, resetLoginFailures } from "@/lib/lockout";
 import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
+import { withSystemContext } from "@/lib/db-context";
 import { recordingConsentNow, safeNextPath } from "@/lib/consent";
 import { revokeTrustedDevices } from "@/lib/mfa/service";
 import { beginSignIn, clearDeviceCookie, landingPath } from "@/lib/sign-in";
@@ -43,31 +44,36 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
   // 1) Grænse pr. betroet klient-IP (mod password spraying på tværs af konti)
   if (!(await rateLimitIp("login-ip", await getClientIp(), 50))) return fail(TOO_MANY);
 
-  // 2) Spærring pr. konto i databasen – uafhængig af IP, så skiftende X-Forwarded-For ikke hjælper (H-2)
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (user && isLocked(user, new Date())) return fail(TOO_MANY);
-  // Ukendte e-mails spærres efter samme antal forsøg, så svaret ikke afslører, om kontoen findes
-  if (!user && !(await rateLimit(`login-unknown:${email}`, LOCK_THRESHOLD))) return fail(TOO_MANY);
+  // 2)-3) Auth-internt (RLS): kontoen slås op på e-mail, før der findes en session – systemkontekst
+  const outcome = await withSystemContext("auth.login", async (): Promise<{ error: string } | { redirect: string }> => {
+    // 2) Spærring pr. konto i databasen – uafhængig af IP, så skiftende X-Forwarded-For ikke hjælper (H-2)
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (user && isLocked(user, new Date())) return { error: TOO_MANY };
+    // Ukendte e-mails spærres efter samme antal forsøg, så svaret ikke afslører, om kontoen findes
+    if (!user && !(await rateLimit(`login-unknown:${email}`, LOCK_THRESHOLD))) return { error: TOO_MANY };
 
-  const ok = await verifyPassword(password, user?.passwordHash ?? null);
-  if (!user || !ok) {
-    if (user) {
-      const r = await recordFailedLogin(user.id);
-      if (r.lockedNow) await audit(user.id, "auth.lockout", "User", user.id, `Spærret til ${r.lockedUntil?.toISOString()}`);
+    const ok = await verifyPassword(password, user?.passwordHash ?? null);
+    if (!user || !ok) {
+      if (user) {
+        const r = await recordFailedLogin(user.id);
+        if (r.lockedNow) await audit(user.id, "auth.lockout", "User", user.id, `Spærret til ${r.lockedUntil?.toISOString()}`);
+      }
+      return { error: "Forkert e-mail eller adgangskode." };
     }
-    return fail("Forkert e-mail eller adgangskode.");
-  }
 
-  // Deaktiverede administratorer: først efter korrekt adgangskode, så svaret ikke afslører kontoen
-  if (user.deactivatedAt) return fail("Kontoen er deaktiveret. Kontakt en administrator.");
+    // Deaktiverede administratorer: først efter korrekt adgangskode, så svaret ikke afslører kontoen
+    if (user.deactivatedAt) return { error: "Kontoen er deaktiveret. Kontakt en administrator." };
 
-  if (user.failedLoginCount > 0 || user.lockedUntil) await resetLoginFailures(user.id);
-  await audit(user.id, "auth.login", "User", user.id);
-  // Totrinsbekræftelse: kode (eller betroet enhed), og for administratorer opsætning, før appen kan bruges
-  const stage = await beginSignIn(user);
-  if (stage !== "full") redirect(mfaPathFor(stage, next));
-  // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login; ellers det dybe link (plan #21)
-  redirect(landingPath(user, next));
+    if (user.failedLoginCount > 0 || user.lockedUntil) await resetLoginFailures(user.id);
+    await audit(user.id, "auth.login", "User", user.id);
+    // Totrinsbekræftelse: kode (eller betroet enhed), og for administratorer opsætning, før appen kan bruges
+    const stage = await beginSignIn(user);
+    if (stage !== "full") return { redirect: mfaPathFor(stage, next) };
+    // Eksisterende brugere uden registreret samtykke accepterer én gang ved næste login; ellers det dybe link (plan #21)
+    return { redirect: landingPath(user, next) };
+  });
+  if ("error" in outcome) return fail(outcome.error);
+  redirect(outcome.redirect);
 }
 
 export async function logoutAction() {
@@ -80,13 +86,16 @@ export async function requestResetAction(_prev: FormState, formData: FormData): 
   if (!(await rateLimitIp("reset-ip", await getClientIp(), 5)) || (email && !(await rateLimit(`reset-email:${email}`, 3, 60 * 60_000)))) {
     return { error: "For mange forsøg. Prøv igen senere.", values: { email }, at: Date.now() };
   }
-  const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
+  // Auth-internt (RLS): kontoen slås op på e-mail uden en session – systemkontekst
+  const user = email ? await withSystemContext("auth.password_reset", () => prisma.user.findUnique({ where: { email } })) : null;
   if (user && !user.deactivatedAt) {
     // Sendes efter svaret, så svartiden ikke afslører, om kontoen findes
-    after(async () => {
-      const { token } = await createPasswordToken(user.id, "RESET");
-      await sendResetEmail(user, token);
-    });
+    after(() =>
+      withSystemContext("auth.password_reset", async () => {
+        const { token } = await createPasswordToken(user.id, "RESET");
+        await sendResetEmail(user, token);
+      }),
+    );
   }
   // Samme svar uanset om kontoen findes (ingen konto-opslag)
   return { ok: "Hvis e-mailen findes hos os, har vi sendt et link til at nulstille adgangskoden.", at: Date.now() };
@@ -108,31 +117,31 @@ export async function setPasswordAction(formData: FormData) {
     redirectWith(back, "err", "Du skal give samtykke til optagelse og transskription af møder for at fortsætte.");
   }
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: row.userId },
-      // Ny adgangskode via engangslink ophæver en evt. login-spærring
-      data: {
-        passwordHash: await hashPassword(password),
-        failedLoginCount: 0,
-        lastFailedLoginAt: null,
-        lockedUntil: null,
-        ...(giveConsent ? recordingConsentNow((await currentConsent("recording")).version) : {}),
-      },
-    }),
-    prisma.passwordToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
-    // Log alle andre sessioner ud
-    prisma.session.deleteMany({ where: { userId: row.userId } }),
-  ]);
-  await audit(row.userId, `auth.password_${row.purpose.toLowerCase()}`, "User", row.userId);
-  // Ny adgangskode: alle betroede enheder tilbagekaldes, så koden kræves igen overalt
-  await revokeTrustedDevices(row.userId, row.purpose === "RESET" ? "password_reset" : "password_change");
-  await clearDeviceCookie();
-  // Et link i en mail giver aldrig adgang uden om totrinsbekræftelsen
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: row.userId } });
-  const stage = await beginSignIn(user);
-  if (stage !== "full") redirect(mfaPathFor(stage));
-  redirect(landingPath(user, null));
+  const passwordHash = await hashPassword(password);
+  const consent = giveConsent ? recordingConsentNow((await currentConsent("recording")).version) : {};
+  // Auth-internt (RLS): linket fra mailen er autorisationen (der findes endnu ingen session) – systemkontekst
+  const stage = await withSystemContext("auth.set_password", async () => {
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: row.userId },
+        // Ny adgangskode via engangslink ophæver en evt. login-spærring
+        data: { passwordHash, failedLoginCount: 0, lastFailedLoginAt: null, lockedUntil: null, ...consent },
+        select: { id: true },
+      });
+      await tx.passwordToken.update({ where: { id: row.id }, data: { usedAt: new Date() }, select: { id: true } });
+      // Log alle andre sessioner ud
+      await tx.session.deleteMany({ where: { userId: row.userId } });
+    });
+    await audit(row.userId, `auth.password_${row.purpose.toLowerCase()}`, "User", row.userId);
+    // Ny adgangskode: alle betroede enheder tilbagekaldes, så koden kræves igen overalt
+    await revokeTrustedDevices(row.userId, row.purpose === "RESET" ? "password_reset" : "password_change");
+    await clearDeviceCookie();
+    // Et link i en mail giver aldrig adgang uden om totrinsbekræftelsen
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: row.userId } });
+    return { stage: await beginSignIn(user), user };
+  });
+  if (stage.stage !== "full") redirect(mfaPathFor(stage.stage));
+  redirect(landingPath(stage.user, null));
 }
 
 export async function changePasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {

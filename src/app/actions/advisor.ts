@@ -17,13 +17,13 @@ export async function updateProfileAction(_prev: FormState, formData: FormData):
   const ph = profilePhone(parsed.data.phone);
   if ("error" in ph) return { error: ph.error, values };
   const phone = ph.phone;
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: user.id }, data: { name: parsed.data.name, phone } }),
-    prisma.advisorProfile.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { name: parsed.data.name, phone } });
+    await tx.advisorProfile.update({
       where: { userId: user.id },
       data: { title: parsed.data.title, bio: parsed.data.bio },
-    }),
-  ]);
+    });
+  });
   revalidatePath("/profile");
   return { ok: "Profilen er gemt.", values };
 }

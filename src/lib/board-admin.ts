@@ -78,13 +78,13 @@ export async function changeBoardAsAdmin(opts: {
     }
   }
 
-  await prisma.$transaction([
-    prisma.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } }),
-    prisma.subscription.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } });
+    await tx.subscription.update({
       where: { id: sub.id },
       data: { advisorCount: ids.length, frequencyWeeks: opts.weeks, monthlyPriceDkk: monthly, advisors: { create: rows } },
-    }),
-  ]);
+    });
+  });
 
   // Ansvarlig rådgiver: den nuværende bliver, hvis vedkommende stadig er i boardet og kvalificeret – ellers ny tildeling
   const lead = await ensureLead(sub.id, "board_changed", opts.actorId);

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { NotificationAudience, NotificationChannel, Prisma, User } from "@prisma/client";
 import { prisma } from "../db";
+import { withSystemContext } from "../db-context";
 import { getEnv } from "../env";
 import { getEmail } from "../messaging/email";
 import { getSms } from "../messaging/sms";
@@ -22,10 +23,22 @@ import { describeChange, describeLeadChange, firstName, joinNames, meetingDateVa
 
 const appUrl = () => getEnv().APP_URL.replace(/\/$/, "");
 
+/*
+ * RLS: notifikationsmotoren er et system-delsystem. Den planlægger og sender beskeder til alle parter i en hændelse
+ * (kunde, rådgivere, afløsere, leads) og læser skabeloner, regler, indstillinger og samtykker – på tværs af kunder. Alle
+ * indgange (hændelser, afsendelse, planlægning, afmelding, statuswebhook) kører derfor i systemkontekst med årsagen
+ * «notifications.<udløser>», også når hændelsen opstår i en kundes eller rådgivers request. Admin-funktionerne i CMS'et
+ * (send igen, testbesked) kører som admin.
+ */
+
 // --------------------------------------------------------------------------- Standardtekster
 
 /** Opretter manglende standardskabeloner, og standardregler for udløsere uden nogen regler. Overskriver aldrig redigeret indhold. */
 export async function ensureNotificationDefaults(opts: { onlyTrigger?: TriggerKey } = {}): Promise<{ templates: number; rules: number }> {
+  return withSystemContext("notifications.defaults", () => ensureNotificationDefaultsAsSystem(opts));
+}
+
+async function ensureNotificationDefaultsAsSystem(opts: { onlyTrigger?: TriggerKey }): Promise<{ templates: number; rules: number }> {
   let templates = 0;
   let rules = 0;
   const idByKey = new Map<string, string>();
@@ -163,10 +176,10 @@ async function dispatchNow(ids: string[]): Promise<void> {
   }
 }
 
-/** Fejl i notifikationer må aldrig vælte den handling, de hører til. */
+/** Fejl i notifikationer må aldrig vælte den handling, de hører til. Kører i systemkontekst («notifications.<label>»). */
 async function safely<T>(label: string, fn: () => Promise<T>): Promise<T | undefined> {
   try {
-    return await fn();
+    return await withSystemContext(`notifications.${label}`, fn);
   } catch (e) {
     console.error(`[notifications] ${label} fejlede`, e);
     return undefined;
@@ -289,6 +302,10 @@ export const meetingEvents = {
  * flyttet eller aflyst, og sendte røres ikke. Idempotent.
  */
 export async function syncMeetingReminders(meetingId: string, now = new Date()): Promise<{ created: number; cancelled: number }> {
+  return withSystemContext("notifications.reminders", () => syncMeetingRemindersAsSystem(meetingId, now));
+}
+
+async function syncMeetingRemindersAsSystem(meetingId: string, now: Date): Promise<{ created: number; cancelled: number }> {
   const m = await loadMeeting(meetingId);
   if (!m) return { created: 0, cancelled: 0 };
   const [rules, existing, settings] = await Promise.all([
@@ -419,6 +436,10 @@ export const accountEvents = {
  * og tilbagetrukne samtykker.
  */
 export async function scanAbandonedOnboarding(now = new Date()): Promise<number> {
+  return withSystemContext("notifications.onboarding_abandoned", () => scanAbandonedOnboardingAsSystem(now));
+}
+
+async function scanAbandonedOnboardingAsSystem(now: Date): Promise<number> {
   const rules = await activeRules("onboarding_abandoned");
   if (rules.length === 0) return 0;
   const minOffset = Math.min(...rules.map((r) => r.offsetMinutes));
@@ -455,6 +476,10 @@ const CLAIM_TIMEOUT_MS = 5 * 60_000;
 
 /** Henter forfaldne beskeder atomisk (FOR UPDATE SKIP LOCKED) og sender dem. */
 export async function processDueNotifications(opts: { limit?: number; ids?: string[]; now?: Date } = {}): Promise<number> {
+  return withSystemContext("notifications.dispatch", () => processDueNotificationsAsSystem(opts));
+}
+
+async function processDueNotificationsAsSystem(opts: { limit?: number; ids?: string[]; now?: Date }): Promise<number> {
   const now = opts.now ?? new Date();
   const limit = opts.limit ?? 50;
   const stale = new Date(now.getTime() - CLAIM_TIMEOUT_MS);
@@ -619,6 +644,10 @@ async function buildVariables(
  * oprettes en driftsalarm (højst én pr. type pr. time). Returnerer en årsag til at springe over, ellers null.
  */
 export async function smsBlockReason(address: string, settings: Pick<NotificationSettings, "smsCountries" | "smsPerNumberCap" | "smsDailyCap">, now = new Date()): Promise<string | null> {
+  return withSystemContext("notifications.sms_policy", () => smsBlockReasonAsSystem(address, settings, now));
+}
+
+async function smsBlockReasonAsSystem(address: string, settings: Pick<NotificationSettings, "smsCountries" | "smsPerNumberCap" | "smsDailyCap">, now: Date): Promise<string | null> {
   const alertOnce = async (kind: "sms_cap_number" | "sms_cap_daily" | "sms_country_blocked", message: string) => {
     if (await rateLimit(`alert:${kind}`, 1, 3_600_000, now)) await raiseAlert(kind, message);
   };
@@ -647,6 +676,10 @@ export async function smsBlockReason(address: string, settings: Pick<Notificatio
 
 /** Sender én besked fra køen. Springer over, hvis den ikke længere er relevant, og udsætter SMS i stille timer. */
 export async function deliverLog(id: string, opts: { extraVars?: Record<string, string>; now?: Date } = {}): Promise<DeliverResult> {
+  return withSystemContext("notifications.deliver", () => deliverLogAsSystem(id, opts));
+}
+
+async function deliverLogAsSystem(id: string, opts: { extraVars?: Record<string, string>; now?: Date }): Promise<DeliverResult> {
   const now = opts.now ?? new Date();
   const log = await prisma.notificationLog.findUnique({ where: { id }, include: { rule: { include: { template: true } }, recipient: true } });
   if (!log || log.status !== "QUEUED") return "GONE";
@@ -803,6 +836,10 @@ export async function sendTestMessage(opts: {
 
 /** Registrerer en afmelding for en adresse. Returnerer hvor mange konti/tilmeldinger, der blev opdateret. */
 export async function applyUnsubscribe(channel: NotificationChannel, address: string): Promise<number> {
+  return withSystemContext("notifications.unsubscribe", () => applyUnsubscribeAsSystem(channel, address));
+}
+
+async function applyUnsubscribeAsSystem(channel: NotificationChannel, address: string): Promise<number> {
   let n = 0;
   if (channel === "EMAIL") {
     const r = await prisma.user.updateMany({ where: { email: { equals: address, mode: "insensitive" } }, data: { emailOptOutAt: new Date() } });
@@ -818,6 +855,10 @@ export async function applyUnsubscribe(channel: NotificationChannel, address: st
 
 /** Statusopdatering fra udbyderen (webhook): matcher på udbyderens besked-id eller vores eget id. */
 export async function applyDeliveryStatus(events: { messageId: string; status: "DELIVERED" | "FAILED"; error?: string }[], now = new Date()): Promise<number> {
+  return withSystemContext("notifications.delivery_status", () => applyDeliveryStatusAsSystem(events, now));
+}
+
+async function applyDeliveryStatusAsSystem(events: { messageId: string; status: "DELIVERED" | "FAILED"; error?: string }[], now: Date): Promise<number> {
   let n = 0;
   // Kun beskeder, vi selv har sendt inden for 30 dage (M-7)
   const since = new Date(now.getTime() - 30 * 86_400_000);

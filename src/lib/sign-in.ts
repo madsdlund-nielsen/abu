@@ -5,6 +5,7 @@ import { createSession, type SessionContext, type SessionStage } from "./auth";
 import { getClientIp } from "./client-ip";
 import { safeNextPath } from "./consent";
 import { prisma } from "./db";
+import { withSystemContext } from "./db-context";
 import { cookieSecure } from "./env";
 import { createTrustedDevice, getTrustedDeviceDays, matchTrustedDevice } from "./mfa/service";
 import { DEVICE_COOKIE } from "./mfa/trusted-device";
@@ -15,8 +16,13 @@ import { DEVICE_COOKIE } from "./mfa/trusted-device";
  *  - ADMIN uden MFA: ventende session → /mfa/opsaet (påkrævet).
  *  - Andre uden MFA: fuld session.
  * Adgangskoden kræves altid; en betroet enhed springer kun koden over.
+ * Auth-internt (RLS): kører i systemkontekst – der findes endnu ingen session, og den betroede enhed slås op på cookiens hash.
  */
 export async function beginSignIn(user: User): Promise<SessionStage> {
+  return withSystemContext("auth.sign_in", () => beginSignInAsSystem(user));
+}
+
+async function beginSignInAsSystem(user: User): Promise<SessionStage> {
   if (user.mfaEnabledAt) {
     const device = await matchTrustedDevice(user.id, (await cookies()).get(DEVICE_COOKIE)?.value);
     if (device) {
@@ -44,8 +50,13 @@ export async function markLogin(userId: string): Promise<void> {
 /**
  * Koden er godkendt (login eller opsætning): sessionen roteres (nyt token, den ventende slettes) og markeres som
  * bekræftet nu. Med «Husk denne enhed» oprettes en betroet enhed og cookien sættes.
+ * Auth-internt (RLS): systemkontekst (den ventende session må ikke selv skrive sessioner, enheder eller login-tidspunkt).
  */
 export async function completeSecondFactor(ctx: SessionContext, opts: { trustDevice?: boolean } = {}): Promise<void> {
+  return withSystemContext("auth.mfa_complete", () => completeSecondFactorAsSystem(ctx, opts));
+}
+
+async function completeSecondFactorAsSystem(ctx: SessionContext, opts: { trustDevice?: boolean }): Promise<void> {
   const now = new Date();
   if (opts.trustDevice) {
     const days = await getTrustedDeviceDays();

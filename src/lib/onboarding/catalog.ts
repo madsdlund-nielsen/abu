@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { visibleAvatarVersion } from "../avatar-url";
 import { prisma } from "../db";
-import { LEAD_TAG_KEY } from "../lead";
+import { leadEligibleIds } from "../lead";
+import { userDirectory } from "../user-directory";
 import type { MatchAdvisor, MatchAnswer } from "../matching";
 
 /** Serialiserbar rådgiver til board-builderen (klient) og matching. */
@@ -34,27 +35,33 @@ export async function loadCatalog(opts: { includeIds?: string[]; viewer?: { id: 
   const [profiles, tags] = await Promise.all([
     prisma.advisorProfile.findMany({
       where: opts.includeIds?.length ? { OR: [{ active: true }, { userId: { in: opts.includeIds } }] } : { active: true },
-      include: { user: true, tags: { include: { tag: true } } },
-      orderBy: { user: { name: "asc" } },
+      include: { tags: { include: { tag: true } } },
     }),
     prisma.tag.findMany({ where: { active: true, kind: "COMPETENCE" }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
   ]);
+  // RLS: rådgivernes navne via kataloget (rls.user_directory), og «kan være ansvarlig» via rls.lead_eligible_ids –
+  // admin-tagget og User-rækkerne er ikke synlige før login (kun admin-tags filtreres her, som før)
+  const ids = profiles.map((p) => p.userId);
+  const [names, eligible] = await Promise.all([userDirectory(ids), leadEligibleIds(ids)]);
+  const nameOf = (id: string) => names.get(id)?.name ?? "";
   return {
     tags: tags.map((t) => ({ id: t.id, name: t.name })),
-    advisors: profiles.map((p) => ({
-      id: p.userId,
-      name: p.user.name,
-      title: p.title,
-      bio: p.bio,
-      photo: visibleAvatarVersion({ id: p.userId, active: p.active, photoKey: p.photoKey, photoUpdatedAt: p.photoUpdatedAt }, opts.viewer),
-      priceDkk: p.pricePerMeetingDkk,
-      ...(p.active ? {} : { inactive: true }),
-      leadEligible: p.active && p.tags.some((t) => t.tag.systemKey === LEAD_TAG_KEY),
-      tags: p.tags
-        .filter((t) => t.tag.active && t.tag.kind === "COMPETENCE")
-        .sort((a, b) => a.tag.sortOrder - b.tag.sortOrder || a.tag.name.localeCompare(b.tag.name, "da"))
-        .map((t) => ({ id: t.tag.id, name: t.tag.name })),
-    })),
+    advisors: [...profiles]
+      .sort((a, b) => nameOf(a.userId).localeCompare(nameOf(b.userId), "da") || a.userId.localeCompare(b.userId))
+      .map((p) => ({
+        id: p.userId,
+        name: nameOf(p.userId),
+        title: p.title,
+        bio: p.bio,
+        photo: visibleAvatarVersion({ id: p.userId, active: p.active, photoKey: p.photoKey, photoUpdatedAt: p.photoUpdatedAt }, opts.viewer),
+        priceDkk: p.pricePerMeetingDkk,
+        ...(p.active ? {} : { inactive: true }),
+        leadEligible: p.active && eligible.has(p.userId),
+        tags: p.tags
+          .filter((t) => t.tag.active && t.tag.kind === "COMPETENCE")
+          .sort((a, b) => a.tag.sortOrder - b.tag.sortOrder || a.tag.name.localeCompare(b.tag.name, "da"))
+          .map((t) => ({ id: t.tag.id, name: t.tag.name })),
+      })),
   };
 }
 

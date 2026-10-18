@@ -3,6 +3,7 @@ import "../scripts/owner-db-env"; // FØRST: kør som ejeren (DATABASE_URL_MIGRA
 import bcrypt from "bcryptjs";
 import { seedRefusal } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";
+import { withSystemContext } from "../src/lib/db-context";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
 import { ensureNotificationDefaults } from "../src/lib/notifications/service";
 import { assignLeadTx, getLeadTagId } from "../src/lib/lead";
@@ -165,7 +166,8 @@ async function main() {
   console.log("  Rådgiver (alle): <fornavn.efternavn>@abu.local / Raadgiver123!");
 }
 
-main()
+// RLS: seed kører som ejeren og i systemkontekst (alle tabeller har FORCE ROW LEVEL SECURITY)
+withSystemContext("seed.demo_data", main)
   .catch((e) => {
     console.error(e);
     process.exitCode = 1;

@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { AVATAR_SIZE, avatarObjectKeys, avatarSrc, avatarVersion } from "./avatar-url";
 import { prisma } from "./db";
+import { withSystemContext } from "./db-context";
+import { nameOf, userDirectory } from "./user-directory";
 
 /**
  * GDPR-dataeksport (M-2). Hver tabel har en eksplicit `select`, så kun felter, personen har ret til, kommer med. Bevidst
@@ -49,7 +51,8 @@ export const EXPORT_USER_SELECT = {
           startedAt: true,
           cancelledAt: true,
           createdAt: true,
-          advisors: { select: { pricePerMeetingDkk: true, isLead: true, advisor: { select: { user: { select: { name: true } } } } } },
+          // Rådgivernes navne tilføjes bagefter fra kataloget (RLS: kunden kan ikke læse rådgivernes User-rækker)
+          advisors: { select: { advisorId: true, pricePerMeetingDkk: true, isLead: true } },
         },
       },
     },
@@ -64,7 +67,7 @@ export const EXPORT_USER_SELECT = {
       pricePerMeetingDkk: true,
       availabilityRules: { select: { weekday: true, startMinute: true, endMinute: true } },
       availabilityBlocks: { select: { startsAt: true, endsAt: true, reason: true } },
-      tags: { select: { tag: { select: { name: true, kind: true } } } },
+      // Tags (også interne admin-tags, som personen har ret til at se i eksporten) hentes i systemkontekst, se nedenfor
       // Rådgiverens pladser i boards, inkl. om vedkommende er ansvarlig rådgiver (uden kundedata)
       boards: { select: { isLead: true, pricePerMeetingDkk: true, subscription: { select: { status: true, createdAt: true } } } },
     },
@@ -78,36 +81,62 @@ export const EXPORT_MEETING_SELECT = {
   status: true,
   cancelledAt: true,
   createdAt: true,
-  participants: { select: { addedAt: true, user: { select: { name: true, role: true } } } },
+  // Deltagernes navn og rolle tilføjes bagefter fra kataloget (RLS: kun navn/rolle på mødekolleger)
+  participants: { select: { userId: true, addedAt: true } },
   transcript: { select: { text: true, summary: true, segments: true, language: true, createdAt: true } },
 } satisfies Prisma.MeetingSelect;
 
+/**
+ * RLS: kontoen, møderne og notifikationsloggen læses som brugeren selv (egne rækker). Det, der hører til personen via
+ * e-mailen (ufærdige tilmeldinger, leadet og samtykker fra før kontoen), egne audit-rækker og egne tags (også interne)
+ * er ikke synlige for brugeren selv – de hentes i systemkontekst, kun for netop denne bruger og e-mail («gdpr.export»).
+ */
 export async function buildDataExport(user: { id: string; email: string }) {
-  const [profile, meetings, auditLog, onboardingSessions, notificationLog, marketingConsents, lead] = await Promise.all([
+  const [profile, rawMeetings, notificationLog, personal] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: EXPORT_USER_SELECT }),
     prisma.meeting.findMany({ where: { participants: { some: { userId: user.id } } }, select: EXPORT_MEETING_SELECT, orderBy: { startsAt: "asc" } }),
-    prisma.auditLog.findMany({ where: { userId: user.id }, select: { action: true, entity: true, entityId: true, detail: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
-    // Eventuelle ufuldendte tilmeldinger med samme e-mail (tokenHash udelades)
-    prisma.onboardingSession.findMany({
-      where: { data: { path: ["contact", "email"], equals: user.email } },
-      select: { step: true, data: true, answers: true, suggestedBoard: true, createdAt: true, expiresAt: true },
-    }),
     prisma.notificationLog.findMany({
       where: { recipientUserId: user.id },
       select: { trigger: true, templateKey: true, channel: true, recipientAddress: true, status: true, subject: true, preview: true, error: true, scheduledFor: true, sentAt: true, createdAt: true },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.marketingConsent.findMany({
-      where: { OR: [{ userId: user.id }, { email: { equals: user.email, mode: "insensitive" } }] },
-      select: { email: true, phone: true, emailConsent: true, smsConsent: true, consentedAt: true, text: true, textVersion: true, source: true, ipAddress: true, userAgent: true, emailWithdrawnAt: true, smsWithdrawnAt: true },
-      orderBy: { consentedAt: "asc" },
-    }),
-    prisma.lead.findUnique({
-      where: { email: user.email.toLowerCase() },
-      select: { email: true, name: true, phone: true, step: true, source: true, createdAt: true, lastActivityAt: true, convertedAt: true },
-    }),
+    withSystemContext("gdpr.export", () =>
+      Promise.all([
+        prisma.auditLog.findMany({ where: { userId: user.id }, select: { action: true, entity: true, entityId: true, detail: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+        // Eventuelle ufuldendte tilmeldinger med samme e-mail (tokenHash udelades)
+        prisma.onboardingSession.findMany({
+          where: { data: { path: ["contact", "email"], equals: user.email } },
+          select: { step: true, data: true, answers: true, suggestedBoard: true, createdAt: true, expiresAt: true },
+        }),
+        prisma.marketingConsent.findMany({
+          where: { OR: [{ userId: user.id }, { email: { equals: user.email, mode: "insensitive" } }] },
+          select: { email: true, phone: true, emailConsent: true, smsConsent: true, consentedAt: true, text: true, textVersion: true, source: true, ipAddress: true, userAgent: true, emailWithdrawnAt: true, smsWithdrawnAt: true },
+          orderBy: { consentedAt: "asc" },
+        }),
+        prisma.lead.findUnique({
+          where: { email: user.email.toLowerCase() },
+          select: { email: true, name: true, phone: true, step: true, source: true, createdAt: true, lastActivityAt: true, convertedAt: true },
+        }),
+        prisma.advisorTag.findMany({ where: { advisorId: user.id }, select: { tag: { select: { name: true, kind: true } } } }),
+      ]),
+    ),
   ]);
-  const { mfaEnabledAt, trustedDevices, ...rest } = profile;
+  const [auditLog, onboardingSessions, marketingConsents, lead, tags] = personal;
+  const subs = profile.customerProfile?.subscriptions ?? [];
+  const names = await userDirectory([...subs.flatMap((s) => s.advisors.map((a) => a.advisorId)), ...rawMeetings.flatMap((m) => m.participants.map((p) => p.userId))]);
+  const customerProfile = profile.customerProfile && {
+    ...profile.customerProfile,
+    subscriptions: subs.map((s) => ({
+      ...s,
+      advisors: s.advisors.map(({ advisorId, ...a }) => ({ ...a, advisor: { user: { name: nameOf(names, advisorId, "") } } })),
+    })),
+  };
+  const meetings = rawMeetings.map((m) => ({
+    ...m,
+    participants: m.participants.map(({ userId, addedAt }) => ({ addedAt, user: { name: nameOf(names, userId, ""), role: names.get(userId)?.role ?? null } })),
+  }));
+  const advisorProfile = profile.advisorProfile && { ...profile.advisorProfile, tags };
+  const { mfaEnabledAt, trustedDevices, ...rest } = { ...profile, customerProfile, advisorProfile };
   const twoFactor = { enabled: mfaEnabledAt !== null, enabledAt: mfaEnabledAt, trustedDevices };
   return { exportedAt: new Date().toISOString(), user: rest, twoFactor, profilePhoto: profilePhotoInfo(user.id, profile.advisorProfile), meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog };
 }

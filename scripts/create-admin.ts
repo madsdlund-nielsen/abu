@@ -11,6 +11,7 @@ import "./owner-db-env"; // FØRST: kør som ejeren (DATABASE_URL_MIGRATE), før
 import { createInterface } from "node:readline";
 import { createAdminInvite, CREATE_ADMIN_USAGE, resolveCreateAdminArgs } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";
+import { withSystemContext } from "../src/lib/db-context";
 import { getEnv } from "../src/lib/env";
 
 async function main() {
@@ -30,7 +31,8 @@ async function main() {
     process.exitCode = 2;
     return;
   }
-  const r = await createAdminInvite(prisma, args, getEnv().APP_URL);
+  // RLS: scriptet kører som ejeren og i systemkontekst (der findes ingen administrator at give rettigheden endnu)
+  const r = await withSystemContext("admin.bootstrap", () => createAdminInvite(prisma, args, getEnv().APP_URL));
   if (!r.ok) {
     console.error(r.error);
     process.exitCode = 1;

@@ -98,15 +98,15 @@ export async function createAdminInvite(
   // En deaktiveret administrator genaktiveres (nødprocedure via serveren)
   if (user.deactivatedAt) user = await db.user.update({ where: { id: user.id }, data: { deactivatedAt: null } });
   if (args.resetMfa) {
-    await db.$transaction([
-      db.user.update({
+    await db.$transaction(async (tx) => {
+      await tx.user.update({
         where: { id: user.id },
         data: { mfaEnabledAt: null, mfaSecretEnc: null, mfaKeyId: null, mfaPendingSecretEnc: null, mfaPendingCreatedAt: null, mfaLastUsedStep: null, mfaFailedCount: 0, mfaLastFailedAt: null },
-      }),
-      db.mfaRecoveryCode.deleteMany({ where: { userId: user.id } }),
-      db.trustedDevice.deleteMany({ where: { userId: user.id } }),
-      db.session.deleteMany({ where: { userId: user.id } }),
-    ]);
+      });
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId: user.id } });
+      await tx.trustedDevice.deleteMany({ where: { userId: user.id } });
+      await tx.session.deleteMany({ where: { userId: user.id } });
+    });
     await db.auditLog.create({ data: { userId: null, action: "admin.bootstrap_mfa_reset", entity: "User", entityId: user.id } });
   }
   const purpose = user.passwordHash ? "RESET" : "INVITE";

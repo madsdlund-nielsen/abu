@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
+import { withSystemContext } from "@/lib/db-context";
 import { getClientIp } from "@/lib/client-ip";
 import { getEnv } from "@/lib/env";
 import { parseIncomingStop, parseStatusEvents } from "@/lib/messaging/inmobile";
@@ -31,20 +32,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ugyldig JSON" }, { status: 400 });
   }
   // Kun kendte beskeder (vores id eller udbyderens id på en sendt besked) kan opdateres
-  const events = parseStatusEvents(payload).slice(0, MAX_STATUS_EVENTS);
-  const updated = events.length ? await applyDeliveryStatus(events) : 0;
-  const stopFrom = parseIncomingStop(payload);
-  let stopped = false;
-  if (stopFrom) {
-    const phone = toE164(stopFrom);
-    // STOP kun fra numre, vi kender – ellers kunne en forfalsket besked afmelde vilkårlige numre
-    if (phone && (await isKnownSmsNumber(phone))) {
-      await applyUnsubscribe("SMS", phone);
-      await audit(null, "notification.sms_stop", "Notification", "SMS", maskPhone(phone));
-      stopped = true;
-    } else {
-      console.warn(`[webhook:inmobile] STOP fra ukendt nummer ignoreret (${phone ? maskPhone(phone) : "ugyldigt"})`);
+  // RLS: først efter godkendt hemmelighed – statusrapporter og STOP har ingen bruger (systemkontekst)
+  const { updated, stopped } = await withSystemContext("webhooks.inmobile", async () => {
+    const events = parseStatusEvents(payload).slice(0, MAX_STATUS_EVENTS);
+    const updated = events.length ? await applyDeliveryStatus(events) : 0;
+    const stopFrom = parseIncomingStop(payload);
+    let stopped = false;
+    if (stopFrom) {
+      const phone = toE164(stopFrom);
+      if (phone && (await isKnownSmsNumber(phone))) {
+        await applyUnsubscribe("SMS", phone);
+        await audit(null, "notification.sms_stop", "Notification", "SMS", maskPhone(phone));
+        stopped = true;
+      } else {
+        console.warn(`[webhook:inmobile] STOP fra ukendt nummer ignoreret (${phone ? maskPhone(phone) : "ugyldigt"})`);
+      }
     }
-  }
+    return { updated, stopped };
+  });
   return NextResponse.json({ updated, stop: stopped });
 }

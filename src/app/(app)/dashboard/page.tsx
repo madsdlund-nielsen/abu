@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
 import { periodBounds } from "@/lib/quota";
 import { getCustomerSubscription } from "@/lib/subscriptions";
+import { userDirectory } from "@/lib/user-directory";
 import { formatDate } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Overblik" };
@@ -23,17 +24,19 @@ export default async function Dashboard({ searchParams }: { searchParams: SP }) 
 
   const upcoming = await prisma.meeting.findMany({
     where: { participants: { some: { userId: user.id } }, status: "BOOKED", endsAt: { gt: new Date() } },
-    include: { participants: { include: { user: true } }, subscription: { include: { customer: true, advisors: { where: { isLead: true }, select: { advisorId: true } } } } },
+    include: { participants: true, subscription: { include: { customer: true, advisors: { where: { isLead: true }, select: { advisorId: true } } } } },
     orderBy: { startsAt: "asc" },
     take: 5,
   });
+  // RLS: deltagernes navn og rolle fra kataloget (ikke deres User-rækker)
+  const people = await userDirectory(upcoming.flatMap((m) => m.participants.map((p) => p.userId)));
   const rows = upcoming.map((m) => ({
     id: m.id,
     startsAt: m.startsAt,
     status: m.status,
     who:
       user.role === "CUSTOMER"
-        ? m.participants.filter((p) => p.user.role === "ADVISOR").map((p) => p.user.name).join(", ")
+        ? m.participants.map((p) => people.get(p.userId)).filter((p) => p?.role === "ADVISOR").map((p) => p!.name).join(", ")
         : `${m.subscription.customer.companyName}${m.subscription.advisors.some((a) => a.advisorId === user.id) ? " · du er ansvarlig rådgiver" : ""}`,
   }));
 

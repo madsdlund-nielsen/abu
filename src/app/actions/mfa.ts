@@ -7,6 +7,7 @@ import { getSessionContext, isMfaFresh, requireSession, type SessionContext } fr
 import { getClientIp } from "@/lib/client-ip";
 import { safeNextPath } from "@/lib/consent";
 import { prisma } from "@/lib/db";
+import { withSystemContext } from "@/lib/db-context";
 import type { FormState } from "@/lib/form-state";
 import { confirmEnrollment, disableMfa, regenerateRecoveryCodes, revokeTrustedDevice, revokeTrustedDevices, verifySecondFactor } from "@/lib/mfa/service";
 import { DEVICE_COOKIE } from "@/lib/mfa/trusted-device";
@@ -59,7 +60,8 @@ export async function confirmMfaSetupAction(_prev: MfaCodesState, formData: Form
   if (ctx.user.mfaEnabledAt) redirect("/account#totrin");
   const r = await confirmEnrollment(ctx.user.id, str(formData, "code"), await getClientIp());
   if (!r.ok) return { error: r.error, at: Date.now() };
-  await prisma.session.update({ where: { id: ctx.session.id }, data: { mfaVerifiedAt: new Date() } });
+  // Auth-internt (RLS): sessioner skrives kun i systemkontekst
+  await withSystemContext("auth.mfa_enrollment", () => prisma.session.update({ where: { id: ctx.session.id }, data: { mfaVerifiedAt: new Date() }, select: { id: true } }));
   return { ok: "Totrinsbekræftelse er slået til.", codes: r.codes, at: Date.now() };
 }
 

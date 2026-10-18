@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { NotificationChannel } from "@prisma/client";
 import { prisma } from "./db";
 import { getEnv } from "./env";
@@ -19,14 +20,17 @@ export interface ConsentProof {
   userAgent?: string | null;
 }
 
-/** Opretter/opdaterer leadet for en e-mail og registrerer eller trækker samtykket tilbage efter afkrydsningen. */
+/**
+ * Opretter/opdaterer leadet for en e-mail og registrerer eller trækker samtykket tilbage efter afkrydsningen.
+ * RLS: kræver en igangværende tilmelding (onboarding-cookien). Leadet oprettes/opdateres af `rls.capture_onboarding_lead`
+ * (token-scoped: kun knyttet til kalderens egen tilmelding, og kun id'et returneres); samtykket skrives derefter af anon
+ * selv – politikkerne tillader det kun for egen tilmeldings lead.
+ */
 export async function upsertLead(opts: { name: string; email: string; consent: boolean; proof: ConsentProof }): Promise<string> {
   const email = opts.email.trim().toLowerCase();
-  const lead = await prisma.lead.upsert({
-    where: { email },
-    update: { name: opts.name, lastActivityAt: new Date() },
-    create: { email, name: opts.name },
-  });
+  const [captured] = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT rls.capture_onboarding_lead(${randomUUID()}, ${email}, ${opts.name}, ${new Date()}::timestamp(3)) AS id`;
+  const lead = await prisma.lead.findUniqueOrThrow({ where: { id: captured.id }, select: { id: true, phone: true } });
   const active = await prisma.marketingConsent.findFirst({
     where: { leadId: lead.id, OR: [{ emailConsent: true, emailWithdrawnAt: null }, { smsConsent: true, smsWithdrawnAt: null }] },
   });

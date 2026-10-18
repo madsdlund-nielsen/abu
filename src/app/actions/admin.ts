@@ -130,10 +130,10 @@ export async function updateAdvisorProfileByAdminAction(_prev: FormState, formDa
   const before = { title: user.advisorProfile.title, bio: user.advisorProfile.bio, phone: user.phone };
   const changed = (Object.keys(before) as (keyof typeof before)[]).filter((k) => before[k] !== d[k]);
   if (changed.length === 0) return { ok: "Ingen ændringer at gemme.", values };
-  await prisma.$transaction([
-    prisma.user.update({ where: { id }, data: { phone: d.phone } }),
-    prisma.advisorProfile.update({ where: { userId: id }, data: { title: d.title, bio: d.bio } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id }, data: { phone: d.phone } });
+    await tx.advisorProfile.update({ where: { userId: id }, data: { title: d.title, bio: d.bio } });
+  });
   await audit(admin.id, "advisor.profile.update", "User", id, `Felter: ${changed.join(",")}`);
   revalidatePath("/admin/advisors");
   revalidatePath(`/admin/advisors/${id}`);

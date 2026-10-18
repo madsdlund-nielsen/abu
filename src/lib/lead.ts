@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { audit } from "./audit";
 import { prisma } from "./db";
+import { userDirectory } from "./user-directory";
 
 /**
  * Ansvarlig rådgiver (lead) pr. board (ejerens beslutning 18.10.2026).
@@ -125,19 +126,20 @@ export async function getLeadTagId(db: Db = prisma): Promise<string> {
   return created.id;
 }
 
-/** Hvilke af rådgiverne kan være ansvarlige (lead-tag og aktive)? */
+/**
+ * Hvilke af rådgiverne kan være ansvarlige (lead-tag og aktive)? RLS: lead-tagget er et internt admin-tag, som kun
+ * admin/system kan se – booleanen beregnes derfor af `rls.lead_eligible_ids` (SECURITY DEFINER), som kun returnerer id'erne.
+ */
 export async function leadEligibleIds(advisorIds: readonly string[], db: Db = prisma): Promise<Set<string>> {
   if (advisorIds.length === 0) return new Set();
-  const tagId = await getLeadTagId(db);
-  const rows = await db.advisorTag.findMany({ where: { tagId, advisorId: { in: [...advisorIds] }, advisor: { active: true } }, select: { advisorId: true } });
-  return new Set(rows.map((r) => r.advisorId));
+  const rows = await db.$queryRaw<{ id: string }[]>`SELECT id FROM rls.lead_eligible_ids(${[...advisorIds]}::text[]) AS id`;
+  return new Set(rows.map((r) => r.id));
 }
 
 /** Alle aktive rådgivere med lead-tagget. */
 export async function allLeadEligibleIds(db: Db = prisma): Promise<Set<string>> {
-  const tagId = await getLeadTagId(db);
-  const rows = await db.advisorTag.findMany({ where: { tagId, advisor: { active: true } }, select: { advisorId: true } });
-  return new Set(rows.map((r) => r.advisorId));
+  const rows = await db.$queryRaw<{ id: string }[]>`SELECT id FROM rls.lead_eligible_ids(NULL::text[]) AS id`;
+  return new Set(rows.map((r) => r.id));
 }
 
 async function lockLeadAssignment(tx: Prisma.TransactionClient) {
@@ -156,25 +158,25 @@ export interface LeadAssignment {
  */
 export async function assignLeadTx(tx: Prisma.TransactionClient, subscriptionId: string, opts: { keep?: boolean } = {}): Promise<LeadAssignment> {
   await lockLeadAssignment(tx);
-  const rows = await tx.subscriptionAdvisor.findMany({
-    where: { subscriptionId },
-    select: { advisorId: true, isLead: true, pricePerMeetingDkk: true, advisor: { select: { user: { select: { name: true } } } } },
-  });
+  const rows = await tx.subscriptionAdvisor.findMany({ where: { subscriptionId }, select: { advisorId: true, isLead: true, pricePerMeetingDkk: true } });
   const previousLeadId = rows.find((r) => r.isLead)?.advisorId ?? null;
   const eligible = await leadEligibleIds(rows.map((r) => r.advisorId), tx);
   if ((opts.keep ?? true) && previousLeadId && eligible.has(previousLeadId)) return { leadId: previousLeadId, previousLeadId, changed: false };
 
   const ids = rows.filter((r) => eligible.has(r.advisorId)).map((r) => r.advisorId);
-  const live = { subscription: { status: { in: [...LIVE_STATUSES] } }, subscriptionId: { not: subscriptionId } };
-  const [leadRows, seatRows] = await Promise.all([
-    tx.subscriptionAdvisor.groupBy({ by: ["advisorId"], where: { ...live, advisorId: { in: ids }, isLead: true }, _count: { _all: true } }),
-    tx.subscriptionAdvisor.groupBy({ by: ["advisorId"], where: { ...live, advisorId: { in: ids } }, _count: { _all: true } }),
+  // RLS: kunden ser ikke andre kunders boards. Fordelingen (antal ansvarsroller/pladser i levende boards, ekskl. dette)
+  // kommer fra `rls.advisor_lead_load`, som kun returnerer tallene for netop boardets rådgivere; navnene fra kataloget.
+  const [load, names] = await Promise.all([
+    ids.length
+      ? tx.$queryRaw<{ advisor_id: string; lead_count: number; seat_count: number }[]>`SELECT advisor_id, lead_count, seat_count FROM rls.advisor_lead_load(${ids}::text[], ${subscriptionId})`
+      : Promise.resolve([]),
+    userDirectory(ids, tx),
   ]);
-  const count = (list: typeof leadRows, id: string) => list.find((r) => r.advisorId === id)?._count._all ?? 0;
+  const count = (id: string, key: "lead_count" | "seat_count") => Number(load.find((r) => r.advisor_id === id)?.[key] ?? 0);
   const leadId = pickLead(
     rows
       .filter((r) => eligible.has(r.advisorId))
-      .map((r) => ({ id: r.advisorId, name: r.advisor.user.name, priceDkk: r.pricePerMeetingDkk, leadCount: count(leadRows, r.advisorId), seatCount: count(seatRows, r.advisorId) })),
+      .map((r) => ({ id: r.advisorId, name: names.get(r.advisorId)?.name ?? "", priceDkk: r.pricePerMeetingDkk, leadCount: count(r.advisorId, "lead_count"), seatCount: count(r.advisorId, "seat_count") })),
   );
   if (leadId === previousLeadId) return { leadId, previousLeadId, changed: false };
   await tx.subscriptionAdvisor.updateMany({ where: { subscriptionId, isLead: true }, data: { isLead: false } });

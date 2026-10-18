@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { MeetingStatus, Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getEnv } from "./env";
 import { meetingEvents } from "./notifications/service";
@@ -15,26 +15,32 @@ export class BookingError extends Error {}
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
+/**
+ * Regler, fravær og optagne tider for rådgiverne i perioden. RLS: en kunde ser kun regler/fravær for rådgiverne i sit
+ * eget board, og rådgivernes øvrige møder (med andre kunder) kun som start/slut via `rls.advisor_busy` – uden mødeid'er,
+ * kunder eller indhold. Admin ser alle.
+ */
 export async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Date, excludeMeetingId?: string): Promise<AdvisorAvailability[]> {
   const margin = 24 * 3_600_000;
-  const [rules, blocks, meetings] = await Promise.all([
+  const busyFrom = new Date(from.getTime() - margin);
+  const busyTo = new Date(to.getTime() + margin);
+  const [rules, blocks, busy] = await Promise.all([
     tx.availabilityRule.findMany({ where: { advisorId: { in: advisorIds } } }),
     tx.availabilityBlock.findMany({
       where: { advisorId: { in: advisorIds }, endsAt: { gt: from }, startsAt: { lt: to } },
     }),
-    tx.meetingParticipant.findMany({
-      where: {
-        userId: { in: advisorIds },
-        meeting: { ...(excludeMeetingId ? { id: { not: excludeMeetingId } } : {}), status: { in: ADVISOR_BLOCKING_STATUSES }, endsAt: { gt: new Date(from.getTime() - margin) }, startsAt: { lt: new Date(to.getTime() + margin) } },
-      },
-      select: { userId: true, meeting: { select: { startsAt: true, endsAt: true } } },
-    }),
+    advisorIds.length
+      ? tx.$queryRaw<{ advisor_id: string; starts_at: Date; ends_at: Date; status: MeetingStatus }[]>`
+          SELECT advisor_id, starts_at, ends_at, status::text AS status
+            FROM rls.advisor_busy(${advisorIds}::text[], ${busyFrom}::timestamp(3), ${busyTo}::timestamp(3), ${excludeMeetingId ?? null}::text)`
+      : Promise.resolve([]),
   ]);
+  const meetings = busy.filter((m) => ADVISOR_BLOCKING_STATUSES.includes(m.status));
   return advisorIds.map((id) => ({
     id,
     rules: rules.filter((r) => r.advisorId === id),
     blocks: blocks.filter((b) => b.advisorId === id),
-    meetings: meetings.filter((m) => m.userId === id).map((m) => m.meeting),
+    meetings: meetings.filter((m) => m.advisor_id === id).map((m) => ({ startsAt: m.starts_at, endsAt: m.ends_at })),
   }));
 }
 

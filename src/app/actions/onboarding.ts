@@ -14,6 +14,7 @@ import { rateLimit, rateLimitIp } from "@/lib/rate-limit";
 import { startCheckout } from "@/lib/checkout";
 import { lookupCvr } from "@/lib/cvr";
 import { prisma } from "@/lib/db";
+import { withSystemContext } from "@/lib/db-context";
 import { suggestBoard } from "@/lib/matching";
 import { resolveBoard } from "@/lib/onboarding/board";
 import { loadActiveQuestions, loadCatalog, selectedMatchAnswers, toMatchAdvisors } from "@/lib/onboarding/catalog";
@@ -37,10 +38,21 @@ import { formValues, type FormState } from "@/lib/form-state";
  */
 async function notifyExistingAccount(userId: string, email: string) {
   if (!(await rateLimit(`account-exists:${email}`, 1, 24 * 3_600_000))) return;
-  after(async () => {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (user) await accountEvents.alreadyExists(user).catch((e) => console.error("[onboarding] konto-findes-mail fejlede", e instanceof Error ? e.message : e));
-  });
+  after(() =>
+    withSystemContext("onboarding.account_exists", async () => {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (user) await accountEvents.alreadyExists(user).catch((e) => console.error("[onboarding] konto-findes-mail fejlede", e instanceof Error ? e.message : e));
+    }),
+  );
+}
+
+/**
+ * Har e-mailen allerede en konto? Auth-internt opslag før login (RLS: anon kan ikke læse User) – svaret vises aldrig
+ * (M-1), det afgør kun, om leadet gemmes, eller kontoejeren får en neutral mail.
+ */
+async function accountIdForEmail(email: string): Promise<string | null> {
+  const u = await withSystemContext("onboarding.account_exists", () => prisma.user.findUnique({ where: { email }, select: { id: true } }));
+  return u?.id ?? null;
 }
 
 const BASE = "/kom-i-gang";
@@ -62,11 +74,13 @@ export async function saveContactAction(_prev: FormState, formData: FormData): P
   const parsed = contactSchema.safeParse({ name: formData.get("name"), email: formData.get("email") });
   if (!parsed.success) return { error: parsed.error.issues[0].message, values, at: Date.now() };
   const contact = parsed.data;
-  const exists = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
+  const existingAccountId = await accountIdForEmail(contact.email);
+  // RLS: tilmeldingen (og dermed cookien) skal findes, før leadet knyttes til den (rls.capture_onboarding_lead)
+  const s = (await getOnboardingSession()) ?? (await createOnboardingSession({ step: 1, data: { contact } }));
   let leadId: string | null = null;
-  if (exists) {
+  if (existingAccountId) {
     // Ingen forskel på siden (M-1): tilmeldingen fortsætter, og kontoejeren får en neutral e-mail
-    await notifyExistingAccount(exists.id, contact.email);
+    await notifyExistingAccount(existingAccountId, contact.email);
   } else {
     // Lead gemmes straks (også hvis tilmeldingen aldrig gøres færdig). Samtykket er aktivt (aldrig forudkrydset)
     // og gemmes med den præcise tekst og version, personen så.
@@ -79,12 +93,7 @@ export async function saveContactAction(_prev: FormState, formData: FormData): P
       proof: { ...proof, ipAddress: await getClientIp(), userAgent: h.get("user-agent") },
     });
   }
-  const s = await getOnboardingSession();
-  if (s) {
-    await updateOnboardingSession(s.id, { step: Math.max(s.step, 2), data: { ...s.data, contact }, leadId });
-  } else {
-    await createOnboardingSession({ step: 2, data: { contact }, leadId });
-  }
+  await updateOnboardingSession(s.id, { step: Math.max(s.step, 2), data: { ...s.data, contact }, leadId });
   if (leadId) await prisma.lead.updateMany({ where: { id: leadId, step: { lt: 2 } }, data: { step: 2 } });
   redirect(to(2));
 }
@@ -213,10 +222,10 @@ export async function completeOnboardingAction(formData: FormData) {
   const board = await resolveBoard(chosen.advisorIds, chosen.weeks);
   if ("error" in board) fail(5, board.error);
   const resolved = board as Exclude<typeof board, { error: string }>;
-  const existing = await prisma.user.findUnique({ where: { email: contact.email }, select: { id: true } });
-  if (existing) {
+  const existingId = await accountIdForEmail(contact.email);
+  if (existingId) {
     // Opret ikke en ny konto, og sig ikke, at e-mailen er kendt (M-1): samme neutrale besked som ellers sendes på mail
-    await notifyExistingAccount(existing.id, contact.email);
+    await notifyExistingAccount(existingId, contact.email);
     await deleteOnboardingSession(s.id);
     redirect("/login?ok=" + encodeURIComponent("Tjek din e-mail. Vi har sendt dig en besked om, hvordan du fortsætter."));
   }
@@ -235,15 +244,19 @@ export async function completeOnboardingAction(formData: FormData) {
   const companyName = info?.name ?? manual?.name ?? "";
   const address = info ? [info.address, `${info.zip} ${info.city}`.trim()].filter(Boolean).join(", ") : (manual?.address ?? "");
 
-  const user = await prisma.user.create({
+  const passwordHash = await hashPassword(parsed.data!.password);
+  const recordingConsent = recordingConsentNow((await currentConsent("recording")).version);
+  // Kontooprettelse er auth-internt (RLS): der findes endnu ingen bruger at give rettigheden – systemkontekst. Resten
+  // (konvertering af leadet, betaling) kører som den nye kunde, når sessionen er oprettet.
+  const user = await withSystemContext("onboarding.signup", () => prisma.user.create({
     data: {
       email: contact.email,
       name: contact.name,
       phone: company.phone,
       role: "CUSTOMER",
-      passwordHash: await hashPassword(parsed.data!.password),
+      passwordHash,
       consentAt: new Date(),
-      ...recordingConsentNow((await currentConsent("recording")).version),
+      ...recordingConsent,
       customerProfile: {
         create: {
           companyName,
@@ -256,7 +269,7 @@ export async function completeOnboardingAction(formData: FormData) {
         },
       },
     },
-  });
+  }));
   await createSession(user.id);
   await convertLead(s.leadId, user.id);
   await audit(user.id, "auth.signup", "User", user.id);

@@ -13,21 +13,21 @@ export interface RateLimitStore {
   reset(key: string): Promise<void>;
 }
 
+/**
+ * RLS: RateLimit er en systemtabel. Alle kontekster (også anon før login) tæller via SECURITY DEFINER-funktionerne
+ * `rls.rate_limit_hit`/`rls.rate_limit_reset` (migrationen 20261020090000_rls_policies), som kun rører den ene nøgle.
+ */
 export class PostgresRateLimitStore implements RateLimitStore {
   async hit(key: string, windowMs: number, now: Date) {
     const resetAt = new Date(now.getTime() + windowMs);
     // Atomisk: opret, tæl op eller start et nyt vindue i én sætning (ingen race mellem instanser)
-    const rows = await prisma.$queryRaw<{ count: number; resetAt: Date }[]>`
-      INSERT INTO "RateLimit" ("key", "count", "resetAt") VALUES (${key}, 1, ${resetAt})
-      ON CONFLICT ("key") DO UPDATE SET
-        "count" = CASE WHEN "RateLimit"."resetAt" <= ${now} THEN 1 ELSE "RateLimit"."count" + 1 END,
-        "resetAt" = CASE WHEN "RateLimit"."resetAt" <= ${now} THEN EXCLUDED."resetAt" ELSE "RateLimit"."resetAt" END
-      RETURNING "count", "resetAt"`;
-    return { count: Number(rows[0].count), resetAt: rows[0].resetAt };
+    const rows = await prisma.$queryRaw<{ hits: number; reset_until: Date }[]>`
+      SELECT hits, reset_until FROM rls.rate_limit_hit(${key}, ${resetAt}::timestamp(3), ${now}::timestamp(3))`;
+    return { count: Number(rows[0].hits), resetAt: rows[0].reset_until };
   }
 
   async reset(key: string) {
-    await prisma.rateLimit.deleteMany({ where: { key } });
+    await prisma.$executeRaw`SELECT rls.rate_limit_reset(${key})`;
   }
 }
 
@@ -64,7 +64,7 @@ export async function clearRateLimit(key: string): Promise<void> {
   await store.reset(storeKey(key));
 }
 
-/** Sletter udløbne rækker (jobkøen, dagligt). */
+/** Sletter udløbne rækker (jobkøen, dagligt – systemkontekst). */
 export async function cleanupRateLimits(now = new Date()): Promise<number> {
   const r = await prisma.rateLimit.deleteMany({ where: { resetAt: { lt: new Date(now.getTime() - 3_600_000) } } });
   return r.count;

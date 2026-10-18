@@ -17,6 +17,7 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { visibleAvatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
+import { userDirectory } from "@/lib/user-directory";
 import { LATE_CANCEL_HOURS } from "@/lib/quota";
 import { formatDateTime, formatTime } from "@/lib/time";
 import { MOCK_ROOM_PREFIX } from "@/lib/video/mock";
@@ -30,16 +31,32 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   const user = await requireUser();
   const { id } = await params;
   const { ok, err } = await flashFrom(searchParams);
-  const meeting = await prisma.meeting.findUnique({
+  const row = await prisma.meeting.findUnique({
     where: { id },
     include: {
-      participants: { include: { user: { include: { advisorProfile: { select: { active: true, photoKey: true, photoUpdatedAt: true } } } } } },
-      subscription: { include: { customer: { include: { user: true } }, advisors: { where: { isLead: true }, include: { advisor: { include: { user: { select: { name: true } } } } } } } },
+      participants: true,
+      subscription: { include: { customer: true, advisors: { where: { isLead: true }, select: { advisorId: true } } } },
       recordings: { orderBy: { createdAt: "desc" } },
       transcript: true,
     },
   });
-  if (!meeting || !canAccessMeeting(user, meeting.participants.map((p) => p.userId))) notFound();
+  if (!row || !canAccessMeeting(user, row.participants.map((p) => p.userId))) notFound();
+  // RLS: navn/rolle på deltagere, kunde og ansvarlig fra kataloget (ikke deres User-rækker); fotos fra rådgiverprofilerne
+  const ids = row.participants.map((p) => p.userId);
+  const [people, profiles] = await Promise.all([
+    userDirectory([...ids, row.subscription.customerId, ...row.subscription.advisors.map((a) => a.advisorId)]),
+    prisma.advisorProfile.findMany({ where: { userId: { in: ids } }, select: { userId: true, active: true, photoKey: true, photoUpdatedAt: true } }),
+  ]);
+  const person = (userId: string) => ({ name: people.get(userId)?.name ?? "", role: people.get(userId)?.role ?? null });
+  const meeting = {
+    ...row,
+    participants: row.participants.map((p) => ({ ...p, user: { ...person(p.userId), advisorProfile: profiles.find((x) => x.userId === p.userId) ?? null } })),
+    subscription: {
+      ...row.subscription,
+      customer: { ...row.subscription.customer, user: person(row.subscription.customerId) },
+      advisors: row.subscription.advisors.map((a) => ({ ...a, advisor: { user: person(a.advisorId) } })),
+    },
+  };
 
   const uploadDecision = recordingUploadDecision(meeting, new Date());
   const isStaff = user.role === "ADMIN" || user.role === "ADVISOR";

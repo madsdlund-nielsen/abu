@@ -2,6 +2,7 @@ import type { Prisma, TrustedDevice, User } from "@prisma/client";
 import { raiseAlert } from "../alerts";
 import { audit } from "../audit";
 import { prisma } from "../db";
+import { withSystemContext } from "../db-context";
 import { getEnv } from "../env";
 import { isLocked, recordFailedMfa } from "../lockout";
 import { rateLimit, rateLimitIp } from "../rate-limit";
@@ -84,12 +85,23 @@ export async function remainingRecoveryCodes(userId: string): Promise<number> {
  * Verificerer en kode fra appen (eller en gendannelseskode) for en bruger med totrinsbekræftelse slået til:
  * rate limit pr. bruger og IP, kontospærring efter gentagne fejl, ±1 trin og ingen genbrug af et trin (replay – atomisk,
  * så to samtidige forsøg med samme kode ikke begge lykkes). Hemmeligheden krypteres om, hvis den bruger en gammel nøgle.
+ * Auth-internt (RLS): systemkontekst – også en MFA-ventende session skal kunne verificeres, og tællere/spærring er ikke
+ * felter, brugeren selv må skrive. `userId` kommer altid fra den aktuelle session (actions/mfa.ts).
  */
 export async function verifySecondFactor(
   userId: string,
   input: { code?: string | null; recoveryCode?: string | null },
   ctx: { ip: string; purpose: MfaPurpose; allowRecovery?: boolean },
   now = new Date(),
+): Promise<SecondFactorResult> {
+  return withSystemContext("auth.mfa_verify", () => verifySecondFactorAsSystem(userId, input, ctx, now));
+}
+
+async function verifySecondFactorAsSystem(
+  userId: string,
+  input: { code?: string | null; recoveryCode?: string | null },
+  ctx: { ip: string; purpose: MfaPurpose; allowRecovery?: boolean },
+  now: Date,
 ): Promise<SecondFactorResult> {
   const useRecovery = Boolean(input.recoveryCode?.trim()) && ctx.allowRecovery !== false;
   if (!useRecovery && !/^\d{6}$/.test(normalizeTotpCode(input.code ?? ""))) return { ok: false, error: MFA_FORMAT };
@@ -142,7 +154,10 @@ export async function verifySecondFactor(
 /** En påbegyndt opsætning (QR-koden) gælder så længe; derefter laves en ny hemmelighed. */
 export const ENROLLMENT_TTL_MS = 30 * 60_000;
 
-/** Hemmeligheden til QR-koden: genbruger en påbegyndt opsætning (så en genindlæsning ikke skifter koden), ellers en ny. */
+/**
+ * Hemmeligheden til QR-koden: genbruger en påbegyndt opsætning (så en genindlæsning ikke skifter koden), ellers en ny.
+ * Auth-internt (RLS): en admin, der skal opsætte MFA, har kun en ventende session (systemkontekst).
+ */
 export async function getOrStartEnrollment(user: Pick<User, "id" | "mfaPendingSecretEnc" | "mfaPendingCreatedAt">, now = new Date()): Promise<string> {
   if (user.mfaPendingSecretEnc && user.mfaPendingCreatedAt && now.getTime() - user.mfaPendingCreatedAt.getTime() < ENROLLMENT_TTL_MS) {
     try {
@@ -152,7 +167,9 @@ export async function getOrStartEnrollment(user: Pick<User, "id" | "mfaPendingSe
     }
   }
   const secret = generateTotpSecret();
-  await prisma.user.update({ where: { id: user.id }, data: { mfaPendingSecretEnc: sealSecret(user.id, secret).enc, mfaPendingCreatedAt: now } });
+  await withSystemContext("auth.mfa_enrollment", () =>
+    prisma.user.update({ where: { id: user.id }, data: { mfaPendingSecretEnc: sealSecret(user.id, secret).enc, mfaPendingCreatedAt: now }, select: { id: true } }),
+  );
   return secret;
 }
 
@@ -163,9 +180,13 @@ async function replaceRecoveryCodes(tx: Prisma.TransactionClient, userId: string
 
 /**
  * Bekræfter opsætningen med en gyldig kode fra appen: først nu slås totrinsbekræftelse til. Returnerer 10 nye
- * gendannelseskoder i klartekst – de vises én gang og gemmes kun som hash.
+ * gendannelseskoder i klartekst – de vises én gang og gemmes kun som hash. Auth-internt (RLS): systemkontekst.
  */
 export async function confirmEnrollment(userId: string, code: string, ip: string, now = new Date()): Promise<{ ok: true; codes: string[] } | { ok: false; error: string }> {
+  return withSystemContext("auth.mfa_enrollment", () => confirmEnrollmentAsSystem(userId, code, ip, now));
+}
+
+async function confirmEnrollmentAsSystem(userId: string, code: string, ip: string, now: Date): Promise<{ ok: true; codes: string[] } | { ok: false; error: string }> {
   if (!/^\d{6}$/.test(normalizeTotpCode(code))) return { ok: false, error: MFA_FORMAT };
   if (!(await attemptAllowed(userId, ip))) return { ok: false, error: MFA_TOO_MANY };
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -213,21 +234,28 @@ export async function regenerateRecoveryCodes(userId: string, code: string, ip: 
   const r = await verifySecondFactor(userId, { code }, { ip, purpose: "regenerate", allowRecovery: false });
   if (!r.ok) return r;
   const codes = generateRecoveryCodes();
-  await prisma.$transaction((tx) => replaceRecoveryCodes(tx, userId, codes));
+  await withSystemContext("auth.mfa_recovery_codes", () => prisma.$transaction((tx) => replaceRecoveryCodes(tx, userId, codes)));
   await audit(userId, "auth.mfa_recovery_regenerated", "User", userId);
   return { ok: true, codes };
 }
 
-/** Fjerner al MFA-data for en bruger: hemmelighed, opsætning, gendannelseskoder og betroede enheder. */
+/**
+ * Fjerner al MFA-data for en bruger: hemmelighed, opsætning, gendannelseskoder og betroede enheder. Kaldes efter en
+ * godkendt kode (brugeren selv) eller af en administrator med frisk kode. Auth-internt (RLS): gendannelseskoderne er
+ * kun tilgængelige i systemkontekst.
+ */
 export async function clearMfaData(userId: string): Promise<void> {
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: userId },
-      data: { mfaEnabledAt: null, mfaSecretEnc: null, mfaKeyId: null, mfaPendingSecretEnc: null, mfaPendingCreatedAt: null, mfaLastUsedStep: null, mfaFailedCount: 0, mfaLastFailedAt: null },
+  await withSystemContext("auth.mfa_clear", () =>
+    prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { mfaEnabledAt: null, mfaSecretEnc: null, mfaKeyId: null, mfaPendingSecretEnc: null, mfaPendingCreatedAt: null, mfaLastUsedStep: null, mfaFailedCount: 0, mfaLastFailedAt: null },
+        select: { id: true },
+      });
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId } });
+      await tx.trustedDevice.deleteMany({ where: { userId } });
     }),
-    prisma.mfaRecoveryCode.deleteMany({ where: { userId } }),
-    prisma.trustedDevice.deleteMany({ where: { userId } }),
-  ]);
+  );
 }
 
 /** Valgfri MFA (rådgiver/kunde) slås fra med en gyldig kode eller gendannelseskode. Administratorer kan ikke. */
@@ -255,23 +283,33 @@ export async function setTrustedDeviceDays(days: number): Promise<number> {
   return v;
 }
 
-/** Ny betroet enhed: tilfældigt token til cookien, kun hash i databasen. Udløbet er fast (forlænges ikke ved brug). */
+/**
+ * Ny betroet enhed: tilfældigt token til cookien, kun hash i databasen. Udløbet er fast (forlænges ikke ved brug).
+ * Auth-internt (RLS): oprettes kun lige efter en godkendt kode (completeSecondFactor), i systemkontekst.
+ */
 export async function createTrustedDevice(userId: string, meta: { userAgent: string | null; ip: string | null }, days: number, now = new Date()) {
   const token = randomToken();
-  const device = await prisma.trustedDevice.create({
-    data: { userId, tokenHash: sha256(token), label: deviceLabel(meta.userAgent), ipPrefix: ipPrefix(meta.ip), createdAt: now, expiresAt: trustedDeviceExpiry(now, days) },
-  });
+  const device = await withSystemContext("auth.trusted_device", () =>
+    prisma.trustedDevice.create({
+      data: { userId, tokenHash: sha256(token), label: deviceLabel(meta.userAgent), ipPrefix: ipPrefix(meta.ip), createdAt: now, expiresAt: trustedDeviceExpiry(now, days) },
+    }),
+  );
   await audit(userId, "auth.device_trusted", "TrustedDevice", device.id, `${device.label}; til ${device.expiresAt.toISOString()}`);
   return { token, device };
 }
 
-/** Gyldig betroet enhed for brugeren ud fra cookiens token – eller null. Opdaterer kun «senest brugt», aldrig udløbet. */
+/**
+ * Gyldig betroet enhed for brugeren ud fra cookiens token – eller null. Opdaterer kun «senest brugt», aldrig udløbet.
+ * Auth-internt (RLS): slås op ved login, før der findes en session (systemkontekst).
+ */
 export async function matchTrustedDevice(userId: string, token: string | null | undefined, now = new Date()): Promise<TrustedDevice | null> {
   if (!token) return null;
-  const device = await prisma.trustedDevice.findUnique({ where: { tokenHash: sha256(token) } });
-  if (!device || device.userId !== userId) return null;
-  if (!isTrustedDeviceValid(device, now, await getTrustedDeviceDays())) return null;
-  return prisma.trustedDevice.update({ where: { id: device.id }, data: { lastUsedAt: now } });
+  return withSystemContext("auth.trusted_device", async () => {
+    const device = await prisma.trustedDevice.findUnique({ where: { tokenHash: sha256(token) } });
+    if (!device || device.userId !== userId) return null;
+    if (!isTrustedDeviceValid(device, now, await getTrustedDeviceDays())) return null;
+    return prisma.trustedDevice.update({ where: { id: device.id }, data: { lastUsedAt: now } });
+  });
 }
 
 export async function listTrustedDevices(userId: string, now = new Date()) {

@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { withSystemContext } from "./db-context";
 
 /**
  * Driftsalarmer (M-5, L-3). Skrives altid til loggen med præfikset "[ALERT]" (til log-overvågning, fx GlitchTip/Better
@@ -22,14 +23,17 @@ export interface StoredAlert {
   message: string;
 }
 
+/** RLS: alarmer kan opstå i enhver kontekst (også en kundes request), men gemmes altid i systemkontekst. */
 export async function raiseAlert(kind: AlertKind, message: string): Promise<void> {
   console.error(`[ALERT] ${kind}: ${message}`);
   try {
     const key = `alert:${kind}`;
-    const prev = await prisma.appSetting.findUnique({ where: { key } });
-    const old = prev ? (JSON.parse(prev.value) as StoredAlert) : null;
-    const value = JSON.stringify({ kind, lastAt: new Date().toISOString(), count: (old?.count ?? 0) + 1, message } satisfies StoredAlert);
-    await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+    await withSystemContext("alerts.raise", async () => {
+      const prev = await prisma.appSetting.findUnique({ where: { key } });
+      const old = prev ? (JSON.parse(prev.value) as StoredAlert) : null;
+      const value = JSON.stringify({ kind, lastAt: new Date().toISOString(), count: (old?.count ?? 0) + 1, message } satisfies StoredAlert);
+      await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+    });
   } catch (e) {
     console.error("[ALERT] alarmen kunne ikke gemmes", e instanceof Error ? e.message : e);
   }

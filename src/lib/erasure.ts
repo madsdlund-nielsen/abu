@@ -3,6 +3,7 @@ import { raiseAlert } from "./alerts";
 import { audit } from "./audit";
 import { avatarObjectKeys } from "./avatar-url";
 import { prisma } from "./db";
+import { withSystemContext } from "./db-context";
 import { ensureLead, LIVE_STATUSES } from "./lead";
 import { revokeTrustedDevices } from "./mfa/service";
 import { deleteNotificationDataFor } from "./notifications/service";
@@ -88,7 +89,9 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
     ...customerIds.map((v) => ({ payload: { path: ["customer"], equals: v } })),
     ...meetingRefs.map((v) => ({ externalId: { startsWith: `video:${v}:` } })),
   ];
-  const webhookEvents = or.length ? (await prisma.webhookEvent.deleteMany({ where: { OR: or } })).count : 0;
+  // RLS: WebhookEvent er en systemtabel (kun webhooks og oprydning) – GDPR-sletningen af kundens payloads kører derfor i
+  // systemkontekst (admin har allerede godkendt sletningen med frisk kode, processDeletionAction)
+  const webhookEvents = or.length ? await withSystemContext("gdpr.erasure", async () => (await prisma.webhookEvent.deleteMany({ where: { OR: or } })).count) : 0;
 
   // 3b) En rådgiver forsvinder fra boards og kommende møder med kaskaden. Møder holdes altid med hele boardet, så det
   //     må ikke ske i stilhed: hvert berørt møde audit-logges, og admin får en driftsalarm + advarselslisten på forsiden.
@@ -106,7 +109,7 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
     : [];
   // Totrinsbekræftelse: betroede enheder, gendannelseskoder og sessioner (forsvinder også med kaskaden, men eksplicit her)
   await revokeTrustedDevices(userId, "account_deleted", actorId);
-  await prisma.mfaRecoveryCode.deleteMany({ where: { userId } });
+  await withSystemContext("gdpr.erasure", () => prisma.mfaRecoveryCode.deleteMany({ where: { userId } })); // kun auth-internt/system (RLS)
   await prisma.session.deleteMany({ where: { userId } });
   await prisma.user.delete({ where: { id: userId } });
   for (const s of ledSubs) await ensureLead(s.subscriptionId, "deleted", actorId);
@@ -136,7 +139,8 @@ const WEBHOOK_ROW_RETENTION_DAYS = 400;
 
 /**
  * Webhook-payloads indeholder kundedata (e-mail, CVR, telefon). Efter 30 dage fjernes payloaden; rækken (id) bevares som
- * idempotens-nøgle, til den slettes efter 400 dage.
+ * idempotens-nøgle, til den slettes efter 400 dage. Kører fra jobkøen (systemkontekst; den rå UPDATE er underlagt RLS
+ * som alt andet).
  */
 export async function cleanupWebhookPayloads(now = new Date()): Promise<{ redacted: number; deleted: number }> {
   const day = 86_400_000;

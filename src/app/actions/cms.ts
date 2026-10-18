@@ -81,7 +81,9 @@ export async function deleteQuestionAction(id: string): R {
 
 export async function reorderQuestionsAction(ids: string[]): R {
   return guard(async (adminId) => {
-    await prisma.$transaction(ids.map((id, i) => prisma.onboardingQuestion.update({ where: { id }, data: { sortOrder: (i + 1) * 10 } })));
+    await prisma.$transaction(async (tx) => {
+      for (const [i, id] of ids.entries()) await tx.onboardingQuestion.update({ where: { id }, data: { sortOrder: (i + 1) * 10 } });
+    });
     await audit(adminId, "onboarding.question.reorder", "OnboardingQuestion", "all");
     refresh();
     return { ok: true };
@@ -123,7 +125,9 @@ export async function deleteAnswerAction(id: string): R {
 
 export async function reorderAnswersAction(ids: string[]): R {
   return guard(async (adminId) => {
-    await prisma.$transaction(ids.map((id, i) => prisma.onboardingAnswer.update({ where: { id }, data: { sortOrder: (i + 1) * 10 } })));
+    await prisma.$transaction(async (tx) => {
+      for (const [i, id] of ids.entries()) await tx.onboardingAnswer.update({ where: { id }, data: { sortOrder: (i + 1) * 10 } });
+    });
     await audit(adminId, "onboarding.answer.reorder", "OnboardingAnswer", ids[0] ?? "none");
     refresh();
     return { ok: true };
@@ -221,11 +225,11 @@ export async function updateAdvisorAction(userId: string, input: { priceDkk: num
     const tagCount = await prisma.tag.count({ where: { id: { in: p.data.tagIds } } });
     const hadLeadTag = (await prisma.advisorTag.count({ where: { advisorId: userId, tag: { systemKey: LEAD_TAG_KEY } } })) > 0;
     if (tagCount !== new Set(p.data.tagIds).size) return err("Et af tagsene findes ikke.");
-    await prisma.$transaction([
-      prisma.advisorProfile.update({ where: { userId }, data: { pricePerMeetingDkk: p.data.priceDkk } }),
-      prisma.advisorTag.deleteMany({ where: { advisorId: userId, tagId: { notIn: p.data.tagIds } } }),
-      prisma.advisorTag.createMany({ data: [...new Set(p.data.tagIds)].map((tagId) => ({ advisorId: userId, tagId })), skipDuplicates: true }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.advisorProfile.update({ where: { userId }, data: { pricePerMeetingDkk: p.data.priceDkk } });
+      await tx.advisorTag.deleteMany({ where: { advisorId: userId, tagId: { notIn: p.data.tagIds } } });
+      await tx.advisorTag.createMany({ data: [...new Set(p.data.tagIds)].map((tagId) => ({ advisorId: userId, tagId })), skipDuplicates: true });
+    });
     await audit(adminId, "advisor.update", "User", userId);
     // Lead-tagget fjernet → nye ansvarlige for rådgiverens boards; tilføjet → boards uden ansvarlig kan få én
     const leadTagId = await getLeadTagId();

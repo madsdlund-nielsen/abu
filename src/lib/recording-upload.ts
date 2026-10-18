@@ -36,10 +36,12 @@ export async function prepareRecordingUpload(user: Actor, meetingId: string, siz
   if (size > MAX_RECORDING_BYTES) return { ok: false, error: "Filen er for stor (maks 500 MB)." };
 
   const since = new Date(now.getTime() - UPLOAD_TTL_SECONDS * 1000);
-  const [mine, total] = await Promise.all([
+  // RLS: rådgiveren ser kun optagelser fra egne møder – det fælles loft tælles af rls.pending_upload_total (kun tallet)
+  const [mine, totalRows] = await Promise.all([
     prisma.recording.count({ where: { status: "UPLOADING", uploadedById: user.id, createdAt: { gt: since } } }),
-    prisma.recording.count({ where: { status: "UPLOADING", createdAt: { gt: since } } }),
+    prisma.$queryRaw<{ n: number | null }[]>`SELECT rls.pending_upload_total(${since}::timestamp(3)) AS n`,
   ]);
+  const total = Number(totalRows[0]?.n ?? 0);
   if (mine >= MAX_PENDING_PER_USER || total >= MAX_PENDING_TOTAL) return { ok: false, error: "Der er allerede uploads i gang. Vent til de er færdige, og prøv igen." };
 
   const storage = getStorage();

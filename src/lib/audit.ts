@@ -8,7 +8,9 @@ import { prisma } from "./db";
  */
 export async function audit(userId: string | null, action: string, entity: string, entityId: string, detail?: string) {
   try {
-    await prisma.auditLog.create({ data: { userId, action, entity, entityId, detail: detail?.slice(0, 1000) } });
+    // createMany (ingen RETURNING): audit-loggen er append-only og kun læsbar for admin/system (RLS), så en kunde eller
+    // rådgiver må tilføje en række, men ikke få den returneret
+    await prisma.auditLog.createMany({ data: [{ userId, action, entity, entityId, detail: detail?.slice(0, 1000) }] });
   } catch (e) {
     await raiseAlert("audit_write_failed", `Audit-loggen kunne ikke skrive «${action}» (${entity}): ${e instanceof Error ? e.message.slice(0, 200) : "ukendt fejl"}`);
   }

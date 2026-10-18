@@ -58,9 +58,9 @@ export async function changePlanAction(formData: FormData) {
     console.error("[subscription] skift af plan fejlede", e);
     redirectWith(back, "err", "Planen kunne ikke ændres hos betalingsudbyderen. Prøv igen senere.");
   }
-  await prisma.$transaction([
-    prisma.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } }),
-    prisma.subscription.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } });
+    await tx.subscription.update({
       where: { id: sub.id },
       data: {
         advisorCount: board.advisors.length,
@@ -68,8 +68,8 @@ export async function changePlanAction(formData: FormData) {
         monthlyPriceDkk: board.monthlyPriceDkk,
         advisors: { create: board.advisors.map((a) => ({ advisorId: a.id, pricePerMeetingDkk: a.pricePerMeetingDkk, isLead: a.id === prevLead })) },
       },
-    }),
-  ]);
+    });
+  });
   await audit(user.id, "subscription.change_plan", "Subscription", sub.id);
   // Den ansvarlige beholder rollen, hvis vedkommende stadig er i boardet; ellers tildeles en ny automatisk
   await ensureLead(sub.id, "board_changed", user.id);
