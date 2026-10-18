@@ -6,7 +6,7 @@ import { AutoRefresh, JoinCountdown } from "@/components/join-countdown";
 import { RecordingUpload } from "@/components/recording-upload";
 import { UPLOAD_TTL_SECONDS } from "@/lib/recording-upload";
 import { RoomEmbed } from "@/components/room-embed";
-import { MeetingStatusBadge } from "@/components/ui";
+import { LeadLabel, MeetingStatusBadge } from "@/components/ui";
 import Link from "next/link";
 import { canAccessMeeting } from "@/lib/access";
 import { hasRecordingConsent } from "@/lib/consent";
@@ -32,7 +32,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
     where: { id },
     include: {
       participants: { include: { user: true } },
-      subscription: { include: { customer: { include: { user: true } } } },
+      subscription: { include: { customer: { include: { user: true } }, advisors: { where: { isLead: true }, include: { advisor: { include: { user: { select: { name: true } } } } } } } },
       recordings: { orderBy: { createdAt: "desc" } },
       transcript: true,
     },
@@ -41,6 +41,9 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
 
   const uploadDecision = recordingUploadDecision(meeting, new Date());
   const isStaff = user.role === "ADMIN" || user.role === "ADVISOR";
+  const leadRow = meeting.subscription.advisors[0];
+  const leadId = leadRow?.advisorId ?? null;
+  const leadName = leadRow?.advisor.user.name ?? null;
   const canCancel =
     meeting.status === "BOOKED" &&
     meeting.startsAt > new Date() &&
@@ -80,6 +83,13 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         <ul className="mt-3 space-y-1 text-sm">
           <li><span className="text-muted">Kunde:</span> {meeting.subscription.customer.user.name}, {meeting.subscription.customer.companyName}</li>
           <li><span className="text-muted">Rådgivere (hele boardet):</span> {advisors.map((a) => a.user.name).join(", ")}</li>
+          <li data-testid="meeting-lead">
+            {leadId === user.id ? (
+              <span className="font-semibold text-navy">Du er ansvarlig rådgiver for dette board.</span>
+            ) : (
+              <LeadLabel prefix name={leadName} />
+            )}
+          </li>
         </ul>
         <p className="mt-2 text-xs text-muted">Møderne holdes altid med hele boardet. Kan en rådgiver ikke deltage, finder vi en afløser.</p>
       </section>

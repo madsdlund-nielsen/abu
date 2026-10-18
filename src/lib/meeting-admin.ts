@@ -46,7 +46,7 @@ export async function listSubstituteCandidates(meetingId: string): Promise<Ranke
   const current = new Set(meeting.participants.map((p) => p.userId));
   const [profiles, profile] = await Promise.all([
     // Inaktive rådgivere vises også, men markeret «Inaktiv» og kan ikke vælges (QA #13)
-    prisma.advisorProfile.findMany({ where: { userId: { notIn: [...current] } }, include: { user: true, tags: true } }),
+    prisma.advisorProfile.findMany({ where: { userId: { notIn: [...current] } }, include: { user: true, tags: { where: { tag: { kind: "COMPETENCE" } } } } }),
     prisma.customerProfile.findUnique({ where: { userId: meeting.subscription.customerId }, select: { testAnswers: true } }),
   ]);
   const ids = profiles.map((p) => p.userId);

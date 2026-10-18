@@ -18,7 +18,7 @@ import { renderTemplate } from "./template";
 import { adjustForQuietHours } from "./timing";
 import { isTriggerKey, TRIGGERS, VARIABLES, type TriggerDef, type TriggerKey } from "./triggers";
 import { unsubscribeUrl } from "./unsubscribe";
-import { describeChange, firstName, joinNames, meetingDateVars, type ChangeRole } from "./variables";
+import { describeChange, describeLeadChange, firstName, joinNames, meetingDateVars, type ChangeRole } from "./variables";
 
 const appUrl = () => getEnv().APP_URL.replace(/\/$/, "");
 
@@ -343,6 +343,25 @@ export const subscriptionEvents = {
     });
   },
 
+  /** Ny ansvarlig rådgiver: kunden, den nye og den tidligere ansvarlige. */
+  async leadChanged(subscriptionId: string, change: { leadId: string; previousLeadId: string | null }) {
+    await safely("board_lead_changed", async () => {
+      const sub = await prisma.subscription.findUnique({ where: { id: subscriptionId }, include: { customer: { include: { user: true } } } });
+      if (!sub) return;
+      const affected = await prisma.user.findMany({ where: { id: { in: [change.leadId, ...(change.previousLeadId ? [change.previousLeadId] : [])] } } });
+      const ids = await enqueue({
+        trigger: "board_lead_changed",
+        entityType: "subscription",
+        entityId: sub.id,
+        anchor: new Date(),
+        dedupe: `l${Date.now()}`,
+        recipients: [userRecipient(sub.customer.user, "customer"), ...affected.map((u) => userRecipient(u, "advisor"))],
+        context: change,
+      });
+      await dispatchNow(ids);
+    });
+  },
+
   async paymentFailed(subscriptionId: string) {
     await safely("payment_failed", async () => {
       const sub = await prisma.subscription.findUnique({ where: { id: subscriptionId }, include: { customer: { include: { user: true } } } });
@@ -571,6 +590,15 @@ async function buildVariables(
       vars["rådgivere"] = joinNames(sub.advisors.map((a) => a.advisor.user.name));
       vars.kontolink = recipient?.role === "CUSTOMER" ? `${base}/account/subscription` : `${base}/dashboard`;
       if (def.key === "board_changed") await changeVars("board", recipient?.id ?? null, recipient?.id === sub.customerId);
+      if (def.key === "board_lead_changed") {
+        const lc = (log.context ?? {}) as { leadId?: string; previousLeadId?: string | null };
+        const nameOf = (id?: string | null) => sub.advisors.find((a) => a.advisorId === id)?.advisor.user.name ?? "";
+        const lead = nameOf(lc.leadId);
+        const prev = lc.previousLeadId ? nameOf(lc.previousLeadId) || (await prisma.user.findUnique({ where: { id: lc.previousLeadId }, select: { name: true } }))?.name || "" : "";
+        vars["ansvarlig_rådgiver"] = lead;
+        vars["tidligere_ansvarlig"] = prev;
+        vars["ændring"] = describeLeadChange({ company: sub.customer.companyName, lead, previous: prev, role: recipient?.id === sub.customerId ? "customer" : recipient?.id === lc.leadId ? "lead" : "previous" });
+      }
     }
   } else if (log.entityType === "lead") {
     const l = await prisma.lead.findUnique({ where: { id: log.entityId } });

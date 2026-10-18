@@ -35,8 +35,8 @@ describe("aktivering af rådgivere (QA #13, ejerens beslutning)", () => {
 
   it("inaktive foreslås aldrig i matching", () => {
     const m = toMatchAdvisors([
-      { id: "a", name: "A", title: "", bio: "", photoUrl: "", priceDkk: 1, tags: [{ id: "t", name: "T" }] },
-      { id: "b", name: "B", title: "", bio: "", photoUrl: "", priceDkk: 1, tags: [{ id: "t", name: "T" }], inactive: true },
+      { id: "a", name: "A", title: "", bio: "", photoUrl: "", priceDkk: 1, leadEligible: false, tags: [{ id: "t", name: "T" }] },
+      { id: "b", name: "B", title: "", bio: "", photoUrl: "", priceDkk: 1, leadEligible: false, tags: [{ id: "t", name: "T" }], inactive: true },
     ]);
     expect(m.map((x) => x.id)).toEqual(["a"]);
   });

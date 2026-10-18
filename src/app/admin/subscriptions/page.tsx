@@ -34,9 +34,10 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             </div>
             <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm" aria-label="Board">
               {s.advisors.map((a) => (
-                <li key={a.advisorId} className="flex items-center gap-2"><span className="scale-75"><Initials name={a.advisor.user.name} /></span>{a.advisor.user.name}</li>
+                <li key={a.advisorId} className="flex items-center gap-2"><span className="scale-75"><Initials name={a.advisor.user.name} /></span>{a.advisor.user.name}{a.isLead && <span className="badge badge-gold" data-testid="lead-badge">Ansvarlig</span>}</li>
               ))}
             </ul>
+            {s.status !== "CANCELLED" && !s.advisors.some((a) => a.isLead) && <p className="mt-2 text-sm font-semibold text-danger">Ingen ansvarlig rådgiver</p>}
             <div className="mt-4">
               <Link className="btn-secondary btn-sm" href={`/admin/subscriptions/${s.id}`}>Rediger board</Link>
             </div>

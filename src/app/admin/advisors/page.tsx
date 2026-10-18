@@ -28,7 +28,10 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h1>Rådgivere</h1>
-        <Link href="/admin/advisors/new" className="btn">Opret rådgiver</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/ansvarlige" className="btn-secondary">Ansvarlige rådgivere</Link>
+          <Link href="/admin/advisors/new" className="btn">Opret rådgiver</Link>
+        </div>
       </div>
       <Flash ok={ok} err={err} />
       <details className="card" data-testid="price-bounds">
@@ -63,10 +66,13 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
                 <td>{a.title}</td>
                 <td className="max-w-[18rem]">
                   <ul className="flex flex-wrap gap-1">
-                    {a.tags.map((t) => (
+                    {a.tags.filter((t) => t.tag.kind === "COMPETENCE").map((t) => (
                       <li key={t.tagId} className={`badge ${t.tag.active ? "badge-muted" : "badge-outline opacity-60"}`}>{t.tag.name}</li>
                     ))}
-                    {a.tags.length === 0 && <li className="text-xs text-gold-ink">Ingen tags</li>}
+                    {!a.tags.some((t) => t.tag.kind === "COMPETENCE") && <li className="text-xs text-gold-ink">Ingen kompetence-tags</li>}
+                    {a.tags.filter((t) => t.tag.kind === "ADMIN").map((t) => (
+                      <li key={t.tagId} className="badge badge-gold" title="Internt tag (kun admin)" data-testid="internal-tag"><span className="sr-only">Internt tag: </span>{t.tag.name}</li>
+                    ))}
                   </ul>
                 </td>
                 <td className="text-right tabular-nums">{formatDkk(a.pricePerMeetingDkk)}</td>

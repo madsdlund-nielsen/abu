@@ -124,7 +124,14 @@ model AdvisorProfile {
   tags               AdvisorTag[]
 }
 
-/// Kompetence-tag. Bruges til at matche kundens behov (onboarding-testen) med rådgivere.
+/// COMPETENCE: kompetence-tag (matching, katalog, kunder ser det). ADMIN: internt tag, kun synligt for admin.
+enum TagKind {
+  COMPETENCE
+  ADMIN
+}
+
+/// Tag på rådgivere. Kompetence-tags matcher kundens behov (onboarding-testen); admin-tags er interne mærkater
+/// (fx «Lead-kvalificeret») og vises aldrig for kunder eller rådgivere og bruges ikke i matching.
 model Tag {
   id          String   @id @default(cuid())
   slug        String   @unique
@@ -132,6 +139,9 @@ model Tag {
   description String?
   sortOrder   Int      @default(0)
   active      Boolean  @default(true)
+  kind        TagKind  @default(COMPETENCE)
+  /// Systemtag med fast nøgle (fx "lead"). Kan ikke slettes eller deaktiveres; navnet kan ændres.
+  systemKey   String?  @unique
 
   advisors AdvisorTag[]
   weights  AnswerTagWeight[]
@@ -337,6 +347,9 @@ model SubscriptionAdvisor {
   advisorId      String
   /// Rådgiverens pris pr. møde (ekskl. moms) fastfrosset på købstidspunktet / ved planskift.
   pricePerMeetingDkk Int @default(1750)
+  /// Ansvarlig rådgiver (lead) for boardet. Højst én pr. abonnement (delvist unikt indeks i migrationen
+  /// `WHERE "isLead"`); præcis én for PENDING/ACTIVE/PAST_DUE, og kun en rådgiver med lead-tagget (src/lib/lead.ts).
+  isLead         Boolean        @default(false)
   subscription   Subscription   @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   advisor        AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
 

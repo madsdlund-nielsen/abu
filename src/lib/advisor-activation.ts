@@ -2,6 +2,7 @@ import { audit } from "./audit";
 import { getPriceBounds } from "./advisor-price";
 import { activationBlockedMessage, boardsWithAdvisor, canActivate, loadReadiness, missingReadiness } from "./advisor-readiness";
 import { prisma } from "./db";
+import { fillMissingLeads, reassignLeadsFrom } from "./lead";
 
 export type ActivationResult =
   | { ok: true; message: string; active: boolean; boards: string[] }
@@ -28,6 +29,8 @@ export async function setAdvisorActive(adminId: string, advisorId: string, activ
     if (!profile.active) {
       await prisma.advisorProfile.update({ where: { userId: advisorId }, data: { active: true } });
       await audit(adminId, "advisor.activate", "User", advisorId);
+      // Boards uden ansvarlig, som rådgiveren sidder i, kan nu få én
+      await fillMissingLeads(advisorId, adminId);
     }
     return { ok: true, active: true, boards: [], message: `${name} er aktiveret og kan nu vælges af kunder.` };
   }
@@ -36,6 +39,8 @@ export async function setAdvisorActive(adminId: string, advisorId: string, activ
   if (profile.active) {
     await prisma.advisorProfile.update({ where: { userId: advisorId }, data: { active: false } });
     await audit(adminId, "advisor.deactivate", "User", advisorId, boards.length ? `Berørte boards: ${boards.length}` : undefined);
+    // En deaktiveret rådgiver kan ikke være ansvarlig: ny ansvarlig tildeles automatisk
+    await reassignLeadsFrom(advisorId, "deactivated", adminId);
   }
   return {
     ok: true,

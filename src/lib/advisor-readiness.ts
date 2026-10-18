@@ -11,6 +11,7 @@ import { prisma } from "./db";
  */
 export interface ReadinessInput {
   inviteAccepted: boolean;
+  /** Antal kompetence-tags (interne admin-tags tæller ikke) */
   tagCount: number;
   ruleCount: number;
   bio: string;
@@ -65,7 +66,7 @@ export async function boardsWithAdvisor(advisorId: string): Promise<{ subscripti
 export async function loadReadiness(advisorIds: string[], priceBounds?: { min: number; max: number }): Promise<Map<string, ReadinessItem[]>> {
   const profiles = await prisma.advisorProfile.findMany({
     where: { userId: { in: advisorIds } },
-    select: { userId: true, bio: true, pricePerMeetingDkk: true, user: { select: { passwordHash: true } }, _count: { select: { tags: true, availabilityRules: true } } },
+    select: { userId: true, bio: true, pricePerMeetingDkk: true, user: { select: { passwordHash: true } }, _count: { select: { tags: { where: { tag: { kind: "COMPETENCE" } } }, availabilityRules: true } } },
   });
   return new Map(
     profiles.map((p) => [

@@ -56,3 +56,11 @@ export function describeChange(opts: {
   }
   return text;
 }
+
+/** Ny ansvarlig rådgiver, tilpasset modtageren (kunden, den nye eller den tidligere ansvarlige). */
+export function describeLeadChange(opts: { company: string; lead: string; previous: string; role: "customer" | "lead" | "previous" }): string {
+  const { company, lead, previous, role } = opts;
+  if (role === "lead") return `Du er nu ansvarlig rådgiver for boardet hos ${company}${previous ? ` og overtager efter ${previous}` : ""}.`;
+  if (role === "previous") return `${lead} er nu ansvarlig rådgiver for boardet hos ${company} i stedet for dig.`;
+  return `${lead} er nu ansvarlig rådgiver for jeres board${previous ? ` i stedet for ${previous}` : ""}.`;
+}

@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { BookingError, cancelMeeting } from "@/lib/booking";
 import { changeBoardAsAdmin } from "@/lib/board-admin";
+import { applyBalancing, setLeadManually } from "@/lib/lead";
 import { changeMeetingAdvisors, rescheduleMeeting } from "@/lib/meeting-admin";
 import type { ActionResult } from "@/lib/onboarding/cms-types";
 import { redirectWith } from "@/lib/redirect";
@@ -83,4 +84,34 @@ export async function adminChangeBoardAction(formData: FormData) {
   if (!r.ok) redirectWith(back, "err", r.error);
   const conflicts = r.conflicts.length ? ` Konflikter (mødet er uændret): ${r.conflicts.join(" · ")}` : "";
   redirectWith(back, "ok", r.message + conflicts);
+}
+
+/** Admin vælger boardets ansvarlige rådgiver (kun kvalificerede medlemmer). Audit-logges, og der sendes besked. */
+export async function setLeadAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const subscriptionId = String(formData.get("subscriptionId") ?? "");
+  const back = `/admin/subscriptions/${subscriptionId}`;
+  const r = await setLeadManually(admin.id, subscriptionId, String(formData.get("advisorId") ?? ""));
+  if (!r.ok) redirectWith(back, "err", r.error);
+  revalidatePath(back);
+  redirectWith(back, "ok", r.changed ? "Den ansvarlige rådgiver er skiftet. Kunden og rådgiverne har fået besked." : "Uændret: rådgiveren er allerede ansvarlig.");
+}
+
+/** Anvend et udligningsforslag efter bekræftelse. Flytningerne kommer som `move` = "subId:from:to". */
+export async function applyBalancingAction(formData: FormData) {
+  const admin = await requireRole("ADMIN");
+  const moves = formData
+    .getAll("move")
+    .map(String)
+    .map((v) => v.split(":"))
+    .filter((p) => p.length === 3 && p.every(Boolean))
+    .map(([subscriptionId, from, to]) => ({ subscriptionId, from, to }));
+  if (moves.length === 0) redirectWith("/admin/ansvarlige", "err", "Der er ingen flytninger at anvende.");
+  const r = await applyBalancing(admin.id, moves);
+  revalidatePath("/admin/ansvarlige");
+  redirectWith(
+    "/admin/ansvarlige",
+    "ok",
+    `${r.applied} ${r.applied === 1 ? "board har" : "boards har"} fået en ny ansvarlig rådgiver.${r.skipped ? ` ${r.skipped} flytning${r.skipped === 1 ? "" : "er"} blev sprunget over, fordi boardet er ændret siden forslaget.` : ""}`,
+  );
 }

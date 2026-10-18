@@ -104,6 +104,10 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
   it("board-ændring med «opdatér kommende møder»: er den nye rådgiver optaget, bliver den gamle i mødet (intet hul)", async () => {
     const { changeBoardAsAdmin } = await import("./board-admin");
     const [a, b, busy] = [await tagless("A"), await tagless("B"), await tagless("Optaget", false)];
+    // Boardet skal have en rådgiver, der kan være ansvarlig
+    const { prisma } = await import("./db");
+    const { getLeadTagId } = await import("./lead");
+    await prisma.advisorTag.create({ data: { advisorId: a, tagId: await getLeadTagId() } });
     const { sub, meeting, customerId } = await boardWithMeeting([a, b]);
     const r = await changeBoardAsAdmin({ subscriptionId: sub.id, advisorIds: [a, busy], weeks: 8, pricePolicy: "keep", updateUpcoming: true, actorId: customerId });
     expect(r.ok).toBe(true);

@@ -1,10 +1,11 @@
-/* Seed: admin, tags, 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
+/* Seed: admin, tags (inkl. det interne «Lead-kvalificeret» på 4 rådgivere), 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
 import bcrypt from "bcryptjs";
 import { seedRefusal } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
 import { ensureNotificationDefaults } from "../src/lib/notifications/service";
-import { ADVISORS, DEMO_BOARD_EMAILS, QUESTIONS, TAGS } from "./seed-data";
+import { assignLeadTx, getLeadTagId } from "../src/lib/lead";
+import { ADVISORS, DEMO_BOARD_EMAILS, LEAD_ADVISOR_EMAILS, QUESTIONS, TAGS } from "./seed-data";
 
 async function main() {
   // H-1: demodata med kendte adgangskoder må aldrig ende i produktion
@@ -36,6 +37,9 @@ async function main() {
     tagIds.set(t.slug, tag.id);
   }
 
+  // Systemtagget «Lead-kvalificeret» (internt; oprettes af migrationen, ellers her)
+  const leadTagId = await getLeadTagId();
+
   const advisorIds = new Map<string, string>();
   for (const [i, a] of ADVISORS.entries()) {
     const user = await prisma.user.upsert({
@@ -53,7 +57,10 @@ async function main() {
     });
     advisorIds.set(a.email, user.id);
     await prisma.advisorTag.createMany({
-      data: a.tags.map((slug) => ({ advisorId: user.id, tagId: tagIds.get(slug)! })),
+      data: [
+        ...a.tags.map((slug) => ({ advisorId: user.id, tagId: tagIds.get(slug)! })),
+        ...(LEAD_ADVISOR_EMAILS.includes(a.email) ? [{ advisorId: user.id, tagId: leadTagId }] : []),
+      ],
       skipDuplicates: true,
     });
     const existing = await prisma.availabilityRule.count({ where: { advisorId: user.id } });
@@ -110,7 +117,7 @@ async function main() {
 
   const hasSub = await prisma.subscription.count({ where: { customerId: customer.id } });
   if (!hasSub) {
-    await prisma.subscription.create({
+    const sub = await prisma.subscription.create({
       data: {
         customerId: customer.id,
         // Møder holdes altid med hele boardet: advisorCount = antal rådgivere i boardet
@@ -132,6 +139,8 @@ async function main() {
         },
       },
     });
+    // Ansvarlig rådgiver med samme tildelingsregel som ved køb
+    await prisma.$transaction((tx) => assignLeadTx(tx, sub.id));
   }
 
   // Danske standardtekster og -regler til notifikationer (e-mail og SMS)

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
+import { LEAD_TAG_KEY } from "../lead";
 import type { MatchAdvisor, MatchAnswer } from "../matching";
 
 /** Serialiserbar rådgiver til board-builderen (klient) og matching. */
@@ -10,7 +11,10 @@ export interface BuilderAdvisor {
   bio: string;
   photoUrl: string;
   priceDkk: number;
+  /** Kun kompetence-tags (admin-tags vises aldrig for kunder) */
   tags: { id: string; name: string }[];
+  /** Kan være ansvarlig rådgiver (har det interne lead-tag). Selve tagget sendes ikke til klienten. */
+  leadEligible: boolean;
   /** Kun når admin ser et eksisterende board med en rådgiver, der er deaktiveret siden (kan ikke vælges på ny). */
   inactive?: boolean;
 }
@@ -28,7 +32,7 @@ export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise
       include: { user: true, tags: { include: { tag: true } } },
       orderBy: { user: { name: "asc" } },
     }),
-    prisma.tag.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.tag.findMany({ where: { active: true, kind: "COMPETENCE" }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
   ]);
   return {
     tags: tags.map((t) => ({ id: t.id, name: t.name })),
@@ -40,8 +44,9 @@ export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise
       photoUrl: p.photoUrl,
       priceDkk: p.pricePerMeetingDkk,
       ...(p.active ? {} : { inactive: true }),
+      leadEligible: p.active && p.tags.some((t) => t.tag.systemKey === LEAD_TAG_KEY),
       tags: p.tags
-        .filter((t) => t.tag.active)
+        .filter((t) => t.tag.active && t.tag.kind === "COMPETENCE")
         .sort((a, b) => a.tag.sortOrder - b.tag.sortOrder || a.tag.name.localeCompare(b.tag.name, "da"))
         .map((t) => ({ id: t.tag.id, name: t.tag.name })),
     })),
@@ -50,7 +55,7 @@ export async function loadCatalog(opts: { includeIds?: string[] } = {}): Promise
 
 export function toMatchAdvisors(advisors: BuilderAdvisor[]): MatchAdvisor[] {
   // Inaktive rådgivere foreslås aldrig (QA #13)
-  return advisors.filter((a) => !a.inactive).map((a) => ({ id: a.id, name: a.name, priceDkk: a.priceDkk, active: true, tagIds: a.tags.map((t) => t.id) }));
+  return advisors.filter((a) => !a.inactive).map((a) => ({ id: a.id, name: a.name, priceDkk: a.priceDkk, active: true, tagIds: a.tags.map((t) => t.id), leadEligible: a.leadEligible }));
 }
 
 const questionInclude = {

@@ -7,6 +7,9 @@
  *    dækker, til 30 % for de næste valg. Lige score: laveste pris, derefter alfabetisk.
  * 4. Størrelse: største `boardSize` blandt svarene; ellers tilføjes rådgivere, til boardet dækker mindst 80 % af den
  *    samlede behovsvægt (2-4, standard 3 når der ingen behov er).
+ * 5. Ansvarlig rådgiver: boardet skal have mindst én rådgiver, der kan være ansvarlig (`leadEligible`). Har det grådige
+ *    valg ingen, erstattes medlemmet med det mindste bidrag af den kvalificerede rådgiver med højest score (eller hun/han
+ *    tilføjes, hvis boardet er mindre end den tilsigtede størrelse, og størrelsen ikke er låst af et svar).
  */
 
 export interface MatchAnswer {
@@ -20,6 +23,8 @@ export interface MatchAdvisor {
   priceDkk: number;
   active: boolean;
   tagIds: string[];
+  /** Kan være ansvarlig rådgiver (internt lead-tag). Bruges kun til reglen om mindst én kvalificeret pr. board. */
+  leadEligible?: boolean;
 }
 
 export interface MatchPick {
@@ -47,6 +52,8 @@ export interface MatchResult {
   uncoveredTagIds: string[];
   /** 0-1: andel af den samlede behovsvægt boardet dækker */
   coverage: number;
+  /** Justering for at få en rådgiver med, der kan være ansvarlig: hvem kom ind (og evt. hvem gik ud) */
+  leadAdjustment: { kind: "replaced" | "added"; inId: string; outId?: string } | null;
 }
 
 export const REDUCED_WEIGHT = 0.3;
@@ -106,9 +113,10 @@ export function suggestBoard(advisorsIn: readonly MatchAdvisor[], answers: reado
   const sizeReason: MatchResult["sizeReason"] = fixedSize ? "boardSize" : totalNeed === 0 ? "default" : "coverage";
   const target = fixedSize ?? (totalNeed === 0 ? Math.min(DEFAULT_SIZE, advisors.length) : null);
 
-  while (remaining.length > 0 && picks.length < maxPicks) {
-    if (target !== null && picks.length >= target) break;
-    if (target === null && picks.length >= MIN_SIZE) {
+  const chosen: MatchAdvisor[] = [];
+  while (remaining.length > 0 && chosen.length < maxPicks) {
+    if (target !== null && chosen.length >= target) break;
+    if (target === null && chosen.length >= MIN_SIZE) {
       const coveredWeight = [...covered].reduce((a, t) => a + (needs[t] ?? 0), 0);
       if (coveredWeight / totalNeed >= COVERAGE_TARGET) break;
     }
@@ -122,14 +130,7 @@ export function suggestBoard(advisorsIn: readonly MatchAdvisor[], answers: reado
       }
     }
     if (!best) break;
-    const matched = best.tagIds.filter((t) => (needs[t] ?? 0) > 0).sort((x, y) => needs[y] - needs[x] || x.localeCompare(y));
-    picks.push({
-      advisorId: best.id,
-      effectiveScore: round2(bestScore),
-      baseScore: advisorScore(best.tagIds, needs),
-      matchedTagIds: matched,
-      newTagIds: matched.filter((t) => !covered.has(t)),
-    });
+    chosen.push(best);
     for (const t of best.tagIds) {
       covered.add(t);
       if (needs[t] !== undefined) working[t] = needs[t] * REDUCED_WEIGHT;
@@ -137,7 +138,29 @@ export function suggestBoard(advisorsIn: readonly MatchAdvisor[], answers: reado
     remaining.splice(remaining.indexOf(best), 1);
   }
 
-  const boardTags = advisors.filter((a) => picks.some((p) => p.advisorId === a.id)).flatMap((a) => a.tagIds);
+  // 5. Mindst én rådgiver, der kan være ansvarlig
+  let leadAdjustment: MatchResult["leadAdjustment"] = null;
+  if (chosen.length > 0 && !chosen.some((a) => a.leadEligible)) {
+    const pool = advisors.filter((a) => a.leadEligible && !chosen.includes(a));
+    const inAdv = pool.sort((x, y) => advisorScore(y.tagIds, needs) - advisorScore(x.tagIds, needs) || byTieBreak(x, y))[0];
+    if (inAdv) {
+      const intended = target ?? chosen.length;
+      if (!fixedSize && chosen.length < Math.min(intended, MAX_SIZE)) {
+        chosen.push(inAdv);
+        leadAdjustment = { kind: "added", inId: inAdv.id };
+      } else {
+        const replayed = replayPicks(chosen, needs);
+        // Mindste bidrag; lige → det senest valgte
+        let idx = replayed.length - 1;
+        for (let i = replayed.length - 1; i >= 0; i--) if (replayed[i].effectiveScore < replayed[idx].effectiveScore) idx = i;
+        leadAdjustment = { kind: "replaced", inId: inAdv.id, outId: chosen[idx].id };
+        chosen[idx] = inAdv;
+      }
+    }
+  }
+  picks.push(...replayPicks(chosen, needs));
+
+  const boardTags = chosen.flatMap((a) => a.tagIds);
   const cov = boardCoverage(needs, boardTags);
   return {
     advisorIds: picks.map((p) => p.advisorId),
@@ -150,7 +173,29 @@ export function suggestBoard(advisorsIn: readonly MatchAdvisor[], answers: reado
     coveredTagIds: cov.covered,
     uncoveredTagIds: cov.uncovered,
     coverage: cov.coverage,
+    leadAdjustment,
   };
+}
+
+/** Valgene i rækkefølge med nedskrivning af allerede dækkede tags (samme regel som det grådige valg). */
+function replayPicks(order: readonly MatchAdvisor[], needs: Record<string, number>): MatchPick[] {
+  const working: Record<string, number> = { ...needs };
+  const covered = new Set<string>();
+  return order.map((a) => {
+    const matched = a.tagIds.filter((t) => (needs[t] ?? 0) > 0).sort((x, y) => needs[y] - needs[x] || x.localeCompare(y));
+    const pick: MatchPick = {
+      advisorId: a.id,
+      effectiveScore: round2(advisorScore(a.tagIds, working)),
+      baseScore: advisorScore(a.tagIds, needs),
+      matchedTagIds: matched,
+      newTagIds: matched.filter((t) => !covered.has(t)),
+    };
+    for (const t of a.tagIds) {
+      covered.add(t);
+      if (needs[t] !== undefined) working[t] = needs[t] * REDUCED_WEIGHT;
+    }
+    return pick;
+  });
 }
 
 function round2(n: number) {

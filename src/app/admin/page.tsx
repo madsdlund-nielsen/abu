@@ -4,6 +4,7 @@ import { processJobsAction } from "@/app/actions/admin";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { ALERT_LABEL, recentAlerts } from "@/lib/alerts";
 import { prisma } from "@/lib/db";
+import { loadLeadOverview } from "@/lib/lead";
 import { meetingsBelowBoard } from "@/lib/meeting-admin";
 import { formatDateTime } from "@/lib/time";
 import { formatDkk } from "@/lib/pricing";
@@ -12,7 +13,7 @@ export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminHome({ searchParams }: { searchParams: SP }) {
   const { ok, err } = await flashFrom(searchParams);
-  const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr, alerts, belowBoard] = await Promise.all([
+  const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr, alerts, belowBoard, leadOverview] = await Promise.all([
     prisma.advisorProfile.count(),
     prisma.customerProfile.count(),
     prisma.subscription.count({ where: { status: "ACTIVE" } }),
@@ -23,6 +24,7 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
     prisma.subscription.aggregate({ where: { status: "ACTIVE" }, _sum: { monthlyPriceDkk: true } }),
     recentAlerts(7),
     meetingsBelowBoard(),
+    loadLeadOverview(),
   ]);
   const stats: [string, string | number, string][] = [
     ["Rådgivere", advisors, "/admin/advisors"],
@@ -62,6 +64,20 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
               </li>
             ))}
           </ul>
+        </section>
+      )}
+      {leadOverview.withoutLead.length > 0 && (
+        <section className="card" aria-labelledby="nolead-h" data-testid="boards-without-lead">
+          <h2 id="nolead-h">Boards uden ansvarlig rådgiver</h2>
+          <ul className="mt-3 space-y-2 text-sm">
+            {leadOverview.withoutLead.map((b) => (
+              <li key={b.subscriptionId} className="callout callout-error">
+                <Link href={`/admin/subscriptions/${b.subscriptionId}`} className="font-semibold">{b.label}</Link>
+                <span className="text-ink"> – {b.hasEligible ? "vælg en ansvarlig rådgiver" : "ingen i boardet kan være ansvarlig; tilføj en rådgiver med lead-tagget"}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">Se fordelingen under <Link href="/admin/ansvarlige">Ansvarlige rådgivere</Link>.</p>
         </section>
       )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

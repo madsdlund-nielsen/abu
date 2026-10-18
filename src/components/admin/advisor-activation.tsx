@@ -89,7 +89,7 @@ export function AdvisorActivationControl({
                   <li key={b}>{b}</li>
                 ))}
               </ul>
-              <p className="mt-2">Kunderne kan ikke booke nye møder, før rådgiveren er erstattet under Abonnementer. Allerede bookede møder ændres ikke.</p>
+              <p className="mt-2">Kunderne kan ikke booke nye møder, før rådgiveren er erstattet under Abonnementer. Allerede bookede møder ændres ikke. Er rådgiveren ansvarlig rådgiver for et board, tildeles en ny automatisk.</p>
             </div>
           ) : (
             <p>{name} sidder ikke i nogen aktive boards. Rådgiveren fjernes fra kataloget og kan ikke vælges af kunder, før du aktiverer igen.</p>

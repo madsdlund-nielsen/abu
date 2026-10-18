@@ -42,7 +42,7 @@ export function PreviewDrawer({
   const tagName = (id: string) => tags.find((t) => t.id === id)?.name ?? id;
   const quiz = useMemo(() => questions.filter((q) => q.active && q.answers.length > 0), [questions]);
   const matchAdvisors: MatchAdvisor[] = useMemo(
-    () => advisors.map((a) => ({ id: a.id, name: a.name, priceDkk: a.priceDkk, active: true, tagIds: a.tagIds.filter((t) => activeTags.has(t)) })),
+    () => advisors.map((a) => ({ id: a.id, name: a.name, priceDkk: a.priceDkk, active: true, tagIds: a.tagIds.filter((t) => activeTags.has(t)), leadEligible: a.leadEligible ?? false })),
     [advisors, activeTags],
   );
   const answers: MatchAnswer[] = useMemo(

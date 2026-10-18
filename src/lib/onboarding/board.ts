@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { leadEligibleIds, NO_LEAD_ELIGIBLE_ERROR } from "../lead";
 import { FREQUENCY_WEEKS, monthlyPriceForBoard, isFrequencyWeeks } from "../pricing";
 
 export interface ResolvedBoard {
@@ -15,6 +16,8 @@ export async function resolveBoard(advisorIds: string[], weeks: number): Promise
   if (!isFrequencyWeeks(weeks)) return { error: `Vælg hvor ofte I vil mødes (hver ${FREQUENCY_WEEKS.join(".")}. uge).` };
   const profiles = await prisma.advisorProfile.findMany({ where: { userId: { in: ids }, active: true }, include: { user: true } });
   if (profiles.length !== ids.length) return { error: "En af de valgte rådgivere er ikke længere tilgængelig. Vælg igen." };
+  // Mindst én rådgiver, der kan være ansvarlig rådgiver (lead-tagget)
+  if ((await leadEligibleIds(ids)).size === 0) return { error: NO_LEAD_ELIGIBLE_ERROR };
   const advisors = ids.map((id) => {
     const p = profiles.find((x) => x.userId === id)!;
     return { id, name: p.user.name, pricePerMeetingDkk: p.pricePerMeetingDkk };

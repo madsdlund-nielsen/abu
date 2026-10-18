@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Profil" };
 export default async function ProfilePage({ searchParams }: { searchParams: SP }) {
   const user = await requireRole("ADVISOR");
   const { ok, err } = await flashFrom(searchParams);
-  const profile = await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: user.id }, include: { tags: { include: { tag: true } } } });
+  const profile = await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: user.id }, include: { tags: { where: { tag: { kind: "COMPETENCE" } }, include: { tag: true } } } });
   return (
     <div>
       <h1>Min profil</h1>

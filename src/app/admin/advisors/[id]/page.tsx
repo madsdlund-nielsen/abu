@@ -15,7 +15,7 @@ export default async function AdminAdvisor({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const [profile, tags, activeSubscriptions] = await Promise.all([
     prisma.advisorProfile.findUnique({ where: { userId: id }, include: { user: true, tags: true } }),
-    prisma.tag.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true, active: true } }),
+    prisma.tag.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true, active: true, kind: true, systemKey: true } }),
     prisma.subscriptionAdvisor.count({ where: { advisorId: id, subscription: { status: { in: ["ACTIVE", "PAST_DUE"] } } } }),
   ]);
   if (!profile) notFound();

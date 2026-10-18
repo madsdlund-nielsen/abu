@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getPriceBounds, validateAdvisorPrice } from "@/lib/advisor-price";
 import { isDuplicateTagName } from "@/lib/tag-name";
+import { fillMissingLeads, getLeadTagId, LEAD_TAG_KEY, reassignLeadsFrom } from "@/lib/lead";
 import type { ActionResult } from "@/lib/onboarding/cms-types";
 
 type R<T = object> = Promise<ActionResult<T>>;
@@ -129,13 +130,16 @@ export async function reorderAnswersAction(ids: string[]): R {
   });
 }
 
-/** Sætter (1-5) eller fjerner (null) et tags vægt på et svar. */
+/** Sætter (1-5) eller fjerner (null) et tags vægt på et svar. Kun kompetence-tags (interne tags bruges aldrig i matchingen). */
 export async function setAnswerWeightAction(answerId: string, tagId: string, weight: number | null): R {
   return guard(async (adminId) => {
     if (weight === null) {
       await prisma.answerTagWeight.deleteMany({ where: { answerId, tagId } });
     } else {
       if (!Number.isInteger(weight) || weight < 1 || weight > 5) return err("Vægten skal være mellem 1 og 5.");
+      const tag = await prisma.tag.findUnique({ where: { id: tagId }, select: { kind: true } });
+      if (!tag) return err("Tagget findes ikke.");
+      if (tag.kind !== "COMPETENCE") return err("Interne tags kan ikke bruges i onboarding-testen.");
       await prisma.answerTagWeight.upsert({
         where: { answerId_tagId: { answerId, tagId } },
         update: { weight },
@@ -160,9 +164,9 @@ function slugify(name: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-export async function createTagAction(input: { name: string; description?: string }): R<{ id: string }> {
+export async function createTagAction(input: { name: string; description?: string; kind?: "COMPETENCE" | "ADMIN" }): R<{ id: string }> {
   const admin = await requireRole("ADMIN");
-  const p = z.object({ name: text(60, 2), description: z.string().trim().max(200).optional() }).safeParse(input);
+  const p = z.object({ name: text(60, 2), description: z.string().trim().max(200).optional(), kind: z.enum(["COMPETENCE", "ADMIN"]).default("COMPETENCE") }).safeParse(input);
   if (!p.success) return err(p.error.issues[0].message);
   const names = await prisma.tag.findMany({ select: { name: true } });
   if (isDuplicateTagName(names.map((n) => n.name), p.data.name)) return err("Der findes allerede et tag med det navn.");
@@ -170,9 +174,9 @@ export async function createTagAction(input: { name: string; description?: strin
   if (await prisma.tag.findUnique({ where: { slug } })) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
   const last = await prisma.tag.aggregate({ _max: { sortOrder: true } });
   const t = await prisma.tag.create({
-    data: { name: p.data.name, slug, description: p.data.description || null, sortOrder: (last._max.sortOrder ?? 0) + 10 },
+    data: { name: p.data.name, slug, description: p.data.description || null, sortOrder: (last._max.sortOrder ?? 0) + 10, kind: p.data.kind },
   });
-  await audit(admin.id, "tag.create", "Tag", t.id);
+  await audit(admin.id, "tag.create", "Tag", t.id, p.data.kind === "ADMIN" ? "Internt tag" : undefined);
   refresh();
   return { ok: true, id: t.id };
 }
@@ -181,6 +185,9 @@ export async function updateTagAction(id: string, patch: { name?: string; descri
   return guard(async (adminId) => {
     const p = z.object({ name: text(60, 2).optional(), description: z.string().trim().max(200).optional(), active: z.boolean().optional() }).safeParse(patch);
     if (!p.success) return err(p.error.issues[0].message);
+    const current = await prisma.tag.findUnique({ where: { id }, select: { systemKey: true } });
+    if (!current) return err("Tagget findes ikke.");
+    if (current.systemKey && p.data.active === false) return err("Systemtagget kan ikke deaktiveres. Fjern det i stedet fra de rådgivere, der ikke skal have det.");
     if (p.data.name !== undefined) {
       const others = await prisma.tag.findMany({ where: { id: { not: id } }, select: { name: true } });
       if (isDuplicateTagName(others.map((n) => n.name), p.data.name)) return err("Der findes allerede et tag med det navn.");
@@ -212,6 +219,7 @@ export async function updateAdvisorAction(userId: string, input: { priceDkk: num
     const exists = await prisma.advisorProfile.findUnique({ where: { userId } });
     if (!exists) return err("Rådgiveren findes ikke.");
     const tagCount = await prisma.tag.count({ where: { id: { in: p.data.tagIds } } });
+    const hadLeadTag = (await prisma.advisorTag.count({ where: { advisorId: userId, tag: { systemKey: LEAD_TAG_KEY } } })) > 0;
     if (tagCount !== new Set(p.data.tagIds).size) return err("Et af tagsene findes ikke.");
     await prisma.$transaction([
       prisma.advisorProfile.update({ where: { userId }, data: { pricePerMeetingDkk: p.data.priceDkk } }),
@@ -219,6 +227,10 @@ export async function updateAdvisorAction(userId: string, input: { priceDkk: num
       prisma.advisorTag.createMany({ data: [...new Set(p.data.tagIds)].map((tagId) => ({ advisorId: userId, tagId })), skipDuplicates: true }),
     ]);
     await audit(adminId, "advisor.update", "User", userId);
+    // Lead-tagget fjernet → nye ansvarlige for rådgiverens boards; tilføjet → boards uden ansvarlig kan få én
+    const leadTagId = await getLeadTagId();
+    if (hadLeadTag && !p.data.tagIds.includes(leadTagId)) await reassignLeadsFrom(userId, "tag_removed", adminId);
+    if (!hadLeadTag && p.data.tagIds.includes(leadTagId)) await fillMissingLeads(userId, adminId);
     refresh();
     revalidatePath(`/admin/advisors/${userId}`);
     return { ok: true };

@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { raiseAlert } from "./alerts";
 import { audit } from "./audit";
 import { prisma } from "./db";
+import { ensureLead, LIVE_STATUSES } from "./lead";
 import { deleteNotificationDataFor } from "./notifications/service";
 import { deleteOnboardingSessionsForEmail } from "./onboarding/session";
 import { getPayments } from "./payments";
@@ -83,7 +84,12 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
   await deleteNotificationDataFor(user);
   await prisma.marketingConsent.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
   await prisma.lead.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
+  // Var en rådgiver ansvarlig for boards, tildeles nye ansvarlige efter sletningen (pladsen forsvinder med kaskaden)
+  const ledSubs = user.role === "ADVISOR"
+    ? await prisma.subscriptionAdvisor.findMany({ where: { advisorId: userId, isLead: true, subscription: { status: { in: [...LIVE_STATUSES] } } }, select: { subscriptionId: true } })
+    : [];
   await prisma.user.delete({ where: { id: userId } });
+  for (const s of ledSubs) await ensureLead(s.subscriptionId, "deleted", actorId);
   return { ok: true, cancelled, objects, webhookEvents };
 }
 

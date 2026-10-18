@@ -38,7 +38,7 @@ export const EXPORT_USER_SELECT = {
           startedAt: true,
           cancelledAt: true,
           createdAt: true,
-          advisors: { select: { pricePerMeetingDkk: true, advisor: { select: { user: { select: { name: true } } } } } },
+          advisors: { select: { pricePerMeetingDkk: true, isLead: true, advisor: { select: { user: { select: { name: true } } } } } },
         },
       },
     },
@@ -52,7 +52,9 @@ export const EXPORT_USER_SELECT = {
       pricePerMeetingDkk: true,
       availabilityRules: { select: { weekday: true, startMinute: true, endMinute: true } },
       availabilityBlocks: { select: { startsAt: true, endsAt: true, reason: true } },
-      tags: { select: { tag: { select: { name: true } } } },
+      tags: { select: { tag: { select: { name: true, kind: true } } } },
+      // Rådgiverens pladser i boards, inkl. om vedkommende er ansvarlig rådgiver (uden kundedata)
+      boards: { select: { isLead: true, pricePerMeetingDkk: true, subscription: { select: { status: true, createdAt: true } } } },
     },
   },
 } satisfies Prisma.UserSelect;

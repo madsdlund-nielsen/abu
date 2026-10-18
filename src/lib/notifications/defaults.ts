@@ -201,6 +201,38 @@ Se dit overblik:
 ${SIGN}`,
   },
   {
+    key: "board_lead_changed_customer_email",
+    channel: "EMAIL",
+    name: "Ansvarlig rådgiver ændret – kunde (e-mail)",
+    subject: "Ny ansvarlig rådgiver for jeres board",
+    body: `Hej {{fornavn}}
+
+{{ændring}}
+
+Den ansvarlige rådgiver er jeres faste kontakt i boardet. Møderne holdes fortsat med hele boardet: {{rådgivere}}
+
+Se dit abonnement:
+{{kontolink}}
+
+${SIGN}`,
+  },
+  {
+    key: "board_lead_changed_advisor_email",
+    channel: "EMAIL",
+    name: "Ansvarlig rådgiver ændret – rådgiver (e-mail)",
+    subject: "Ansvarlig rådgiver hos {{virksomhed}}",
+    body: `Hej {{fornavn}}
+
+{{ændring}}
+
+Kunde: {{virksomhed}}
+
+Se dit overblik:
+{{kontolink}}
+
+${SIGN}`,
+  },
+  {
     key: "payment_failed_email",
     channel: "EMAIL",
     name: "Betaling mislykkedes (e-mail)",
@@ -316,6 +348,8 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { trigger: "transcript_ready", offsetMinutes: 0, channel: "EMAIL", templateKey: "transcript_ready_email", audience: "BOTH" },
   { trigger: "board_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_changed_customer_email", audience: "CUSTOMER" },
   { trigger: "board_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_changed_advisor_email", audience: "ADVISORS" },
+  { trigger: "board_lead_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_lead_changed_customer_email", audience: "CUSTOMER" },
+  { trigger: "board_lead_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_lead_changed_advisor_email", audience: "ADVISORS" },
   { trigger: "payment_failed", offsetMinutes: 0, channel: "EMAIL", templateKey: "payment_failed_email", audience: "CUSTOMER" },
   { trigger: "payment_failed", offsetMinutes: 4320, channel: "EMAIL", templateKey: "payment_failed_reminder_email", audience: "CUSTOMER" },
   { trigger: "onboarding_abandoned", offsetMinutes: 60, channel: "EMAIL", templateKey: "onboarding_abandoned_1_email", audience: "SUBJECT" },
