@@ -1,0 +1,33 @@
+# Deploy: kører hele CI først og deployer kun, hvis CI er grøn.
+# Startes manuelt ("Run workflow" under Actions → Deploy) eller ved et versions-tag (v*).
+# Selve deploy-trinnet udfyldes, når Hetzner-serveren er sat op (se docs/PRODUKTIONSPLAN.md, fase 4).
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy til produktion
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Deploy (afventer server)
+        run: |
+          echo "CI er grøn. Deploy-trinnet er endnu ikke sat op (afventer Hetzner-server)."
+          echo "Her kommer: byg og push image, ssh til serveren, docker compose pull && migrate && up -d."

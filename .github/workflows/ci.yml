@@ -1,17 +1,28 @@
 # CI: lint, typetjek, test (inkl. DB-tests mod Postgres), build, npm audit, prod-config-guard og Docker-build.
 # Actions er låst til commit-SHA (Renovate opdaterer dem). Kun `npm ci` – lockfilen er sandheden.
+#
+# Hvornår kører CI (for at spare Actions-minutter):
+#  - Før deploy: deploy.yml kalder denne workflow og deployer kun, hvis den er grøn.
+#  - På PR'er mod main, men kun når PR'en er klar til review (ikke draft) og ændrer kode – ikke ved rene docs-ændringer.
+#  - Manuelt via "Run workflow" i GitHub.
+# Der køres ikke længere på push til main eller på hvert commit på feature-branches.
 name: CI
 
 on:
+  workflow_call:
+  workflow_dispatch:
   pull_request:
-  push:
     branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,6 +31,7 @@ env:
 jobs:
   verify:
     name: Lint, typer, test, build, audit
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
@@ -84,6 +96,7 @@ jobs:
 
   docker:
     name: Docker-build
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
