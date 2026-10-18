@@ -42,10 +42,11 @@ export async function addAdvisorAction(meetingId: string, addId: string, noteTex
   });
 }
 
+/** Fjerner en ekstra deltager. Afvises, hvis mødet så får færre rådgivere end boardet (udskift i stedet). */
 export async function removeAdvisorAction(meetingId: string, removeId: string, noteText?: string): Promise<R> {
   return run(meetingId, async (adminId) => {
     const r = await changeMeetingAdvisors({ meetingId, actorId: adminId, removeId, note: note(noteText) });
-    return `${r.detail}.${r.below ? " Bemærk: der er nu færre rådgivere i mødet end i kundens board." : ""}`;
+    return `${r.detail}. Mødet har stadig hele boardet.`;
   });
 }
 

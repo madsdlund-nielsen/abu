@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { raiseAlert } from "./alerts";
 import { audit } from "./audit";
 import { prisma } from "./db";
 import { deleteNotificationDataFor } from "./notifications/service";
@@ -72,6 +73,10 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
   ];
   const webhookEvents = or.length ? (await prisma.webhookEvent.deleteMany({ where: { OR: or } })).count : 0;
 
+  // 3b) En rådgiver forsvinder fra boards og kommende møder med kaskaden. Møder holdes altid med hele boardet, så det
+  //     må ikke ske i stilhed: hvert berørt møde audit-logges, og admin får en driftsalarm + advarselslisten på forsiden.
+  if (user.role === "ADVISOR") await flagAdvisorErasure(userId, actorId);
+
   // 4) Øvrige data om personen og selve kontoen
   await audit(actorId, "user.delete", "User", userId, `Opsagt: ${cancelled}, optagelser: ${objects}, webhooks: ${webhookEvents}`);
   await deleteOnboardingSessionsForEmail(user.email);
@@ -80,6 +85,24 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
   await prisma.lead.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
   await prisma.user.delete({ where: { id: userId } });
   return { ok: true, cancelled, objects, webhookEvents };
+}
+
+/**
+ * Kommende møder og boards, som en slettet rådgiver sad i (ejerens beslutning: møder holdes altid med hele boardet).
+ * Alarmen nævner ikke navnet – den overlever sletningen.
+ */
+async function flagAdvisorErasure(advisorId: string, actorId: string): Promise<void> {
+  const [meetings, boards] = await Promise.all([
+    prisma.meeting.findMany({ where: { status: "BOOKED", endsAt: { gt: new Date() }, participants: { some: { userId: advisorId } } }, select: { id: true } }),
+    prisma.subscriptionAdvisor.count({ where: { advisorId, subscription: { status: { in: ["ACTIVE", "PAST_DUE", "PENDING"] } } } }),
+  ]);
+  for (const m of meetings) await audit(actorId, "meeting.advisor_erased", "Meeting", m.id, "Rådgiveren er slettet (GDPR); mødet mangler nu en rådgiver fra boardet.");
+  if (meetings.length || boards) {
+    await raiseAlert(
+      "advisor_erased",
+      `En rådgiver er slettet (GDPR). ${meetings.length} kommende ${meetings.length === 1 ? "møde mangler" : "møder mangler"} nu en rådgiver, og ${boards} ${boards === 1 ? "board" : "boards"} har en tom plads. Udskift rådgiveren under Møder og Abonnementer.`,
+    );
+  }
 }
 
 export const WEBHOOK_PAYLOAD_RETENTION_DAYS = 30;

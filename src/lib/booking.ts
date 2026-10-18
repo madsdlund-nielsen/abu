@@ -38,6 +38,11 @@ export async function loadAvailability(tx: Tx, advisorIds: string[], from: Date,
   }));
 }
 
+/** Møder planlægges altid for hele boardet (ejerens beslutning): alle `advisorCount` pladser skal være besat. */
+export function hasWholeBoard(sub: { advisorCount: number; advisors: unknown[] }): boolean {
+  return sub.advisors.length >= sub.advisorCount && sub.advisors.length > 0;
+}
+
 async function loadSubscription(tx: Tx, subscriptionId: string) {
   return tx.subscription.findUnique({
     where: { id: subscriptionId },
@@ -53,7 +58,8 @@ export async function getBookableSlots(subscriptionId: string, now = new Date())
   const sub = await loadSubscription(prisma, subscriptionId);
   if (!sub || sub.status !== "ACTIVE" || !sub.startedAt) return [];
   const advisorIds = sub.advisors.map((a) => a.advisorId);
-  if (sub.advisors.some((a) => !a.advisor.active)) return [];
+  // Møder holdes altid med hele boardet: mangler en rådgiver (inaktiv eller slettet), kan der ikke bookes
+  if (sub.advisors.some((a) => !a.advisor.active) || !hasWholeBoard(sub)) return [];
   const duration = getEnv().MEETING_DURATION_MINUTES;
   const { earliest, latest } = bookingWindow({ now });
   const [availability, blockedDates] = await Promise.all([loadAvailability(prisma, advisorIds, earliest, latest), getBlockedDates(earliest, latest)]);
@@ -85,6 +91,7 @@ export async function bookMeeting(opts: { subscriptionId: string; startsAt: Date
       const advisorIds = sub.advisors.map((a) => a.advisorId).sort();
       if (advisorIds.length === 0) throw new BookingError("Der er ingen rådgivere på abonnementet.");
       if (sub.advisors.some((a) => !a.advisor.active)) throw new BookingError("En af rådgiverne er ikke længere aktiv.");
+      if (!hasWholeBoard(sub)) throw new BookingError("Boardet mangler en rådgiver. Møder holdes altid med hele boardet – kontakt os, så sætter vi det sammen igen.");
 
       // Lås abonnement og rådgivere i fast rækkefølge (undgår deadlocks)
       for (const key of [`sub:${sub.id}`, ...advisorIds.map((id) => `adv:${id}`)]) {

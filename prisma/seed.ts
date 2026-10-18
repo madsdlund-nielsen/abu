@@ -113,7 +113,8 @@ async function main() {
     await prisma.subscription.create({
       data: {
         customerId: customer.id,
-        advisorCount: 3,
+        // Møder holdes altid med hele boardet: advisorCount = antal rådgivere i boardet
+        advisorCount: DEMO_BOARD_EMAILS.length,
         frequencyWeeks: 8,
         monthlyPriceDkk: monthlyPriceForBoard(
           DEMO_BOARD_EMAILS.map((e) => ADVISORS.find((a) => a.email === e)!.price),

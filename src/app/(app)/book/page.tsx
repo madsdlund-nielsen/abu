@@ -5,7 +5,7 @@ import { bookAction } from "@/app/actions/meetings";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { Empty } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
-import { getBookableSlots, getQuotaInfo } from "@/lib/booking";
+import { getBookableSlots, getQuotaInfo, hasWholeBoard } from "@/lib/booking";
 import { getEnv } from "@/lib/env";
 import { bookingWindow } from "@/lib/slots";
 import { getCustomerSubscription } from "@/lib/subscriptions";
@@ -74,13 +74,18 @@ export default async function BookPage({ searchParams }: { searchParams: SP }) {
     <div>
       <h1>Book møde</h1>
       <p className="mb-6 mt-4 max-w-3xl text-muted">
-        Mødet varer {duration / 60 >= 1 ? `${duration / 60} timer` : `${duration} minutter`} og afholdes online. Tidspunkterne herunder er
-        tidspunkter, hvor alle dine rådgivere ({sub.advisors.map((a) => a.advisor.user.name).join(", ")}) er ledige.
+        Mødet varer {duration / 60 >= 1 ? `${duration / 60} timer` : `${duration} minutter`}, afholdes online og holdes altid med hele dit board.
+        Tidspunkterne herunder er tidspunkter, hvor alle dine rådgivere ({sub.advisors.map((a) => a.advisor.user.name).join(", ")}) er ledige.
       </p>
       <Flash ok={ok} err={err} />
       {inactive.length > 0 ? (
         <Empty>
           {inactive.join(" og ")} er ikke aktiv lige nu, så der kan ikke bookes møder med dit board. Vælg en anden rådgiver under{" "}
+          <Link href="/account/subscription">Konto → Abonnement</Link>, eller kontakt os.
+        </Empty>
+      ) : !hasWholeBoard(sub) ? (
+        <Empty>
+          Dit board mangler en rådgiver, og møder holdes altid med hele boardet. Vælg en ny rådgiver under{" "}
           <Link href="/account/subscription">Konto → Abonnement</Link>, eller kontakt os.
         </Empty>
       ) : noQuota ? (

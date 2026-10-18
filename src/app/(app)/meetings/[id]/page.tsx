@@ -79,8 +79,9 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         <h2>Deltagere</h2>
         <ul className="mt-3 space-y-1 text-sm">
           <li><span className="text-muted">Kunde:</span> {meeting.subscription.customer.user.name}, {meeting.subscription.customer.companyName}</li>
-          <li><span className="text-muted">Rådgivere:</span> {advisors.map((a) => a.user.name).join(", ")}</li>
+          <li><span className="text-muted">Rådgivere (hele boardet):</span> {advisors.map((a) => a.user.name).join(", ")}</li>
         </ul>
+        <p className="mt-2 text-xs text-muted">Møderne holdes altid med hele boardet. Kan en rådgiver ikke deltage, finder vi en afløser.</p>
       </section>
 
       {user.role === "ADMIN" && (

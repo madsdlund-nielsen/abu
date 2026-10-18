@@ -8,8 +8,25 @@ import { rankSubstituteCandidates, type RankedCandidate, type SubstituteCandidat
 import { getVideo } from "./video";
 import { formatDateTime } from "./time";
 
-/** Min. antal rådgivere i et møde */
-export const MIN_MEETING_ADVISORS = 1;
+/** Fejl, når en ren fjernelse ville give færre rådgivere end boardet (ejerens beslutning: møder holdes altid med hele boardet). */
+export const WHOLE_BOARD_ERROR = "Et møde holdes altid med hele boardet – udskift rådgiveren i stedet.";
+
+/**
+ * Møder planlægges altid for hele boardet – aldrig 1:1 eller med et reduceret board (ejerens beslutning 18.10.2026).
+ * Udskiftning (fjern + tilføj i samme handling) er altid tilladt, og admin må tilføje en ekstra deltager ud over boardet.
+ * En ren fjernelse er kun tilladt for en ekstra deltager, altså så længe mødet stadig har mindst boardets størrelse.
+ * Returnerer en dansk fejl eller null.
+ */
+export function meetingAdvisorChangeError(i: { current: number; boardSize: number; remove: boolean; add: boolean }): string | null {
+  if (!i.remove && !i.add) return "Vælg, hvad der skal ændres.";
+  if (i.remove && !i.add && i.current - 1 < Math.max(1, i.boardSize)) return WHOLE_BOARD_ERROR;
+  return null;
+}
+
+/** Kan rådgiveren fjernes uden udskiftning? Kun en ekstra deltager ud over boardet. */
+export function canRemoveWithoutReplacement(current: number, boardSize: number): boolean {
+  return meetingAdvisorChangeError({ current, boardSize, remove: true, add: false }) === null;
+}
 
 function durationMinutes(m: { startsAt: Date; endsAt: Date }): number {
   return Math.round((m.endsAt.getTime() - m.startsAt.getTime()) / 60_000);
@@ -63,7 +80,8 @@ async function lockFor(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>
 }
 
 /**
- * Udskifter, tilføjer eller fjerner rådgivere i ét møde. Ledigheden tjekkes med samme logik og låsning som booking, i en
+ * Udskifter, tilføjer eller fjerner rådgivere i ét møde. Mødet har altid mindst hele boardet (se
+ * `meetingAdvisorChangeError`): en ren fjernelse afvises, medmindre rådgiveren er en ekstra deltager. Ledigheden tjekkes med samme logik og låsning som booking, i en
  * transaktion. Kundens pris er uændret (abonnementet dækker); honoraret registreres pr. faktisk deltager (MeetingParticipant).
  */
 export async function changeMeetingAdvisors(opts: ChangeOpts & { removeId?: string; addId?: string; now?: Date; silent?: boolean }) {
@@ -83,7 +101,8 @@ export async function changeMeetingAdvisors(opts: ChangeOpts & { removeId?: stri
       const advisors = fresh.filter((p) => p.user.role === "ADVISOR");
       if (removeId && !advisors.some((p) => p.userId === removeId)) throw new BookingError("Rådgiveren deltager ikke i mødet.");
       const remaining = advisors.length - (removeId ? 1 : 0) + (addId ? 1 : 0);
-      if (remaining < MIN_MEETING_ADVISORS) throw new BookingError("Et møde skal have mindst én rådgiver.");
+      const ruleError = meetingAdvisorChangeError({ current: advisors.length, boardSize: m.subscription.advisorCount, remove: Boolean(removeId), add: Boolean(addId) });
+      if (ruleError) throw new BookingError(ruleError);
 
       let addedName = "";
       let addedPrice: number | null = null;
@@ -160,4 +179,38 @@ export async function rescheduleMeeting(opts: ChangeOpts & { startsAt: Date; now
   await audit(opts.actorId, "meeting.reschedule", "Meeting", opts.meetingId, detail);
   await meetingEvents.rescheduled(opts.meetingId);
   return { detail };
+}
+
+export interface MeetingBelowBoard {
+  id: string;
+  startsAt: Date;
+  companyName: string;
+  advisors: number;
+  boardSize: number;
+}
+
+/**
+ * Kommende møder med færre rådgivere end kundens board (fx efter GDPR-sletning af en rådgiver, eller hvis kunden har
+ * udvidet boardet efter bookingen). Vises som advarselsliste på admin-forsiden, så admin kan udskifte/tilføje.
+ */
+export async function meetingsBelowBoard(now = new Date()): Promise<MeetingBelowBoard[]> {
+  const rows = await prisma.meeting.findMany({
+    where: { status: "BOOKED", endsAt: { gt: now } },
+    orderBy: { startsAt: "asc" },
+    select: {
+      id: true,
+      startsAt: true,
+      subscription: { select: { advisorCount: true, customer: { select: { companyName: true } } } },
+      participants: { select: { user: { select: { role: true } } } },
+    },
+  });
+  return rows
+    .map((m) => ({
+      id: m.id,
+      startsAt: m.startsAt,
+      companyName: m.subscription.customer.companyName,
+      advisors: m.participants.filter((p) => p.user.role === "ADVISOR").length,
+      boardSize: m.subscription.advisorCount,
+    }))
+    .filter((m) => m.advisors < m.boardSize);
 }

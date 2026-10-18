@@ -4,13 +4,14 @@ import { prisma } from "./db";
  * Driftsalarmer (M-5, L-3). Skrives altid til loggen med præfikset "[ALERT]" (til log-overvågning, fx GlitchTip/Better
  * Stack) og gemmes som AppSetting `alert:<type>`, så de vises på admin-forsiden. Må aldrig kaste.
  */
-export type AlertKind = "sms_cap_number" | "sms_cap_daily" | "sms_country_blocked" | "audit_write_failed";
+export type AlertKind = "sms_cap_number" | "sms_cap_daily" | "sms_country_blocked" | "audit_write_failed" | "advisor_erased";
 
 export const ALERT_LABEL: Record<AlertKind, string> = {
   sms_cap_number: "SMS-loft pr. nummer nået",
   sms_cap_daily: "Dagligt SMS-loft nået",
   sms_country_blocked: "SMS til land uden for tilladt-listen blokeret",
   audit_write_failed: "Audit-loggen kunne ikke skrives",
+  advisor_erased: "Rådgiver slettet – møder og boards mangler en rådgiver",
 };
 
 export interface StoredAlert {
