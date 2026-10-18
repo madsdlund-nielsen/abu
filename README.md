@@ -14,14 +14,20 @@ betaler en fast månedspris, booker møder online og får transskription og resu
 Forudsætninger: Node 22, npm 10 og en Postgres 16 (fx via Docker).
 
 ```bash
-docker run -d --name abu-pg -e POSTGRES_PASSWORD=abu -e POSTGRES_USER=abu -e POSTGRES_DB=abu -p 5432:5432 postgres:16
+docker run -d --name abu-pg -e POSTGRES_PASSWORD="$(openssl rand -hex 32)" -e POSTGRES_DB=abu -p 5432:5432 postgres:16
+docker exec abu-pg createdb -U postgres abu_test   # valgfrit: testdatabase til DB-tests
 
 cp .env.example .env          # alle integrationer er "mock" som standard
+#  .env: sæt ABU_OWNER_PASSWORD og ABU_APP_PASSWORD (openssl rand -hex 32), indsæt dem i DATABASE_URL (abu_app) og
+#  DATABASE_URL_MIGRATE (abu_owner), og sæt DATABASE_URL_PROVISION til superbrugeren (postgres + adgangskoden ovenfor).
 npm install
-npx prisma migrate deploy     # opretter tabellerne
-npm run db:seed               # demodata
-npm run dev                   # http://localhost:3000
+npm run db:roles              # opretter rollerne abu_owner/abu_app og rettighederne (én gang pr. database; idempotent)
+npx prisma migrate deploy     # opretter tabellerne – som ejeren abu_owner (DATABASE_URL_MIGRATE)
+npm run db:seed               # demodata – også som abu_owner
+npm run dev                   # http://localhost:3000 – appen kører som abu_app (kun DML)
 ```
+
+Appen forbinder aldrig som ejer eller superbruger: se *Database og roller* under Deployment.
 
 Seed-brugere:
 
@@ -61,8 +67,9 @@ Seed er **kun til udvikling**: det afvises, når `NODE_ENV=production` eller `AP
 Med Docker Compose (Postgres + migration + app) lokalt:
 
 ```bash
-cp .env.example .env          # sæt APP_ENV=development i .env for at køre lokalt med mock-udbydere
-docker compose up --build
+cp .env.example .env          # sæt APP_ENV=development i .env for at køre lokalt med mock-udbydere, og
+                              # POSTGRES_PASSWORD, ABU_OWNER_PASSWORD, ABU_APP_PASSWORD (openssl rand -hex 32)
+docker compose up --build     # stopper med en fejl, hvis en af de tre adgangskoder mangler
 docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   # valgfrit: demodata (kun lokalt)
 ```
 
@@ -75,10 +82,11 @@ docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Enheds- og integrationstests (vitest). DB-tests kører kun med `TEST_DATABASE_URL` (en separat testdatabase, migreret med `prisma migrate deploy`); ellers springes de over |
-| `npm run db:migrate` | Ny migration under udvikling |
-| `npm run db:deploy` | Anvend migrationer (produktion) |
-| `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) |
-| `npm run create-admin -- --email … --name …` | Opretter første administrator og udskriver et engangslink til at vælge adgangskode (uden flag spørger scriptet i terminalen; `--reset` nyt link, `--reset-mfa` nødprocedure) |
+| `npm run db:roles` | Opretter/opdaterer databaserollerne `abu_owner`, `abu_app` og `abu_jobs` og deres rettigheder (`prisma/roles.sql`) i databasen i `DATABASE_URL_PROVISION` (superbruger); adgangskoder fra `ABU_*_PASSWORD`, sendt som SCRAM-verifikatorer. Idempotent |
+| `npm run db:migrate` | Ny migration under udvikling (som `abu_owner`; Prismas skyggedatabase kræver lokalt `ALTER ROLE abu_owner CREATEDB`) |
+| `npm run db:deploy` | Anvend migrationer (produktion) – som `abu_owner` via `DATABASE_URL_MIGRATE` |
+| `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) – som `abu_owner` |
+| `npm run create-admin -- --email … --name …` | (Som `abu_owner`.) Opretter første administrator og udskriver et engangslink til at vælge adgangskode (uden flag spørger scriptet i terminalen; `--reset` nyt link, `--reset-mfa` nødprocedure) |
 | `npm run storage:check` | Tjekker objektlageret med appens konfiguration: skriver, læser og sletter et testobjekt; med S3 også privat bucket og CORS (se `docs/HETZNER-S3.md`) |
 
 ## Onboarding og CMS
@@ -167,6 +175,8 @@ src/
     slots.ts           Ren funktion: ledige tider for et board (testet)
     quota.ts           Kvoteperioder, aflysningsregler (testet)
     booking.ts         Booking/aflysning med revalidering i DB-transaktion (advisory locks)
+    db.ts, db-config.ts  Prisma-klient (pg-adapter): pool, TLS (sslmode + DATABASE_SSL_CA) og timeouts
+    db-guard.ts        Opstartstjek: appen må ikke køre som superbruger/ejer/BYPASSRLS (RLS fase 0)
     auth.ts            Hashing (bcryptjs), DB-sessioner (SHA-256 af tilfældigt token) med MFA-trin, re-verifikation, invite/reset-tokens
     mfa/               TOTP (RFC 6238), AES-256-GCM-kryptering, gendannelseskoder, betroede enheder; sign-in.ts: login-forløbet
     admin-users.ts     Administratorer: invitation, deaktivering (sidste-admin-værn), nulstilling af MFA
@@ -179,7 +189,8 @@ src/
   proxy.ts             Letvægts-gate (kræver session-cookie, ?next= til login) + sikkerhedsheaders (CSP med nonce, HSTS,
                        Permissions-Policy); rollekontrol sker i layouts/sider
   instrumentation.ts   Fail-closed opstartstjek af konfigurationen (C-1) og planlæggeren
-prisma/                schema, migrationer, seed
+prisma/                schema, migrationer, seed, roles.sql (databaseroller og rettigheder)
+docker/postgres/initdb/  opretter rollerne ved første start af compose-Postgres
 ```
 
 **Adaptere.** Hver integration har et interface og en `mock`-implementering, valgt via miljøvariabel:
@@ -246,17 +257,23 @@ Tjeklisten viser også «Profilbillede (valgfrit)», men et foto er ikke et krav
 (`/admin/advisors/[id]`) uploader, skifter og fjerner profilbilledet (kvadratisk forhåndsvisning, «Vælg billede» /
 «Skift billede» / «Fjern billede», træk og slip). Der er ingen foto-URL længere: eksterne billeder lækkede besøgendes
 IP-adresser til tredjepart, og CSP'ens `img-src` er nu kun `'self' data: blob:`.
+- Upload går gennem `PUT /api/avatar/<id>` med filen som body – ikke en server action, som ville læse hele filen ind, før
+  koden kører (D-2). Rettigheder, `Content-Length` (> 5 MB → 413 med det samme), én upload ad gangen pr. bruger (429) og
+  den fælles grænse for tungt arbejde (503) tjekkes, **før** body'en læses; den læses som stream med loft og 30 sek. tidsgrænse.
 - Kun JPEG, PNG og WebP på højst 5 MB, genkendt ud fra filens første bytes (samme magic bytes-hjælper som optagelser,
   `detectImageType` i `media-type.ts`). SVG (XSS), GIF, HEIC m.fl. afvises. Mindst 200 × 200 px.
 - Behandling med `sharp` (libvips, fast version): roteres efter EXIF, **alle metadata fjernes** (EXIF/GPS/XMP/ICC),
-  centreret beskæring til kvadrat, 512 × 512 WebP (kvalitet 82) + 96 × 96-miniature. Højst 50 megapixel ind
+  centreret beskæring til kvadrat, 512 × 512 WebP (kvalitet 82) + 96 × 96-miniature. Højst 25 megapixel ind
   (`limitInputPixels`, mod dekompressionsbomber), tidsgrænse pr. billede og samme grænse for samtidigt tungt arbejde som upload af optagelser.
 - Lagres via storage-adapteren (lokalt / Hetzner Object Storage, **privat** bucket) som `avatars/<id>/<tilfældig>.webp`
   og `…-96.webp`. Et nyt billede sletter de gamle objekter; upload, skift og fjernelse audit-logges (`advisor.photo.*`).
 - Serveres af appen: `GET /api/avatar/<id>?size=512|96&v=<version>` streamer fra lageret med `Content-Type: image/webp`,
-  `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` og `Cache-Control: public, max-age=31536000, immutable`
-  (versionen er tidspunktet for seneste upload, så en ny upload giver en ny URL). Manglende billede, ukendt rådgiver
-  og manglende adgang giver det samme 404.
+  `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`, `Vary: Cookie` og
+  `Cache-Control: public, max-age=300, must-revalidate` + `ETag` (inaktive: `private`). Fotoet er persondata, så det caches
+  aldrig `immutable` (D-1): efter 5 minutter genvaliderer browsere og proxies (billigt 304), og et fjernet eller slettet
+  billede giver så 404 (`no-store`). Versionen er tidspunktet for seneste upload, så en ny upload vises med det samme.
+  Manglende billede, ukendt rådgiver og manglende adgang giver det samme 404, og seeren slås op i alle tilfælde, så
+  svartiden ikke afslører noget (D-3).
 - **Adgang (beslutning):** onboarding-kataloget (`/kom-i-gang`) vises før login, så **aktive** rådgiveres fotos er
   offentlige – de er jo netop til at blive vist for kommende kunder. **Inaktive** rådgiveres fotos ser kun admin og
   rådgiveren selv (`private`-cache); alle andre får 404, og siderne viser initialer i stedet.
@@ -273,7 +290,9 @@ board-builder og server-validering). Ved køb tildeles den kvalificerede med fæ
 navn) under en advisory lock. Forlader den ansvarlige boardet, deaktiveres, slettes eller mister tagget, tildeles en ny automatisk; ellers
 vises boardet for admin. Admin kan vælge manuelt (`/admin/subscriptions/[id]`) og se fordelingen samt et udligningsforslag på
 `/admin/ansvarlige`, som kun anvendes efter bekræftelse. Interne admin-tags vises aldrig for kunder eller rådgivere og bruges ikke i
-matchingen. Skift af ansvarlig sender notifikationen «Ansvarlig rådgiver ændret» (`board_lead_changed`).
+matchingen. Bevidst undtagelse (D-5, ejerens UI-valg): board-builderen får et afledt `leadEligible` pr. rådgiver og viser
+«Kan være ansvarlig» – også før login i onboarding. Tagget selv (navn, slug, `systemKey`, `kind`) sendes aldrig til browseren.
+Skal besøgende ikke kunne se, *hvem* der er kvalificeret, skal boolean'en skjules for ikke-admins i `loadCatalog()`. Skift af ansvarlig sender notifikationen «Ansvarlig rådgiver ændret» (`board_lead_changed`).
 
 **Booking.** Et tidspunkt tilbydes kun, hvis *alle* rådgivere i boardet er ledige (inden for en ugentlig regel, ingen blokering,
 intet andet møde inkl. 30 min buffer). Vindue: 2 dage – 16 uger frem. Kvote: ét møde pr. periode (frekvens i uger regnet fra
@@ -291,7 +310,8 @@ optagelsesnotits er accepteret. Manuel upload går aldrig gennem en server actio
 med `Authorization: Bearer $CRON_SECRET` (kald fra fx cron hvert minut).
 
 **GDPR.** Dataeksport (JSON med udvalgte felter – fx aldrig værtens mødelink eller udbyder-id'er; profilbilledet som metadata med lagernøgler og tidspunkt plus en note om, hvordan selve billedet hentes eller rekvireres) og sletningsanmodning under *Konto*; sletning
-opsiger abonnementet hos betalingsudbyderen, sletter optagelser og en rådgivers profilbillede (begge størrelser) i lageret og webhook-data med kundens oplysninger og fjerner notifikationslog,
+opsiger abonnementet hos betalingsudbyderen, sletter optagelser og en rådgivers profilbillede (begge størrelser) i lageret (allerede
+udleverede kopier i browser-/proxy-caches udløber senest efter 5 minutter, D-1) og webhook-data med kundens oplysninger og fjerner notifikationslog,
 leads og samtykker; webhook-payloads ryddes efter 30 dage; audit-log over admin-handlinger og adgang til transskriptioner (fejl i audit-loggen
 giver en driftsalarm); samtykke ved tilmelding (vilkår, optagelse, evt. markedsføring med ordret tekst og version); afmelding via link/STOP/Konto; notifikationsloggen (standard 12 mdr.) og leads med samtykke (24 mdr.) ryddes af jobkøen; ingen tredjeparts-analytics eller eksterne fonte.
 
@@ -342,7 +362,9 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | Variabel | Krav i produktion |
    |---|---|
    | `APP_URL` | `https://…` (ikke localhost) |
-   | `DATABASE_URL` / `POSTGRES_PASSWORD` | sat eksplicit; stærk adgangskode |
+   | `POSTGRES_PASSWORD`, `ABU_OWNER_PASSWORD`, `ABU_APP_PASSWORD` | hver `openssl rand -hex 32` (compose kræver dem; se *Database og roller*) |
+   | `DATABASE_URL` | compose sætter den selv (`abu_app@postgres`). Uden compose: `abu_app`, adgangskode ≥ 24 tegn og `?sslmode=verify-full` (eller `require`) |
+   | `DATABASE_SSL_CA` | sti til databasens CA-certifikat (PEM), når den ikke er udstedt af en offentlig CA |
    | `APP_SECRET`, `CRON_SECRET` | mindst 32 tilfældige tegn hver (`openssl rand -base64 48`) |
    | `MFA_ENCRYPTION_KEY` | mindst 32 tilfældige tegn, forskellig fra `APP_SECRET`; krypterer TOTP-hemmeligheder. Gem den sikkert – mistes den, skal alle opsætte MFA igen. Rotation: ny værdi her, den gamle i `MFA_ENCRYPTION_KEY_PREVIOUS` |
    | `TRUSTED_PROXY_HOPS` | ≥ 1 |
@@ -354,7 +376,9 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` med jeres kontaktadresse (eller `virk` + login) | CVR |
    | `APP_ENV` | tom (eller `production`) – sæt **aldrig** `development` i drift |
 
-4. `docker compose up -d --build` – `migrate`-servicen kører `prisma migrate deploy` (med `NODE_ENV=production`), derefter starter appen.
+4. `docker compose up -d --build` – ved første start opretter Postgres rollerne (`docker/postgres/initdb`), `migrate`-servicen kører
+   `prisma migrate deploy` som `abu_owner` (med `NODE_ENV=production`), og derefter starter appen som `abu_app`. Opstartsloggen viser
+   `[db] rolle=abu_app · TLS=… · superbruger=nej · BYPASSRLS=nej · ejer=nej`.
 5. **Opret den første administrator** (kør **aldrig** seed i produktion – det afvises). Ejerens konto:
    `docker compose run --rm migrate npm run create-admin -- --email mads@qlim8.com --name "Mads"`
    (uden `--email`/`--name` spørger scriptet, når det køres med en terminal, fx `docker compose run --rm -it migrate npm run create-admin`).
@@ -374,20 +398,76 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
 `includeSubDomains`; overvej `preload`, når domænet er endeligt), Permissions-Policy (kamera/mikrofon/skærmdeling kun på mødesiderne),
 `X-Frame-Options`, `Referrer-Policy` og `nosniff`. Alle sider renderes dynamisk, fordi noncen skal være ny pr. request.
 
-Hvis Postgres og app kører på to servere, sæt `DATABASE_URL` direkte i `.env` og fjern `postgres`-servicen fra compose-filen.
+Hvis Postgres og app kører på to servere, sæt `DATABASE_URL` direkte i `.env` og fjern `postgres`-servicen fra compose-filen
+(se *Database og roller* nedenfor: provisionering med `npm run db:roles`, og TLS er da påkrævet).
 
-**CI** (`.github/workflows/ci.yml`): `npm ci`, `npm audit --omit=dev --audit-level=high`, lint, typetjek, tests mod en Postgres-service,
-build, et tjek af at produktionsbuildet nægter at starte med mock-konfiguration, og `docker build`. Afhængigheder opdateres ugentligt og
+### Database og roller (RLS fase 0)
+
+Appen kører **aldrig** som ejer eller superbruger (`docs/SECURITY-AUDIT-DELTA.md`, del B). Tre roller, defineret i `prisma/roles.sql`:
+
+| Rolle | Bruges af | Rettigheder |
+|---|---|---|
+| `postgres` (superbruger) | kun provisionering (`docker/postgres/initdb`, `npm run db:roles`) | alt – aldrig i appens miljø |
+| `abu_owner` | `migrate`-servicen: `prisma migrate deploy`, seed, `create-admin` (`DATABASE_URL_MIGRATE`) | ejer databasen, schema `public` og alle tabeller; ingen superbruger/CREATEROLE/BYPASSRLS |
+| `abu_app` | appen (`DATABASE_URL`) | LOGIN; kun `SELECT/INSERT/UPDATE/DELETE` på tabellerne og `USAGE` på sekvenser; ingen DDL, ingen `TRUNCATE`, ingen `CREATE` i `public`, ingen midlertidige tabeller, intet medlemskab af andre roller; `AuditLog` er append-only (kun `SELECT/INSERT`), `_prisma_migrations` er lukket |
+| `abu_jobs` | forberedt til RLS fase 1 (system-/cronjobs); bruges ikke endnu | som `abu_app`, men med længere timeouts |
+
+- **Fremtidige tabeller:** `ALTER DEFAULT PRIVILEGES FOR ROLE abu_owner` giver automatisk `abu_app` DML på nye tabeller fra migrationer;
+  migrationen `20261019100000_db_roles_phase0` lukker igen for `_prisma_migrations` og gør `AuditLog` append-only.
+- **Timeouts** sidder på rollen (og sættes også af klienten): `abu_app` har `statement_timeout = 15s`, `lock_timeout = 10s` (også
+  advisory locks) og `idle_in_transaction_session_timeout = 30s`; poolen har højst `DATABASE_POOL_MAX` (standard 10) forbindelser pr.
+  proces. Ingen af appens jobs har brug for mere; skulle én enkelt sætning få det, bruges `SET LOCAL statement_timeout = '…'` i dens
+  transaktion (tilladt for `abu_app`), eller jobbet flyttes til `abu_jobs` (5 min) i fase 1.
+- **Opstartstjek (C-1):** i produktion nægter appen at starte, hvis `DATABASE_URL` forbinder som superbruger, med BYPASSRLS/CREATEROLE/
+  CREATEDB, som ejer af tabellerne/databasen (også via medlemskab) eller med `CREATE` i `public` – én billig forespørgsel mod `pg_roles`
+  og ejerskabet af tabellen `"User"`. Kan databasen ikke nås, starter appen heller ikke. Rollenavnet logges, aldrig URL'en.
+  `DATABASE_URL_MIGRATE`, `DATABASE_URL_PROVISION`, `ABU_OWNER_PASSWORD` og `POSTGRES_PASSWORD` må ikke være sat i app-processen
+  (compose tømmer dem i `app`-servicen).
+- **TLS:** i produktion skal `DATABASE_URL` have `?sslmode=verify-full` (anbefalet; værtsnavn + CA, CA-fil i `DATABASE_SSL_CA`, ellers
+  systemets rodcertifikater), `verify-ca` eller `require` (krypteret uden certifikattjek – kun hvis intet andet er muligt). `prefer`/`allow`
+  afvises. **Undtagelse (dokumenteret og bevidst):** en Unix-socket (`?host=/var/run/postgresql`), loopback (`localhost`, `127.x`, `::1`)
+  og compose-databasen med værtsnavnet `postgres`, som appen når over Dockers interne bridge-netværk på samme maskine (porten publiceres
+  ikke, trafikken forlader aldrig værten). Flyttes databasen til en anden server, gælder kravet. Migrationer (Prismas egen motor) bruger
+  Prismas URL-parametre: `?sslmode=require&sslaccept=strict&sslcert=/sti/til/ca.pem` i `DATABASE_URL_MIGRATE`.
+
+**Provisionering i produktion – det skal ejeren gøre:**
+
+1. Generér tre adgangskoder: `openssl rand -hex 32` til `POSTGRES_PASSWORD`, `ABU_OWNER_PASSWORD` og `ABU_APP_PASSWORD` (kun hex/URL-sikre
+   tegn – de indsættes direkte i URL'er). Læg dem i `.env` på serveren (rettigheder 600) og i jeres password-manager – aldrig i repoet.
+2. **Med compose (ny server/tom volumen):** `docker compose up -d --build` opretter rollerne automatisk ved Postgres' første start.
+   **Eksisterende volumen** (oprettet før fase 0 med superbrugeren `abu`): sæt `POSTGRES_SUPERUSER=abu` og dens gamle adgangskode i
+   `POSTGRES_PASSWORD` i `.env`, og kør `docker compose run --rm db-roles` én gang (før `docker compose up`); `prisma/roles.sql` overdrager
+   databasen og alle eksisterende tabeller til `abu_owner`. Uden data (før lancering) er `docker compose down -v` og en ny start enklest.
+3. **Ekstern/administreret Postgres:** opret databasen, og kør med en superbruger-URL (kun i din egen terminal, aldrig i `.env` på app-serveren):
+   `DATABASE_URL_PROVISION=postgresql://postgres:…@db-vært:5432/abu?sslmode=verify-full DATABASE_SSL_CA=/sti/ca.pem ABU_OWNER_PASSWORD=… ABU_APP_PASSWORD=… npm run db:roles`.
+   Sæt derefter `DATABASE_URL=postgresql://abu_app:…@db-vært:5432/abu?sslmode=verify-full` (app) og `DATABASE_URL_MIGRATE` (kun migrate).
+4. Kontrollér opstartsloggen: `[db] rolle=abu_app · … · ejer=nej` (og `TLS=ja` for en ekstern database).
+5. **Skift af adgangskode:** ny værdi i `.env`, `docker compose run --rm db-roles` (eller `npm run db:roles`), derefter `docker compose up -d`.
+
+**CI** (`.github/workflows/ci.yml`): `npm ci`, `npm audit --omit=dev --audit-level=high`, lint, typetjek, `npm run db:roles` (tilfældige
+adgangskoder pr. kørsel), migrationer som `abu_owner`, alle tests som `abu_app` mod en Postgres-service (så rolleopdelingen testes),
+build, et tjek af at produktionsbuildet nægter at starte med mock-konfiguration, og `docker build`. CI starter ikke på PR'er, der kun
+ændrer `docs/**` eller `*.md` (`paths-ignore`). Gør derfor **ikke** CI-jobbene til påkrævede status-checks i branch protection – en
+ren docs-PR ville så vente for evigt på et check, der aldrig kommer (D-6); `deploy.yml` kører CI før hver deploy alligevel. Afhængigheder opdateres ugentligt og
 grupperet af Renovate (`renovate.json`) med review.
 
 ## Test
 
 ```bash
 npm test                                                     # enhedstests; DB-tests springes over
-TEST_DATABASE_URL=postgresql://abu:abu@localhost:5432/abu_test npm test   # også DB-tests (testdatabasen migreres først)
+# DB-tests: testdatabasen provisioneres og migreres som ejeren, og testene kører som app-rollen (som i CI)
+DATABASE_URL_PROVISION=postgresql://postgres:…@localhost:5432/abu_test npm run db:roles
+DATABASE_URL_MIGRATE=postgresql://abu_owner:…@localhost:5432/abu_test npx prisma migrate deploy
+TEST_DATABASE_URL=postgresql://abu_app:…@localhost:5432/abu_test \
+TEST_DATABASE_URL_OWNER=postgresql://abu_owner:…@localhost:5432/abu_test npm test
 npm run lint && npm run typecheck && npm run build
 npm audit --omit=dev --audit-level=high
 ```
+
+`src/lib/db-privileges.test.ts` beviser rolleopdelingen mod databasen: `abu_app` kan ikke `CREATE/ALTER/DROP/TRUNCATE`, oprette indeks,
+funktioner, schemaer eller midlertidige tabeller, `SET ROLE abu_owner`, læse `pg_authid` eller migrationshistorikken, eller ændre/slette i
+`AuditLog`; almindelig CRUD virker; timeouts sidder på rollen; og opstartstjekket afviser en forbindelse som `abu_owner` i produktion.
+`TEST_DATABASE_URL_OWNER` bruges ellers kun til oprydning, som appens rolle bevidst ikke må (audit-loggen).
 
 MFA-tests: TOTP mod RFC 4226/6238-vektorerne, vindue og replay (`src/lib/mfa/totp.test.ts`), kryptering, manipulation og rotation
 (`crypto.test.ts`), gendannelseskoder, betroede enheder (30 dage, ingen forlængelse, tilbagekaldelse) og lockout (`service.test.ts`,

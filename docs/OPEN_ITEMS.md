@@ -80,7 +80,7 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 - Mistral: feltnavne i transskriberings-API'et og grænser for filstørrelse/varighed. Filen sendes nu som en disk-baseret Blob (ikke i RAM), men Mistrals maksimale filstørrelse skal afklares.
 
 **Docker og test:**
-- Docker-imaget er bygget og kørt lokalt 18.10.2026 (mock-konfiguration nægter at starte, dev-konfiguration svarer; `migrate`, `create-admin` og seed-afvisning testet i build-imaget). I sandkassen krævede `npm ci` i imaget proxyens CA (kun en lokal variant af Dockerfilen); CI kører et almindeligt `docker build .`. `docker compose` som helhed er ikke kørt.
+- Docker-imaget er bygget og kørt lokalt 18.10.2026 (mock-konfiguration nægter at starte, dev-konfiguration svarer; `migrate`, `create-admin` og seed-afvisning testet i build-imaget). I sandkassen krævede `npm ci` i imaget proxyens CA (kun en lokal variant af Dockerfilen); CI kører et almindeligt `docker build .`. `docker compose up` som helhed er kørt 18.10.2026 med det nye rolleforløb (init-script → migrate som `abu_owner` → app som `abu_app`, seed/create-admin via `migrate`, `db-roles` igen, ingen hemmeligheder i loggene) – stadig med sandkassens CA-variant af Dockerfilen.
 - Lib-niveauet har nu DB-integrationstests (kører med `TEST_DATABASE_URL`, i CI mod en Postgres-service). Server actions og HTTP-ruter testes stadig kun end-to-end med Playwright (scripts uden for repoet): onboarding → testbetaling → booking → møde/upload/transskription, admin, CMS, notifikationer, leads.
 
 **Onboarding og CMS (nyt):**
@@ -127,6 +127,17 @@ Stripe, Zoom/Teams/Daily, OpenAI/Deepgram/AssemblyAI, Vercel/AWS, Auth0/Clerk, S
 - **Login-spærring:** en angriber, der kender en e-mail, kan spærre kontoen i 15 min (og eskalerende). Indbygget i pr.-konto-spærring; nulstilling af adgangskoden ophæver spærringen. Overvåg `auth.lockout` i audit-loggen.
 - **CSP:** `img-src` er strammet til `'self' data: blob:` (ingen eksterne billedværter, efter at foto-URL'er er erstattet af upload). `style-src` tillader `'unsafe-inline'` (inline style-attributter, fx bredden på fremdriftslinjer); scripts er nonce-låst. Kan strammes ved at erstatte style-attributter med CSS-variabler. Alle sider renderes dynamisk pga. noncen.
 - **npm audit (kun udviklingsværktøjer):** `braces`/`micromatch`/`fast-glob` og `postcss-selector-parser` via Tailwind 3 og ESLint-plugins (bruges kun ved build/lint, ikke i produktionsbundlen). Rettes ved migrering til Tailwind 4. `npm audit --omit=dev` er ren.
-- **Renovate og GitHub:** installér Renovate-appen på repoet, slå branch-beskyttelse til på `main` (kræv CI grøn) og secret scanning.
+- **Renovate og GitHub:** installér Renovate-appen på repoet, slå branch-beskyttelse til på `main` og secret scanning. **Gør ikke** CI-jobbene til påkrævede checks, så længe `ci.yml` har `paths-ignore` for docs (D-6): en ren docs-PR ville vente for evigt. Vil du kræve grøn CI, så fjern `paths-ignore` (eller tilføj et lille altid-kørende job, der gøres påkrævet).
 - **Konsol-adaptere (kun udvikling):** loggen maskerer alle 8-cifrede tal (også CVR-numre i firmanavne) – bevidst konservativt.
 - **Kontrast:** endelig godkendelse af ejeren; mellemvej beskrevet i `docs/screens/kontrast/README.md`.
+
+## 7. Databaseroller og RLS (delta-audit, 18.10.2026)
+
+- **Fase 0 er udført** (se `docs/SECURITY-AUDIT-DELTA.md` → «Remediation status»): `abu_owner`/`abu_app`/`abu_jobs`, ingen standardadgangskoder, TLS-krav, timeouts, opstartstjek og CI som `abu_app`.
+- **Ejeren skal (før lancering):** generere `POSTGRES_PASSWORD`, `ABU_OWNER_PASSWORD`, `ABU_APP_PASSWORD` (`openssl rand -hex 32`) og følge README → *Database og roller*. En compose-volumen fra før fase 0 (superbruger `abu`) skal have rollerne kørt én gang (`POSTGRES_SUPERUSER=abu` + `docker compose run --rm db-roles`) – eller slettes, hvis der ingen data er.
+- **Ekstern/administreret Postgres:** `npm run db:roles` kræver en superbruger (`ALTER DATABASE … OWNER`, ejerskifte af tabeller). Har udbyderen ingen superbruger, skal `prisma/roles.sql` tilpasses (fx opret databasen direkte med `abu_owner` som ejer).
+- **`prisma migrate dev`** (nye migrationer lokalt) kræver, at `abu_owner` må oprette Prismas skyggedatabase: lokalt `ALTER ROLE abu_owner CREATEDB` (aldrig i produktion).
+- **RLS fase 1–3 (TODO, ca. 4–7 dage):** politikker pr. tabel efter planen i delta-auditten. Fase 1 skal tage højde for punkterne under «What Phase 1 (RLS policies) must account for» (system-kontekst til jobs/webhooks/cron – evt. via `abu_jobs`, seed/migrationer som ejer med `FORCE`, raw SQL, sider før login, test-hjælper).
+- **D-5 (beslutning):** board-builderen viser «Kan være ansvarlig» (afledt `leadEligible`) også før login. Bevidst; skal det skjules for besøgende, ændres `loadCatalog()`.
+- **D-7:** når `deploy.yml` får et rigtigt deploy-trin (ssh/docker), behold `permissions: contents: read`, `environment: production` med påkrævede reviewers, ingen utroværdige værdier i `run:`, og hemmeligheder kun via `production`-miljøet.
+- **Rådgiverfotos og cache (D-1):** et fjernet eller slettet foto kan stå i en browser-/proxy-cache i højst 5 minutter (derefter 404). Nævn det sammen med bucket-versioneringen (30 dage) i privatlivspolitikken.
