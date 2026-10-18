@@ -382,7 +382,7 @@ export const subscriptionEvents = {
 
 // --------------------------------------------------------------------------- Udløsere: konto (transaktionelle, med engangslinks)
 
-async function sendSubjectNow(trigger: "advisor_invited" | "password_reset" | "account_exists", user: User, vars: Record<string, string>): Promise<boolean> {
+async function sendSubjectNow(trigger: "advisor_invited" | "admin_invited" | "password_reset" | "account_exists", user: User, vars: Record<string, string>): Promise<boolean> {
   const result = await safely(trigger, async () => {
     const ids = await enqueue({
       trigger,
@@ -404,6 +404,8 @@ async function sendSubjectNow(trigger: "advisor_invited" | "password_reset" | "a
 
 export const accountEvents = {
   invited: (user: User, link: string) => sendSubjectNow("advisor_invited", user, { invitationslink: link }),
+  /** Kun platform-administratorer (Admin → Administratorer). */
+  adminInvited: (user: User, link: string) => sendSubjectNow("admin_invited", user, { invitationslink: link }),
   passwordReset: (user: User, link: string) => sendSubjectNow("password_reset", user, { nulstillingslink: link }),
   /** Neutral besked til en eksisterende konto, der starter en ny tilmelding (M-1). */
   alreadyExists: (user: User) => sendSubjectNow("account_exists", user, { loginlink: `${appUrl()}/login`, nulstillingsside: `${appUrl()}/reset-password` }),

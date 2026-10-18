@@ -23,6 +23,7 @@ export const TRIGGER_KEYS = [
   "payment_failed",
   "onboarding_abandoned",
   "advisor_invited",
+  "admin_invited",
   "password_reset",
   "account_exists",
 ] as const;
@@ -180,6 +181,19 @@ export const TRIGGERS: Record<TriggerKey, TriggerDef> = {
     label: "Rådgiver inviteret",
     group: "Konto",
     description: "Invitation med link til at vælge adgangskode. Transaktionel: kan ikke slås fra.",
+    timing: "event",
+    locked: true,
+    optIn: false,
+    sensitive: true,
+    audiences: ["SUBJECT"],
+    variables: [...COMMON, "invitationslink"],
+  },
+  admin_invited: {
+    key: "admin_invited",
+    label: "Administrator inviteret",
+    group: "Konto",
+    description:
+      "Invitation til en ny platform-administrator (Admin → Administratorer) med link til at vælge adgangskode. Ved første login skal administratoren opsætte totrinsbekræftelse. Kun til administratorer. Transaktionel: kan ikke slås fra.",
     timing: "event",
     locked: true,
     optIn: false,

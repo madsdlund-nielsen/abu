@@ -3,6 +3,7 @@ import Link from "next/link";
 import { processJobsAction } from "@/app/actions/admin";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { ALERT_LABEL, recentAlerts } from "@/lib/alerts";
+import { ACTIVE_ADMIN_WHERE } from "@/lib/admin-users";
 import { prisma } from "@/lib/db";
 import { loadLeadOverview } from "@/lib/lead";
 import { meetingsBelowBoard } from "@/lib/meeting-admin";
@@ -13,7 +14,7 @@ export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminHome({ searchParams }: { searchParams: SP }) {
   const { ok, err } = await flashFrom(searchParams);
-  const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr, alerts, belowBoard, leadOverview] = await Promise.all([
+  const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr, alerts, belowBoard, leadOverview, admins] = await Promise.all([
     prisma.advisorProfile.count(),
     prisma.customerProfile.count(),
     prisma.subscription.count({ where: { status: "ACTIVE" } }),
@@ -25,6 +26,7 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
     recentAlerts(7),
     meetingsBelowBoard(),
     loadLeadOverview(),
+    prisma.user.count({ where: ACTIVE_ADMIN_WHERE }),
   ]);
   const stats: [string, string | number, string][] = [
     ["Rådgivere", advisors, "/admin/advisors"],
@@ -33,6 +35,7 @@ export default async function AdminHome({ searchParams }: { searchParams: SP }) 
     ["Kommende møder", upcoming, "/admin/meetings"],
     ["Månedlig omsætning", formatDkk(mrr._sum.monthlyPriceDkk ?? 0), "/admin/subscriptions"],
     ["Sletningsanmodninger", deletions, "/admin/customers"],
+    ["Administratorer", admins, "/admin/administratorer"],
   ];
   return (
     <div className="space-y-6">

@@ -303,6 +303,22 @@ Du er oprettet som rådgiver hos Advisory Board Unlimited. Vælg en adgangskode 
 ${SIGN}`,
   },
   {
+    key: "admin_invited_email",
+    channel: "EMAIL",
+    name: "Invitation til administrator (e-mail)",
+    subject: "Du er inviteret som administrator af Advisory Board Unlimited",
+    body: `Hej {{fornavn}}
+
+Du er inviteret som administrator af Advisory Board Unlimited. Vælg en adgangskode via linket (gyldigt i 7 dage, kan bruges én gang):
+{{invitationslink}}
+
+Ved første login skal du opsætte totrinsbekræftelse med en godkendelses-app, fx Authy, Google Authenticator eller 1Password. Hav telefonen klar.
+
+Har du ikke ventet denne invitation, kan du se bort fra e-mailen.
+
+${SIGN}`,
+  },
+  {
     key: "password_reset_email",
     channel: "EMAIL",
     name: "Nulstil adgangskode (e-mail)",
@@ -356,6 +372,7 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { trigger: "onboarding_abandoned", offsetMinutes: 1440, channel: "EMAIL", templateKey: "onboarding_abandoned_2_email", audience: "SUBJECT" },
   { trigger: "onboarding_abandoned", offsetMinutes: 4320, channel: "SMS", templateKey: "onboarding_abandoned_sms", audience: "SUBJECT", quietHours: true },
   { trigger: "advisor_invited", offsetMinutes: 0, channel: "EMAIL", templateKey: "advisor_invited_email", audience: "SUBJECT" },
+  { trigger: "admin_invited", offsetMinutes: 0, channel: "EMAIL", templateKey: "admin_invited_email", audience: "SUBJECT" },
   { trigger: "password_reset", offsetMinutes: 0, channel: "EMAIL", templateKey: "password_reset_email", audience: "SUBJECT" },
   { trigger: "account_exists", offsetMinutes: 0, channel: "EMAIL", templateKey: "account_exists_email", audience: "SUBJECT" },
 ];
