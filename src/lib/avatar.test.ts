@@ -2,7 +2,8 @@ import { Readable } from "node:stream";
 import { crc32 } from "node:zlib";
 import sharp from "sharp";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { describeDb, uid, ownerDb } from "../test/db";
+import type { Prisma, PrismaClient, Role } from "@prisma/client";
+import { asAnon, asSystem, asUser, describeDb, uid, ownerDb } from "../test/db";
 import { AVATAR_ERRORS, MAX_AVATAR_BYTES, MAX_INPUT_PIXELS, newAvatarKeys, processAvatar, readBodyLimited, validateAvatarInput } from "./avatar";
 import { avatarObjectKeys, avatarSizeFor, avatarSrc, avatarVersion, canViewAvatar, thumbKeyFor, visibleAvatarVersion } from "./avatar-url";
 import { detectImageType } from "./media-type";
@@ -254,52 +255,61 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
   afterAll(async () => {
     const { prisma } = await import("./db");
     await (await ownerDb()).auditLog.deleteMany({ where: { entityId: { in: ids } } });
-    await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    await asSystem(() => prisma.user.deleteMany({ where: { id: { in: ids } } }));
   });
+  /** Kalderen (rådgiveren selv, admin, en kunde …) som principal – null = før login. */
+  const run = <T>(who: { id: string; role: Role } | null, fn: () => Promise<T>) => (who ? asUser(who, fn) : asAnon(fn));
+  /** Kontrol af databasen udefra (systemkontekst). */
+  const sys = <T>(fn: (p: PrismaClient) => Promise<T>) => import("./db").then(({ prisma }) => asSystem(() => fn(prisma)));
+  const db = {
+    advisorProfile: { findUniqueOrThrow: (a: Prisma.AdvisorProfileFindUniqueOrThrowArgs) => sys((p) => p.advisorProfile.findUniqueOrThrow(a)) },
+    auditLog: { findMany: (a: Prisma.AuditLogFindManyArgs) => sys((p) => p.auditLog.findMany(a)) },
+  };
 
   async function mkUser(role: "ADVISOR" | "ADMIN" | "CUSTOMER", active = false) {
     const { prisma } = await import("./db");
-    const u = await prisma.user.create({
-      data: { email: `${uid(role.toLowerCase())}@test.dk`, name: `${role} Test`, role, ...(role === "ADVISOR" ? { advisorProfile: { create: { active } } } : {}) },
-    });
+    const u = await asSystem(() =>
+      prisma.user.create({
+        data: { email: `${uid(role.toLowerCase())}@test.dk`, name: `${role} Test`, role, ...(role === "ADVISOR" ? { advisorProfile: { create: { active } } } : {}) },
+      }),
+    );
     ids.push(u.id);
     return { id: u.id, role };
   }
 
   it("upload gemmer begge størrelser; et nyt billede sletter de gamle objekter; fjern sletter alt – alt audit-logges", async () => {
-    const { prisma } = await import("./db");
     const { saveAdvisorPhoto, removeAdvisorPhoto } = await import("./avatar");
     const storage = memStorage();
     const adv = await mkUser("ADVISOR");
     const admin = await mkUser("ADMIN");
 
-    const first = await saveAdvisorPhoto(adv, adv.id, await jpegWithGps(640, 480), { storage });
+    const first = await run(adv, async () => saveAdvisorPhoto(adv, adv.id, await jpegWithGps(640, 480), { storage }));
     expect(first).toMatchObject({ ok: true, message: "Profilbilledet er gemt." });
-    const p1 = await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } });
+    const p1 = await db.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } });
     expect(p1.photoKey).toMatch(new RegExp(`^avatars/${adv.id}/[A-Za-z0-9_-]+\\.webp$`));
     expect(first.ok && first.version).toBe(avatarVersion(p1.photoUpdatedAt));
     expect([...storage.m.keys()].sort()).toEqual(avatarObjectKeys(p1.photoKey).sort());
     expect(hasGpsIfd((await sharp(storage.m.get(p1.photoKey!)!).metadata()).exif)).toBe(false);
 
     // Admin skifter billedet: de gamle objekter slettes
-    const second = await saveAdvisorPhoto(admin, adv.id, await solid(300, 300, { r: 10, g: 120, b: 10 }).png().toBuffer(), { storage });
+    const second = await run(admin, async () => saveAdvisorPhoto(admin, adv.id, await solid(300, 300, { r: 10, g: 120, b: 10 }).png().toBuffer(), { storage }));
     expect(second).toMatchObject({ ok: true, message: "Profilbilledet er skiftet." });
-    const p2 = await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } });
+    const p2 = await db.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } });
     expect(p2.photoKey).not.toBe(p1.photoKey);
     expect([...storage.m.keys()].sort()).toEqual(avatarObjectKeys(p2.photoKey).sort());
     for (const k of avatarObjectKeys(p1.photoKey)) expect(storage.m.has(k)).toBe(false);
 
     // Afvist billede ændrer intet
-    expect(await saveAdvisorPhoto(adv, adv.id, Buffer.from("<svg onload=alert(1)>"), { storage })).toEqual({ ok: false, error: AVATAR_ERRORS.bad_format });
-    expect((await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } })).photoKey).toBe(p2.photoKey);
+    expect(await run(adv, async () => saveAdvisorPhoto(adv, adv.id, Buffer.from("<svg onload=alert(1)>"), { storage }))).toEqual({ ok: false, error: AVATAR_ERRORS.bad_format });
+    expect((await db.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } })).photoKey).toBe(p2.photoKey);
 
     // Admin fjerner billedet
-    expect(await removeAdvisorPhoto(admin, adv.id, { storage })).toMatchObject({ ok: true, version: null, message: "Profilbilledet er fjernet." });
+    expect(await run(admin, () => removeAdvisorPhoto(admin, adv.id, { storage }))).toMatchObject({ ok: true, version: null, message: "Profilbilledet er fjernet." });
     expect(storage.m.size).toBe(0);
-    expect(await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } })).toMatchObject({ photoKey: null, photoUpdatedAt: null });
-    expect(await removeAdvisorPhoto(adv, adv.id, { storage })).toMatchObject({ ok: true, message: "Der er intet profilbillede at fjerne." });
+    expect(await db.advisorProfile.findUniqueOrThrow({ where: { userId: adv.id } })).toMatchObject({ photoKey: null, photoUpdatedAt: null });
+    expect(await run(adv, () => removeAdvisorPhoto(adv, adv.id, { storage }))).toMatchObject({ ok: true, message: "Der er intet profilbillede at fjerne." });
 
-    const logs = await prisma.auditLog.findMany({ where: { entityId: adv.id, action: { startsWith: "advisor.photo" } }, orderBy: { createdAt: "asc" } });
+    const logs = await db.auditLog.findMany({ where: { entityId: adv.id, action: { startsWith: "advisor.photo" } }, orderBy: { createdAt: "asc" } });
     expect(logs.map((l) => [l.action, l.userId, l.detail])).toEqual([
       ["advisor.photo.upload", adv.id, "Profilbillede uploadet af rådgiveren"],
       ["advisor.photo.replace", admin.id, "Profilbillede skiftet af admin"],
@@ -314,16 +324,15 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     const other = await mkUser("ADVISOR");
     const customer = await mkUser("CUSTOMER");
     const img = await solid(300, 300).jpeg().toBuffer();
-    expect(await saveAdvisorPhoto(other, adv.id, img, { storage })).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
-    expect(await saveAdvisorPhoto(customer, adv.id, img, { storage })).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
-    expect(await removeAdvisorPhoto(other, adv.id, { storage })).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
+    expect(await run(other, async () => saveAdvisorPhoto(other, adv.id, img, { storage }))).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
+    expect(await run(customer, async () => saveAdvisorPhoto(customer, adv.id, img, { storage }))).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
+    expect(await run(other, () => removeAdvisorPhoto(other, adv.id, { storage }))).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
     // Admin kan ikke give en kunde et rådgiverfoto
-    expect(await saveAdvisorPhoto({ id: "x", role: "ADMIN" }, customer.id, img, { storage })).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
+    expect(await run({ id: "x", role: "ADMIN" }, () => saveAdvisorPhoto({ id: "x", role: "ADMIN" }, customer.id, img, { storage }))).toEqual({ ok: false, error: "Rådgiveren findes ikke." });
     expect(storage.m.size).toBe(0);
   });
 
   it("GET /api/avatar: aktive er offentlige (kort cache + genvalidering); inaktive giver 404 for alle andre end admin og rådgiveren selv", async () => {
-    const { prisma } = await import("./db");
     const { saveAdvisorPhoto } = await import("./avatar");
     const { serveAvatar, CACHE_PUBLIC, CACHE_PRIVATE } = await import("./avatar-serve");
     const storage = memStorage();
@@ -333,10 +342,11 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     const customer = await mkUser("CUSTOMER");
     const admin = await mkUser("ADMIN");
     const img = await solid(400, 400).jpeg().toBuffer();
-    const va = await saveAdvisorPhoto(active, active.id, img, { storage });
-    const vi = await saveAdvisorPhoto(inactive, inactive.id, img, { storage });
+    const va = await run(active, async () => saveAdvisorPhoto(active, active.id, img, { storage }));
+    const vi = await run(inactive, async () => saveAdvisorPhoto(inactive, inactive.id, img, { storage }));
     if (!va.ok || !vi.ok) throw new Error("upload fejlede");
-    const get = (id: string, q: string, viewer: { id: string; role: string } | null, inm?: string) => serveAvatar(id, new URLSearchParams(q), async () => viewer, storage, inm);
+    // Ruten kører med seerens principal (getCurrentUser) – RLS skjuler inaktive profiler for alle andre end admin/rådgiveren selv
+    const get = (id: string, q: string, viewer: { id: string; role: Role } | null, inm?: string) => run(viewer, () => serveAvatar(id, new URLSearchParams(q), async () => viewer, storage, inm));
 
     // Aktiv rådgiver: alle (også uden login – onboarding-kataloget)
     const ok = await get(active.id, `size=96&v=${va.version}`, null);
@@ -373,7 +383,7 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     expect((await get(noPhoto.id, "size=512", null)).status).toBe(404);
     expect((await get(active.id, "size=2000", null)).status).toBe(404);
     expect((await get("../../etc/passwd", "size=512", null)).status).toBe(404);
-    const key = (await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: active.id } })).photoKey!;
+    const key = (await db.advisorProfile.findUniqueOrThrow({ where: { userId: active.id } })).photoKey!;
     storage.m.delete(key);
     expect((await get(active.id, "size=512", null)).status).toBe(404);
   });
@@ -383,10 +393,10 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     const { serveAvatar, AVATAR_MAX_AGE_SECONDS } = await import("./avatar-serve");
     const storage = memStorage();
     const adv = await mkUser("ADVISOR", true);
-    const up = await saveAdvisorPhoto(adv, adv.id, await solid(300, 300).jpeg().toBuffer(), { storage });
+    const up = await run(adv, async () => saveAdvisorPhoto(adv, adv.id, await solid(300, 300).jpeg().toBuffer(), { storage }));
     if (!up.ok) throw new Error("upload fejlede");
     const q = new URLSearchParams(`size=96&v=${up.version}`);
-    const first = await serveAvatar(adv.id, q, async () => null, storage);
+    const first = await run(null, () => serveAvatar(adv.id, q, async () => null, storage));
     const cc = first.headers.get("cache-control") ?? "";
     expect(cc).not.toMatch(/immutable/);
     expect(cc).toMatch(/must-revalidate/);
@@ -394,9 +404,9 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     expect(AVATAR_MAX_AGE_SECONDS).toBeLessThanOrEqual(300);
     // Browserens genvalidering med ETag (If-None-Match) efter fjernelsen: 404, ikke 304
     const etag = first.headers.get("etag")!;
-    expect((await serveAvatar(adv.id, q, async () => null, storage, etag)).status).toBe(304);
-    await removeAdvisorPhoto(adv, adv.id, { storage });
-    const after = await serveAvatar(adv.id, q, async () => null, storage, etag);
+    expect((await run(null, () => serveAvatar(adv.id, q, async () => null, storage, etag))).status).toBe(304);
+    await run(adv, () => removeAdvisorPhoto(adv, adv.id, { storage }));
+    const after = await run(null, () => serveAvatar(adv.id, q, async () => null, storage, etag));
     expect(after.status).toBe(404);
     expect(after.headers.get("cache-control")).toBe("no-store");
   });
@@ -409,11 +419,11 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
     const inactive = await mkUser("ADVISOR", false);
     const noPhoto = await mkUser("ADVISOR", false);
     const img = await solid(300, 300).jpeg().toBuffer();
-    await saveAdvisorPhoto(active, active.id, img, { storage });
-    await saveAdvisorPhoto(inactive, inactive.id, img, { storage });
+    await run(active, async () => saveAdvisorPhoto(active, active.id, img, { storage }));
+    await run(inactive, async () => saveAdvisorPhoto(inactive, inactive.id, img, { storage }));
     for (const id of ["findes-ikke", noPhoto.id, active.id, inactive.id]) {
       const viewer = vi.fn(async () => null);
-      const r = await serveAvatar(id, new URLSearchParams("size=96"), viewer, storage);
+      const r = await run(null, () => serveAvatar(id, new URLSearchParams("size=96"), viewer, storage));
       expect(viewer).toHaveBeenCalledTimes(1);
       expect(r.headers.get("vary")).toBe("Cookie");
       expect(r.status).toBe(id === active.id ? 200 : 404);

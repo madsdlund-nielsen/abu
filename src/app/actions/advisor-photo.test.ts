@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { describeDb, ownerDb, uid } from "../../test/db";
+import { asSystem, describeDb, ownerDb, uid } from "../../test/db";
 
 // Upload via ruten PUT /api/avatar/<id> og fjernelse via server action. Brugeren er den, testen sætter. Lageret er en midlertidig mappe.
 const me = vi.hoisted(() => ({ id: "", role: "ADVISOR" as "ADVISOR" | "ADMIN" | "CUSTOMER", anonymous: false }));
@@ -35,16 +35,20 @@ describeDb("profilbillede: upload-ruten (D-2) og fjernelse – rådgiver selv og
   beforeAll(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "abu-avatar-"));
     process.env.UPLOAD_DIR = dir;
+    // RLS: requestens principal er den bruger, testen sætter (som getSessionContext ville give den indloggede)
+    const { setRequestPrincipalResolver } = await import("@/lib/db-context");
+    setRequestPrincipalResolver(async () => (me.anonymous ? { userId: null, role: "anon" } : { userId: me.id, role: me.role }));
   });
   afterAll(async () => {
+    (await import("@/lib/db-context")).setRequestPrincipalResolver(null);
     const { prisma } = await import("@/lib/db");
     await (await ownerDb()).auditLog.deleteMany({ where: { entityId: { in: ids } } });
-    await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    await asSystem(() => prisma.user.deleteMany({ where: { id: { in: ids } } }));
     await rm(dir, { recursive: true, force: true });
   });
   const mkAdvisor = async () => {
     const { prisma } = await import("@/lib/db");
-    const id = (await prisma.user.create({ data: { email: `${uid("adv")}@test.dk`, name: "R", role: "ADVISOR", advisorProfile: { create: {} } } })).id;
+    const id = (await asSystem(() => prisma.user.create({ data: { email: `${uid("adv")}@test.dk`, name: "R", role: "ADVISOR", advisorProfile: { create: {} } } }))).id;
     ids.push(id);
     return id;
   };
@@ -59,24 +63,24 @@ describeDb("profilbillede: upload-ruten (D-2) og fjernelse – rådgiver selv og
     me.anonymous = false;
 
     expect(await put(b, await jpeg())).toEqual({ status: 404, body: { ok: false, error: "Rådgiveren findes ikke." } });
-    expect((await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: b } })).photoKey).toBeNull();
+    expect((await asSystem(() => prisma.advisorProfile.findUniqueOrThrow({ where: { userId: b } }))).photoKey).toBeNull();
 
     const r = await put(a, await jpeg());
     expect(r).toMatchObject({ status: 200, body: { ok: true, message: "Profilbilledet er gemt.", version: expect.any(String) } });
-    expect((await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: a } })).photoKey).toMatch(new RegExp(`^avatars/${a}/`));
+    expect((await asSystem(() => prisma.advisorProfile.findUniqueOrThrow({ where: { userId: a } }))).photoKey).toMatch(new RegExp(`^avatars/${a}/`));
 
     expect(await put(a, await jpeg(150, 150))).toMatchObject({ status: 400, body: { error: expect.stringMatching(/for lille/) } });
     expect(await put(a, new TextEncoder().encode("<svg/>"))).toMatchObject({ status: 415, body: { error: expect.stringMatching(/ikke et JPEG/) } });
     expect(await put(a, new Uint8Array(0))).toMatchObject({ status: 400, body: { error: "Vælg et billede." } });
 
     // Admin fjerner rådgiverens billede (server action)
-    const admin = (await prisma.user.create({ data: { email: `${uid("adm")}@test.dk`, name: "Admin", role: "ADMIN" } })).id;
+    const admin = (await asSystem(() => prisma.user.create({ data: { email: `${uid("adm")}@test.dk`, name: "Admin", role: "ADMIN" } }))).id;
     ids.push(admin);
     me.id = admin;
     me.role = "ADMIN";
     expect(await removeAdvisorPhotoAction(fd({ advisorId: a }))).toMatchObject({ ok: "Profilbilledet er fjernet.", version: null });
-    expect((await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: a } })).photoKey).toBeNull();
-    const log = await prisma.auditLog.findMany({ where: { entityId: a, action: { startsWith: "advisor.photo" } }, orderBy: { createdAt: "asc" } });
+    expect((await asSystem(() => prisma.advisorProfile.findUniqueOrThrow({ where: { userId: a } }))).photoKey).toBeNull();
+    const log = await asSystem(() => prisma.auditLog.findMany({ where: { entityId: a, action: { startsWith: "advisor.photo" } }, orderBy: { createdAt: "asc" } }));
     expect(log.map((l) => l.action)).toEqual(["advisor.photo.upload", "advisor.photo.remove"]);
   });
 

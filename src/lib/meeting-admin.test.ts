@@ -1,5 +1,5 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { describeDb, uid, ownerDb } from "../test/db";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { asSystem, asUser, createTestUser, describeDb, uid, ownerDb } from "../test/db";
 import { hasWholeBoard } from "./booking";
 import { canRemoveWithoutReplacement, meetingAdvisorChangeError, WHOLE_BOARD_ERROR } from "./meeting-admin";
 
@@ -31,7 +31,15 @@ describe("møder holdes altid med hele boardet (ejerens beslutning)", () => {
 
 describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning", () => {
   const ids: string[] = [];
-  const tagless = async (name: string, available = true) => {
+  // Alle ændringer udføres af en administrator (actions/admin-meetings.ts); testdata i systemkontekst
+  let admin: { id: string; role: "ADMIN" };
+  beforeAll(async () => {
+    admin = { id: (await createTestUser("ADMIN")).id, role: "ADMIN" };
+    ids.push(admin.id);
+  });
+  const asAdmin = <T>(fn: () => Promise<T>) => asUser(admin, fn);
+  const tagless = (name: string, available = true) => asSystem(() => taglessAsSystem(name, available));
+  const taglessAsSystem = async (name: string, available: boolean) => {
     const { prisma } = await import("./db");
     const u = await prisma.user.create({
       data: { email: `${uid("adv")}@test.dk`, name, role: "ADVISOR", passwordHash: "x", advisorProfile: { create: { active: true, bio: "x" } } },
@@ -45,7 +53,8 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
   const startsAt = new Date("2030-01-07T09:00:00Z");
   const endsAt = new Date("2030-01-07T11:00:00Z");
 
-  async function boardWithMeeting(advisorIds: string[]) {
+  const boardWithMeeting = (advisorIds: string[]) => asSystem(() => boardWithMeetingAsSystem(advisorIds));
+  async function boardWithMeetingAsSystem(advisorIds: string[]) {
     const { prisma } = await import("./db");
     const email = `${uid("kunde")}@test.dk`;
     const c = await prisma.user.create({ data: { email, name: "Kunde", role: "CUSTOMER", customerProfile: { create: { companyName: uid("Firma"), cvr: "1", billingEmail: email } } } });
@@ -70,13 +79,13 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
 
   const advisorsIn = async (meetingId: string) => {
     const { prisma } = await import("./db");
-    const ps = await prisma.meetingParticipant.findMany({ where: { meetingId, user: { role: "ADVISOR" } }, select: { userId: true } });
+    const ps = await asSystem(() => prisma.meetingParticipant.findMany({ where: { meetingId, user: { role: "ADVISOR" } }, select: { userId: true } }));
     return ps.map((p) => p.userId).sort();
   };
 
   afterAll(async () => {
     const { prisma } = await import("./db");
-    await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    await asSystem(() => prisma.user.deleteMany({ where: { id: { in: ids } } }));
   });
 
   it("admin kan ikke reducere et møde, men kan udskifte og tilføje/fjerne en ekstra deltager", async () => {
@@ -84,20 +93,23 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
     const [a, b, x, y] = [await tagless("A"), await tagless("B"), await tagless("X"), await tagless("Y")];
     const { meeting, customerId } = await boardWithMeeting([a, b]);
     ids.push(customerId);
-    const base = { meetingId: meeting.id, actorId: customerId, silent: true };
+    const base = { meetingId: meeting.id, actorId: admin.id, silent: true };
 
-    await expect(changeMeetingAdvisors({ ...base, removeId: a })).rejects.toThrow(WHOLE_BOARD_ERROR);
+    await expect(asAdmin(() => changeMeetingAdvisors({ ...base, removeId: a }))).rejects.toThrow(WHOLE_BOARD_ERROR);
     expect(await advisorsIn(meeting.id)).toEqual([a, b].sort());
 
     // Udskiftning: stadig to rådgivere
-    await changeMeetingAdvisors({ ...base, removeId: a, addId: x });
+    await asAdmin(() => changeMeetingAdvisors({ ...base, removeId: a, addId: x }));
     expect(await advisorsIn(meeting.id)).toEqual([b, x].sort());
 
     // Ekstra deltager ud over boardet kan tilføjes og fjernes igen – men ikke længere ned
-    await changeMeetingAdvisors({ ...base, addId: y });
+    await asAdmin(() => changeMeetingAdvisors({ ...base, addId: y }));
     expect((await advisorsIn(meeting.id)).length).toBe(3);
-    await changeMeetingAdvisors({ ...base, removeId: y });
-    await expect(changeMeetingAdvisors({ ...base, removeId: b })).rejects.toThrow(WHOLE_BOARD_ERROR);
+    await asAdmin(() => changeMeetingAdvisors({ ...base, removeId: y }));
+    await expect(asAdmin(() => changeMeetingAdvisors({ ...base, removeId: b }))).rejects.toThrow(WHOLE_BOARD_ERROR);
+    // RLS: kunden selv kan ikke ændre deltagerne (kun admin)
+    await expect(asUser({ id: customerId, role: "CUSTOMER" }, () => changeMeetingAdvisors({ ...base, actorId: customerId, removeId: b, addId: a }))).rejects.toThrow();
+    expect(await advisorsIn(meeting.id)).toEqual([b, x].sort());
     expect(await advisorsIn(meeting.id)).toEqual([b, x].sort());
   });
 
@@ -107,9 +119,9 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
     // Boardet skal have en rådgiver, der kan være ansvarlig
     const { prisma } = await import("./db");
     const { getLeadTagId } = await import("./lead");
-    await prisma.advisorTag.create({ data: { advisorId: a, tagId: await getLeadTagId() } });
-    const { sub, meeting, customerId } = await boardWithMeeting([a, b]);
-    const r = await changeBoardAsAdmin({ subscriptionId: sub.id, advisorIds: [a, busy], weeks: 8, pricePolicy: "keep", updateUpcoming: true, actorId: customerId });
+    await asSystem(async () => prisma.advisorTag.create({ data: { advisorId: a, tagId: await getLeadTagId() } }));
+    const { sub, meeting } = await boardWithMeeting([a, b]);
+    const r = await asAdmin(() => changeBoardAsAdmin({ subscriptionId: sub.id, advisorIds: [a, busy], weeks: 8, pricePolicy: "keep", updateUpcoming: true, actorId: admin.id }));
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.conflicts.length).toBe(1);
     expect(await advisorsIn(meeting.id)).toEqual([a, b].sort());
@@ -120,14 +132,14 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
     const { eraseUser } = await import("./erasure");
     const { meetingsBelowBoard } = await import("./meeting-admin");
     const [a, b] = [await tagless("A"), await tagless("Slettes")];
-    const { meeting, customerId } = await boardWithMeeting([a, b]);
-    const r = await eraseUser(b, customerId, { payments: { cancelSubscription: async () => {} }, storage: { delete: async () => {} } });
+    const { meeting } = await boardWithMeeting([a, b]);
+    const r = await asAdmin(() => eraseUser(b, admin.id, { payments: { cancelSubscription: async () => {} }, storage: { delete: async () => {} } }));
     expect(r.ok).toBe(true);
-    expect(await prisma.auditLog.count({ where: { action: "meeting.advisor_erased", entityId: meeting.id } })).toBe(1);
-    const alert = await prisma.appSetting.findUnique({ where: { key: "alert:advisor_erased" } });
+    expect(await asAdmin(() => prisma.auditLog.count({ where: { action: "meeting.advisor_erased", entityId: meeting.id } }))).toBe(1);
+    const alert = await asAdmin(() => prisma.appSetting.findUnique({ where: { key: "alert:advisor_erased" } }));
     expect(alert?.value).toMatch(/kommende møde mangler nu en rådgiver/);
     expect(alert?.value).not.toMatch(/Slettes/);
-    const below = await meetingsBelowBoard(new Date("2029-12-01T00:00:00Z"));
+    const below = await asAdmin(() => meetingsBelowBoard(new Date("2029-12-01T00:00:00Z")));
     expect(below.find((m) => m.id === meeting.id)).toMatchObject({ advisors: 1, boardSize: 2 });
     await (await ownerDb()).auditLog.deleteMany({ where: { entityId: meeting.id } });
   });

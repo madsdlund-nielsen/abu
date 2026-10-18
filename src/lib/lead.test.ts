@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { describeDb, uid, ownerDb } from "../test/db";
+import { asAnon, asSystem, asUser, createTestUser, describeDb, ownerDb, uid } from "../test/db";
 import { leadCounts, leadSpread, pickLead, proposeBalancing, type BalanceBoard } from "./lead";
 import { suggestBoard, type MatchAdvisor } from "./matching";
 
@@ -82,16 +82,24 @@ describe("matching: boardet får altid en rådgiver, der kan være ansvarlig", (
 describeDb("ansvarlig rådgiver i databasen", () => {
   const ids: string[] = [];
   let leadTag = "";
+  // Admin-handlinger kører som en rigtig administrator; testdata i systemkontekst
+  let admin: { id: string; role: "ADMIN" };
   beforeAll(async () => {
     const { getLeadTagId } = await import("./lead");
-    leadTag = await getLeadTagId();
+    leadTag = await asSystem(() => getLeadTagId());
+    admin = { id: (await createTestUser("ADMIN")).id, role: "ADMIN" };
+    ids.push(admin.id);
   });
   afterAll(async () => {
     const { prisma } = await import("./db");
-    await prisma.user.deleteMany({ where: { id: { in: ids } } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { userId: { in: ids } } });
+    await asSystem(() => prisma.user.deleteMany({ where: { id: { in: ids } } }));
   });
+  const asAdmin = <T>(fn: () => Promise<T>) => asUser(admin, fn);
+  const asCustomerOf = <T>(sub: { customerId: string }, fn: () => Promise<T>) => asUser({ id: sub.customerId, role: "CUSTOMER" }, fn);
 
-  const advisor = async (name: string, lead: boolean, priceDkk = 1750) => {
+  const advisor = (name: string, lead: boolean, priceDkk = 1750) => asSystem(() => advisorAsSystem(name, lead, priceDkk));
+  const advisorAsSystem = async (name: string, lead: boolean, priceDkk: number) => {
     const { prisma } = await import("./db");
     const u = await prisma.user.create({
       data: { email: `${uid("adv")}@test.dk`, name, role: "ADVISOR", passwordHash: "x", advisorProfile: { create: { active: true, bio: "x", pricePerMeetingDkk: priceDkk } } },
@@ -100,7 +108,8 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     if (lead) await prisma.advisorTag.create({ data: { advisorId: u.id, tagId: leadTag } });
     return u.id;
   };
-  const board = async (advisorIds: string[]) => {
+  const board = (advisorIds: string[]) => asSystem(() => boardAsSystem(advisorIds));
+  const boardAsSystem = async (advisorIds: string[]) => {
     const { prisma } = await import("./db");
     const email = `${uid("k")}@test.dk`;
     const c = await prisma.user.create({ data: { email, name: "K", role: "CUSTOMER", customerProfile: { create: { companyName: uid("Firma"), cvr: "1", billingEmail: email } } } });
@@ -110,7 +119,7 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     });
   };
   const leadOf = async (subscriptionId: string) =>
-    (await (await import("./db")).prisma.subscriptionAdvisor.findFirst({ where: { subscriptionId, isLead: true } }))?.advisorId ?? null;
+    (await asSystem(async () => (await import("./db")).prisma.subscriptionAdvisor.findFirst({ where: { subscriptionId, isLead: true } })))?.advisorId ?? null;
 
   it("tildeler den mindst belastede kvalificerede og balancerer over flere boards", async () => {
     const { prisma } = await import("./db");
@@ -118,8 +127,9 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     const [a, b, plain] = [await advisor("Anna", true), await advisor("Bo", true), await advisor("Ikke-lead", false)];
     const s1 = await board([a, b, plain]);
     const s2 = await board([a, b, plain]);
-    await prisma.$transaction((tx) => assignLeadTx(tx, s1.id));
-    await prisma.$transaction((tx) => assignLeadTx(tx, s2.id));
+    // Som ved køb (startCheckout): kunden tildeler i sin egen transaktion og ser kun fordelingen via rls.advisor_lead_load
+    await asCustomerOf(s1, () => prisma.$transaction((tx) => assignLeadTx(tx, s1.id)));
+    await asCustomerOf(s2, () => prisma.$transaction((tx) => assignLeadTx(tx, s2.id)));
     const leads = [await leadOf(s1.id), await leadOf(s2.id)];
     expect(leads.sort()).toEqual([a, b].sort());
     expect(leads).not.toContain(plain);
@@ -129,8 +139,10 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     const { prisma } = await import("./db");
     const [a, b] = [await advisor("A", true), await advisor("B", true)];
     const s = await board([a, b]);
-    await prisma.subscriptionAdvisor.update({ where: { subscriptionId_advisorId: { subscriptionId: s.id, advisorId: a } }, data: { isLead: true } });
-    await expect(prisma.subscriptionAdvisor.update({ where: { subscriptionId_advisorId: { subscriptionId: s.id, advisorId: b } }, data: { isLead: true } })).rejects.toThrow();
+    await asSystem(async () => {
+      await prisma.subscriptionAdvisor.update({ where: { subscriptionId_advisorId: { subscriptionId: s.id, advisorId: a } }, data: { isLead: true } });
+      await expect(prisma.subscriptionAdvisor.update({ where: { subscriptionId_advisorId: { subscriptionId: s.id, advisorId: b } }, data: { isLead: true } })).rejects.toThrow();
+    });
   });
 
   it("deaktivering og fjernet lead-tag giver en ny ansvarlig; ingen kvalificeret → vises som board uden ansvarlig", async () => {
@@ -138,44 +150,49 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     const { ensureLead, loadLeadOverview, reassignLeadsFrom } = await import("./lead");
     const [a, b, plain] = [await advisor("Aase", true), await advisor("Bent", true), await advisor("Carl", false)];
     const s = await board([a, b, plain]);
-    await ensureLead(s.id, "created");
+    await asCustomerOf(s, () => ensureLead(s.id, "created"));
     const first = (await leadOf(s.id))!;
     expect([a, b]).toContain(first);
     const second = first === a ? b : a;
-    await prisma.advisorProfile.update({ where: { userId: first }, data: { active: false } });
-    await reassignLeadsFrom(first, "deactivated");
+    // Deaktivering og tags ændres af admin (setAdvisorActive / updateAdvisorAction)
+    await asAdmin(async () => {
+      await prisma.advisorProfile.update({ where: { userId: first }, data: { active: false } });
+      await reassignLeadsFrom(first, "deactivated");
+    });
     expect(await leadOf(s.id)).toBe(second);
-    await prisma.advisorTag.delete({ where: { advisorId_tagId: { advisorId: second, tagId: leadTag } } });
-    await reassignLeadsFrom(second, "tag_removed");
+    await asAdmin(async () => {
+      await prisma.advisorTag.delete({ where: { advisorId_tagId: { advisorId: second, tagId: leadTag } } });
+      await reassignLeadsFrom(second, "tag_removed");
+    });
     expect(await leadOf(s.id)).toBeNull();
-    expect((await loadLeadOverview()).withoutLead.find((x) => x.subscriptionId === s.id)).toMatchObject({ hasEligible: false });
+    expect((await asAdmin(() => loadLeadOverview())).withoutLead.find((x) => x.subscriptionId === s.id)).toMatchObject({ hasEligible: false });
   });
 
   it("manuel ændring kun til kvalificerede medlemmer; udligning anvendes og audit-logges", async () => {
     const { prisma } = await import("./db");
     const { applyBalancing, ensureLead, setLeadManually } = await import("./lead");
-    const admin = await prisma.user.create({ data: { email: `${uid("adm")}@test.dk`, name: "Admin", role: "ADMIN" } });
-    ids.push(admin.id);
     const [a, b, plain] = [await advisor("Ane", true), await advisor("Bjørn", true), await advisor("Ikke", false)];
     const s = await board([a, b, plain]);
-    await ensureLead(s.id, "created");
-    expect(await setLeadManually(admin.id, s.id, plain)).toEqual({ ok: false, error: expect.stringMatching(/kan ikke være ansvarlig/) });
-    const other = (await leadOf(s.id)) === a ? b : a;
-    expect(await setLeadManually(admin.id, s.id, other)).toEqual({ ok: true, changed: true });
-    expect(await leadOf(s.id)).toBe(other);
-    // Forældet flytning springes over; gyldig anvendes
-    const back = other === a ? b : a;
-    expect(await applyBalancing(admin.id, [{ subscriptionId: s.id, from: back, to: other }])).toEqual({ applied: 0, skipped: 1 });
-    expect(await applyBalancing(admin.id, [{ subscriptionId: s.id, from: other, to: back }])).toEqual({ applied: 1, skipped: 0 });
-    const actions = (await prisma.auditLog.findMany({ where: { entityId: s.id, userId: admin.id } })).map((l) => l.action).sort();
-    expect(actions).toEqual(["subscription.lead.balance", "subscription.lead.set"]);
-    await (await ownerDb()).auditLog.deleteMany({ where: { userId: admin.id } });
+    await asCustomerOf(s, () => ensureLead(s.id, "created"));
+    await asAdmin(async () => {
+      expect(await setLeadManually(admin.id, s.id, plain)).toEqual({ ok: false, error: expect.stringMatching(/kan ikke være ansvarlig/) });
+      const other = (await leadOf(s.id)) === a ? b : a;
+      expect(await setLeadManually(admin.id, s.id, other)).toEqual({ ok: true, changed: true });
+      expect(await leadOf(s.id)).toBe(other);
+      // Forældet flytning springes over; gyldig anvendes
+      const back = other === a ? b : a;
+      expect(await applyBalancing(admin.id, [{ subscriptionId: s.id, from: back, to: other }])).toEqual({ applied: 0, skipped: 1 });
+      expect(await applyBalancing(admin.id, [{ subscriptionId: s.id, from: other, to: back }])).toEqual({ applied: 1, skipped: 0 });
+      const actions = (await prisma.auditLog.findMany({ where: { entityId: s.id, userId: admin.id } })).map((l) => l.action).sort();
+      expect(actions).toEqual(["subscription.lead.balance", "subscription.lead.set"]);
+    });
   });
 
   it("kataloget viser aldrig admin-tags, men markerer hvem der kan være ansvarlig", async () => {
     const { loadCatalog } = await import("./onboarding/catalog");
     const l = await advisor("Katalog-lead", true);
-    const cat = await loadCatalog();
+    // Før login (anon): admin-tagget og AdvisorTag-rækken er usynlige, men booleanen kommer fra rls.lead_eligible_ids
+    const cat = await asAnon(() => loadCatalog());
     expect(cat.tags.some((t) => t.id === leadTag)).toBe(false);
     const row = cat.advisors.find((x) => x.id === l)!;
     expect(row.leadEligible).toBe(true);
@@ -186,7 +203,7 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     const { resolveBoard } = await import("./onboarding/board");
     const { NO_LEAD_ELIGIBLE_ERROR } = await import("./lead");
     const [x, y, l] = [await advisor("X", false), await advisor("Y", false), await advisor("L", true)];
-    expect(await resolveBoard([x, y], 8)).toEqual({ error: NO_LEAD_ELIGIBLE_ERROR });
-    expect(await resolveBoard([x, l], 8)).toMatchObject({ weeks: 8 });
+    expect(await asAnon(() => resolveBoard([x, y], 8))).toEqual({ error: NO_LEAD_ELIGIBLE_ERROR });
+    expect(await asAnon(() => resolveBoard([x, l], 8))).toMatchObject({ weeks: 8 });
   });
 });

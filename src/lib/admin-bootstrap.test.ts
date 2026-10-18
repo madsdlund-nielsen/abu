@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCreateAdminArgs, seedRefusal } from "./admin-bootstrap";
-import { describeDb, uid } from "../test/db";
+import { asSystem, describeDb, uid } from "../test/db";
 
 describe("create-admin (H-1)", () => {
   it("parser e-mail, navn og --reset", () => {
@@ -50,7 +50,8 @@ describe("seed i produktion (H-1)", () => {
 });
 
 describeDb("createAdminInvite mod databasen (H-1)", () => {
-  it("opretter admin uden adgangskode med et engangslink, og afviser dubletter uden --reset", async () => {
+  // create-admin kører som ejeren i systemkontekst («admin.bootstrap»)
+  it("opretter admin uden adgangskode med et engangslink, og afviser dubletter uden --reset", () => asSystem(async () => {
     const { prisma } = await import("./db");
     const { createAdminInvite } = await import("./admin-bootstrap");
     const email = `${uid("admin")}@test.dk`;
@@ -79,5 +80,5 @@ describeDb("createAdminInvite mod databasen (H-1)", () => {
     expect(after).toMatchObject({ mfaEnabledAt: null, mfaSecretEnc: null, deactivatedAt: null });
     expect(await prisma.mfaRecoveryCode.count({ where: { userId: user.id } })).toBe(0);
     await prisma.user.delete({ where: { id: user.id } });
-  });
+  }));
 });

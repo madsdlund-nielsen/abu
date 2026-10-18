@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { describeDb, uid } from "../../test/db";
+import { asSystem, asUser, deleteTestUsers, describeDb, uid } from "../../test/db";
 import { detectMediaType } from "../media-type";
 import { LocalStorage } from "./local";
 import { guardStream } from "./stream-guard";
@@ -81,51 +81,59 @@ describeDb("upload-flow: prepare → stream → finalize (H-5)", () => {
     const { prisma } = await import("../db");
     const { prepareRecordingUpload, finalizeRecordingUpload, MAX_PENDING_PER_USER } = await import("../recording-upload");
     const { getStorage } = await import("./index");
-    const customer = await prisma.user.create({
-      data: { email: `${uid("c")}@test.dk`, name: "Kunde", role: "CUSTOMER", customerProfile: { create: { companyName: "X", cvr: "1", billingEmail: "x@test.dk" } } },
-    });
-    const advisor = await prisma.user.create({ data: { email: `${uid("a")}@test.dk`, name: "Rådgiver", role: "ADVISOR" } });
-    const sub = await prisma.subscription.create({ data: { customerId: customer.id, advisorCount: 2, frequencyWeeks: 8, monthlyPriceDkk: 1000 } });
-    const meeting = await prisma.meeting.create({
-      data: { subscriptionId: sub.id, startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(), participants: { create: [{ userId: customer.id }, { userId: advisor.id }] } },
+    const { customer, advisor, outsider, meeting } = await asSystem(async () => {
+      const customer = await prisma.user.create({
+        data: { email: `${uid("c")}@test.dk`, name: "Kunde", role: "CUSTOMER", customerProfile: { create: { companyName: "X", cvr: "1", billingEmail: "x@test.dk" } } },
+      });
+      const advisor = await prisma.user.create({ data: { email: `${uid("a")}@test.dk`, name: "Rådgiver", role: "ADVISOR" } });
+      const outsider = await prisma.user.create({ data: { email: `${uid("a")}@test.dk`, name: "Anden rådgiver", role: "ADVISOR" } });
+      const sub = await prisma.subscription.create({ data: { customerId: customer.id, advisorCount: 2, frequencyWeeks: 8, monthlyPriceDkk: 1000 } });
+      const meeting = await prisma.meeting.create({
+        data: { subscriptionId: sub.id, startsAt: new Date(Date.now() - 3_600_000), endsAt: new Date(), participants: { create: [{ userId: customer.id }, { userId: advisor.id }] } },
+      });
+      return { customer, advisor, outsider, meeting };
     });
     const actor = { id: advisor.id, role: "ADVISOR" as const };
+    const asAdvisor = <T>(fn: () => Promise<T>) => asUser(actor, fn);
+    const db = <T>(fn: () => Promise<T>) => asSystem(fn);
 
-    expect(await prepareRecordingUpload({ id: customer.id, role: "CUSTOMER" }, meeting.id, 100)).toMatchObject({ ok: false });
-    expect(await prepareRecordingUpload(actor, meeting.id, 600 * 1024 * 1024)).toMatchObject({ ok: false, error: expect.stringMatching(/for stor/) });
+    expect(await asUser(customer, () => prepareRecordingUpload({ id: customer.id, role: "CUSTOMER" }, meeting.id, 100))).toMatchObject({ ok: false });
+    // RLS: en rådgiver, der ikke deltager, ser slet ikke mødet
+    expect(await asUser(outsider, () => prepareRecordingUpload({ id: outsider.id, role: "ADVISOR" }, meeting.id, 100))).toMatchObject({ ok: false, error: "Mødet findes ikke." });
+    expect(await asAdvisor(() => prepareRecordingUpload(actor, meeting.id, 600 * 1024 * 1024))).toMatchObject({ ok: false, error: expect.stringMatching(/for stor/) });
 
-    const good = await prepareRecordingUpload(actor, meeting.id, 5000);
+    const good = await asAdvisor(() => prepareRecordingUpload(actor, meeting.id, 5000));
     expect(good).toMatchObject({ ok: true, target: { kind: "server" } });
     if (!good.ok) return;
-    const rec = await prisma.recording.findUniqueOrThrow({ where: { id: good.recordingId } });
+    const rec = await db(() => prisma.recording.findUniqueOrThrow({ where: { id: good.recordingId } }));
     await getStorage().putStream(rec.storageKey!, chunks(MP3, Buffer.alloc(5000)), { maxBytes: 10_000 });
-    const fin = await finalizeRecordingUpload(actor, good.recordingId);
+    const fin = await asAdvisor(() => finalizeRecordingUpload(actor, good.recordingId));
     expect(fin).toEqual({ ok: true, meetingId: meeting.id });
-    const after = await prisma.recording.findUniqueOrThrow({ where: { id: good.recordingId } });
+    const after = await db(() => prisma.recording.findUniqueOrThrow({ where: { id: good.recordingId } }));
     expect(after).toMatchObject({ status: "RECEIVED", mime: "audio/mpeg", sizeBytes: MP3.length + 5000 });
 
     // Uden magic bytes-tjek i strømmen (S3-direkte): finalize afviser og sletter
-    const bad = await prepareRecordingUpload(actor, meeting.id, 100);
+    const bad = await asAdvisor(() => prepareRecordingUpload(actor, meeting.id, 100));
     if (!bad.ok) throw new Error(bad.error);
-    const badRec = await prisma.recording.findUniqueOrThrow({ where: { id: bad.recordingId } });
+    const badRec = await db(() => prisma.recording.findUniqueOrThrow({ where: { id: bad.recordingId } }));
     await getStorage().putStream(badRec.storageKey!, chunks(Buffer.from("MZ executable payload ......")), { maxBytes: 10_000 });
-    expect(await finalizeRecordingUpload(actor, bad.recordingId)).toMatchObject({ ok: false, error: expect.stringMatching(/ikke en lyd/) });
-    expect(await prisma.recording.findUnique({ where: { id: bad.recordingId } })).toBeNull();
+    expect(await asAdvisor(() => finalizeRecordingUpload(actor, bad.recordingId))).toMatchObject({ ok: false, error: expect.stringMatching(/ikke en lyd/) });
+    expect(await db(() => prisma.recording.findUnique({ where: { id: bad.recordingId } }))).toBeNull();
     expect(await getStorage().stat(badRec.storageKey!)).toBeNull();
 
     // Grænse for samtidige uploads pr. bruger
-    for (let i = 0; i < MAX_PENDING_PER_USER; i++) expect((await prepareRecordingUpload(actor, meeting.id, 100)).ok).toBe(true);
-    expect(await prepareRecordingUpload(actor, meeting.id, 100)).toMatchObject({ ok: false, error: expect.stringMatching(/allerede uploads/) });
-    // Andre kan ikke afslutte min upload
-    const pending = await prisma.recording.findFirstOrThrow({ where: { meetingId: meeting.id, status: "UPLOADING" } });
-    expect(await finalizeRecordingUpload({ id: customer.id, role: "ADMIN" }, pending.id)).toMatchObject({ ok: false });
+    for (let i = 0; i < MAX_PENDING_PER_USER; i++) expect((await asAdvisor(() => prepareRecordingUpload(actor, meeting.id, 100))).ok).toBe(true);
+    expect(await asAdvisor(() => prepareRecordingUpload(actor, meeting.id, 100))).toMatchObject({ ok: false, error: expect.stringMatching(/allerede uploads/) });
+    // Andre kan ikke afslutte min upload (kunden ser optagelsen, men den er ikke kundens)
+    const pending = await db(() => prisma.recording.findFirstOrThrow({ where: { meetingId: meeting.id, status: "UPLOADING" } }));
+    expect(await asUser(customer, () => finalizeRecordingUpload({ id: customer.id, role: "CUSTOMER" }, pending.id))).toMatchObject({ ok: false });
     // En afbrudt/afvist upload ryddes op med det samme, så en ny kan startes
     const { cancelRecordingUpload } = await import("../recording-upload");
-    expect(await cancelRecordingUpload(customer.id, pending.id)).toBe(false);
-    expect(await cancelRecordingUpload(advisor.id, pending.id)).toBe(true);
-    expect((await prepareRecordingUpload(actor, meeting.id, 100)).ok).toBe(true);
+    expect(await asUser(customer, () => cancelRecordingUpload(customer.id, pending.id))).toBe(false);
+    expect(await asAdvisor(() => cancelRecordingUpload(advisor.id, pending.id))).toBe(true);
+    expect((await asAdvisor(() => prepareRecordingUpload(actor, meeting.id, 100))).ok).toBe(true);
 
-    await prisma.user.delete({ where: { id: customer.id } });
-    await prisma.user.delete({ where: { id: advisor.id } });
+    await deleteTestUsers([customer.id, advisor.id, outsider.id]);
+
   });
 });

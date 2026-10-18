@@ -1,6 +1,6 @@
 import pg from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { asSystem, describeDb, uid } from "../test/db";
 import { pgClientConfig } from "./db-config";
 import { assertDbRuntimeRole, dbRoleProblems, readDbRoleFacts } from "./db-guard";
 import { EnvConfigError } from "./env";
@@ -39,7 +39,7 @@ describeDb("databaserollen abu_app: kun DML (RLS fase 0)", () => {
 
   it("testene kører som en rolle uden superbruger, BYPASSRLS, ejerskab eller DDL-ret – og opstartstjekket accepterer den", async () => {
     const facts = await readDbRoleFacts(appUrl);
-    expect(facts).toMatchObject({ superuser: false, bypassRls: false, createRole: false, createDb: false, ownedObjects: 0, ownsUserTable: false, ownsDatabase: false, schemaCreate: false });
+    expect(facts).toMatchObject({ superuser: false, bypassRls: false, createRole: false, createDb: false, ownedObjects: 0, ownsUserTable: false, ownsDatabase: false, schemaCreate: false, tablesWithoutRls: 0, rlsFunctions: true });
     expect(dbRoleProblems(facts)).toEqual([]);
     await expect(assertDbRuntimeRole(appUrl, "production", () => {})).resolves.toMatchObject({ user: facts.user });
   });
@@ -74,22 +74,29 @@ describeDb("databaserollen abu_app: kun DML (RLS fase 0)", () => {
     expect(await sqlState(client, `UPDATE "_prisma_migrations" SET finished_at = now()`)).toBe("42501");
   });
 
-  it("almindelig CRUD virker (via appens Prisma-klient)", async () => {
+  it("almindelig CRUD virker (via appens Prisma-klient, i systemkontekst – RateLimit er en systemtabel)", async () => {
     const { prisma } = await import("./db");
     const key = uid("rls-crud");
-    await prisma.rateLimit.create({ data: { key, count: 1, resetAt: new Date(Date.now() + 60_000) } });
-    expect((await prisma.rateLimit.findUnique({ where: { key } }))?.count).toBe(1);
-    await prisma.rateLimit.update({ where: { key }, data: { count: 2 } });
-    expect((await prisma.rateLimit.findUniqueOrThrow({ where: { key } })).count).toBe(2);
-    await prisma.rateLimit.delete({ where: { key } });
-    expect(await prisma.rateLimit.findUnique({ where: { key } })).toBeNull();
+    await asSystem(async () => {
+      await prisma.rateLimit.create({ data: { key, count: 1, resetAt: new Date(Date.now() + 60_000) } });
+      expect((await prisma.rateLimit.findUnique({ where: { key } }))?.count).toBe(1);
+      await prisma.rateLimit.update({ where: { key }, data: { count: 2 } });
+      expect((await prisma.rateLimit.findUniqueOrThrow({ where: { key } })).count).toBe(2);
+      await prisma.rateLimit.delete({ where: { key } });
+      expect(await prisma.rateLimit.findUnique({ where: { key } })).toBeNull();
+    });
   });
 
   it("AuditLog er append-only for appen: læse og tilføje, aldrig ændre eller slette", async () => {
+    // RLS: uden kontekst afvises alt; i systemkontekst må appen tilføje og læse – men stadig aldrig ændre eller slette
+    await client.query("SAVEPOINT ctx");
+    expect(await sqlState(client, `INSERT INTO "AuditLog" (id, action, entity, "entityId") VALUES ('${uid("al")}', 'test.rls', 'Test', 'x')`)).toBe("42501");
+    await client.query("SELECT set_config('app.role', 'system', true)");
     expect(await sqlState(client, `INSERT INTO "AuditLog" (id, action, entity, "entityId") VALUES ('${uid("al")}', 'test.rls', 'Test', 'x')`)).toBeNull();
     expect(await sqlState(client, `SELECT count(*) FROM "AuditLog"`)).toBeNull();
     expect(await sqlState(client, `UPDATE "AuditLog" SET detail = 'ændret' WHERE action = 'test.rls'`)).toBe("42501");
     expect(await sqlState(client, `DELETE FROM "AuditLog" WHERE action = 'test.rls'`)).toBe("42501");
+    await client.query("ROLLBACK TO SAVEPOINT ctx");
   });
 
   it("timeouts sidder på rollen (15 s / 10 s / 30 s), og SET LOCAL kan give et enkelt job en anden grænse", async () => {

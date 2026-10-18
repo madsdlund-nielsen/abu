@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { asSystem, describeDb, uid } from "../test/db";
 import { afterFailedLogin, BASE_LOCK_MS, isLocked, lockDurationMs, MAX_LOCK_MS, type LoginState } from "./lockout";
 
 const t0 = new Date("2026-10-17T10:00:00Z");
@@ -35,7 +35,8 @@ describe("login-spærring pr. konto (H-2)", () => {
 });
 
 describeDb("login-spærring i databasen (H-2)", () => {
-  it("spærrer kontoen uanset hvilken IP forsøgene kommer fra, og nulstilles", async () => {
+  // Login-forløbet kører i systemkontekst (actions/auth.ts: «auth.login»)
+  it("spærrer kontoen uanset hvilken IP forsøgene kommer fra, og nulstilles", () => asSystem(async () => {
     const { prisma } = await import("./db");
     const { recordFailedLogin, resetLoginFailures } = await import("./lockout");
     const user = await prisma.user.create({ data: { email: `${uid("lock")}@test.dk`, name: "Lås Test", role: "CUSTOMER" } });
@@ -50,5 +51,5 @@ describeDb("login-spærring i databasen (H-2)", () => {
     expect(ok.failedLoginCount).toBe(0);
     expect(isLocked(ok, new Date())).toBe(false);
     await prisma.user.delete({ where: { id: user.id } });
-  });
+  }));
 });

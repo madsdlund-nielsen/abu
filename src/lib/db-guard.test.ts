@@ -12,6 +12,8 @@ const APP: DbRoleFacts = {
   ownsUserTable: false,
   ownsDatabase: false,
   schemaCreate: false,
+  tablesWithoutRls: 0,
+  rlsFunctions: true,
   ssl: true,
 };
 const OWNER: DbRoleFacts = { ...APP, user: "abu_owner", ownedObjects: 115, ownsUserTable: true, ownsDatabase: true, schemaCreate: true };
@@ -30,6 +32,9 @@ describe("opstartstjek af databaserollen (C-1 / RLS fase 0)", () => {
     expect(dbRoleProblems({ ...APP, ownedObjects: 1 }).join()).toMatch(/ejer tabeller/);
     expect(dbRoleProblems({ ...APP, schemaCreate: true }).join()).toMatch(/DDL/);
     expect(dbRoleProblems({ ...APP, ownsUserTable: null }).join()).toMatch(/migrationerne/);
+    // RLS (fase 1–3): appen starter ikke mod en database uden politikkerne
+    expect(dbRoleProblems({ ...APP, tablesWithoutRls: 3 }).join()).toMatch(/3 tabel\(ler\) mangler Row-Level Security/);
+    expect(dbRoleProblems({ ...APP, rlsFunctions: false }).join()).toMatch(/schema rls/);
     expect(dbRoleProblems(OWNER).length).toBeGreaterThanOrEqual(3);
   });
 

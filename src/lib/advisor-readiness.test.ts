@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { asAnon, asSystem, asUser, describeDb, uid } from "../test/db";
 import { activationBlockedMessage, advisorReadiness, canActivate, missingReadiness } from "./advisor-readiness";
 import { rankSubstituteCandidates } from "./substitutes";
 import { toMatchAdvisors } from "./onboarding/catalog";
@@ -70,17 +70,20 @@ describeDb("inaktive rådgivere kan ikke vælges (QA #13)", () => {
     const { loadCatalog } = await import("./onboarding/catalog");
     const { resolveBoard } = await import("./onboarding/board");
     const mk = (active?: boolean) =>
-      prisma.user.create({ data: { email: `${uid("adv")}@test.dk`, name: "R", role: "ADVISOR", advisorProfile: { create: active === undefined ? {} : { active } } } });
+      asSystem(() => prisma.user.create({ data: { email: `${uid("adv")}@test.dk`, name: "R", role: "ADVISOR", advisorProfile: { create: active === undefined ? {} : { active } } } }));
     const fresh = await mk(); // standard: inaktiv
     const on = await mk(true);
-    expect((await prisma.advisorProfile.findUniqueOrThrow({ where: { userId: fresh.id } })).active).toBe(false);
-    const ids = (await loadCatalog()).advisors.map((a) => a.id);
+    expect((await asSystem(() => prisma.advisorProfile.findUniqueOrThrow({ where: { userId: fresh.id } }))).active).toBe(false);
+    // Kataloget og board-valideringen bruges før login (anon)
+    const ids = (await asAnon(() => loadCatalog())).advisors.map((a) => a.id);
     expect(ids).toContain(on.id);
     expect(ids).not.toContain(fresh.id);
-    expect(await resolveBoard([on.id, fresh.id], 8)).toEqual({ error: expect.stringMatching(/ikke længere tilgængelig/) });
+    expect(await asAnon(() => resolveBoard([on.id, fresh.id], 8))).toEqual({ error: expect.stringMatching(/ikke længere tilgængelig/) });
     // Admin ser et eksisterende board med en inaktiv rådgiver markeret
-    const adminView = await loadCatalog({ includeIds: [fresh.id] });
+    const adminView = await asUser({ id: "test-admin", role: "ADMIN" }, () => loadCatalog({ includeIds: [fresh.id] }));
     expect(adminView.advisors.find((a) => a.id === fresh.id)?.inactive).toBe(true);
-    await prisma.user.deleteMany({ where: { id: { in: [fresh.id, on.id] } } });
+    // RLS: anon ser heller ikke den inaktive rådgiver, selv når den bedes om eksplicit
+    expect((await asAnon(() => loadCatalog({ includeIds: [fresh.id] }))).advisors.map((a) => a.id)).not.toContain(fresh.id);
+    await asSystem(() => prisma.user.deleteMany({ where: { id: { in: [fresh.id, on.id] } } }));
   });
 });

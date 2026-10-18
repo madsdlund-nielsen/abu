@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { describeDb, uid, ownerDb } from "../../test/db";
+import { asSystem, asUser, describeDb, uid, ownerDb } from "../../test/db";
 import { cookieJar, formData, redirectOf } from "../../test/request";
 
 // Server actions kaldes direkte med en rigtig session i cookie-krukken (ingen mock af requireRole): det er selve
@@ -43,8 +43,8 @@ describeDb("MFA i server actions og sessioner", () => {
   afterAll(async () => {
     const { prisma } = await import("@/lib/db");
     await (await ownerDb()).auditLog.deleteMany({ where: { userId: { in: ids } } });
-    await prisma.user.deleteMany({ where: { id: { in: ids } } });
-    await prisma.user.deleteMany({ where: { email: { startsWith: "inv-", endsWith: "@test.dk" } } });
+    await asSystem(() => prisma.user.deleteMany({ where: { id: { in: ids } } }));
+    await asSystem(() => prisma.user.deleteMany({ where: { email: { startsWith: "inv-", endsWith: "@test.dk" } } }));
   });
 
   async function user(role: "ADMIN" | "ADVISOR" | "CUSTOMER", opts: { mfa?: boolean } = {}) {
@@ -52,14 +52,14 @@ describeDb("MFA i server actions og sessioner", () => {
     const { sealSecret } = await import("@/lib/mfa/service");
     const { generateTotpSecret } = await import("@/lib/mfa/totp");
     const { hashPassword } = await import("@/lib/auth");
-    const u = await prisma.user.create({
+    const u = await asSystem(async () => prisma.user.create({
       data: { email: `${uid(role.toLowerCase())}@test.dk`, name: `${role} Test`, role, passwordHash: await hashPassword("Rigtig-Adgangskode-1"), recordingConsentAt: new Date() },
-    });
+    }));
     ids.push(u.id);
     if (!opts.mfa) return { user: u, secret: "" };
     const secret = generateTotpSecret();
     const sealed = sealSecret(u.id, secret);
-    const updated = await prisma.user.update({ where: { id: u.id }, data: { mfaEnabledAt: new Date(), mfaSecretEnc: sealed.enc, mfaKeyId: sealed.keyId } });
+    const updated = await asSystem(() => prisma.user.update({ where: { id: u.id }, data: { mfaEnabledAt: new Date(), mfaSecretEnc: sealed.enc, mfaKeyId: sealed.keyId } }));
     return { user: updated, secret };
   }
 
@@ -95,9 +95,9 @@ describeDb("MFA i server actions og sessioner", () => {
       ["notificationSettings", () => saveSettingsAction({ quietEnabled: false, quietStart: 21, quietEnd: 8, smsSender: "ABU", logRetentionMonths: 12, leadRetentionMonths: 24, smsCountries: ["45"], smsPerNumberCap: 5, smsDailyCap: 100 })],
     ];
     for (const [name, run] of attempts) expect(await redirectOf(run), name).toBe("/mfa/opsaet");
-    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: victim.user.id } })).deactivatedAt).toBeNull();
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: victim.user.id } })).mfaEnabledAt).not.toBeNull();
+    expect(await asSystem(() => prisma.user.findUnique({ where: { email } }))).toBeNull();
+    expect((await asSystem(() => prisma.user.findUniqueOrThrow({ where: { id: victim.user.id } }))).deactivatedAt).toBeNull();
+    expect((await asSystem(() => prisma.user.findUniqueOrThrow({ where: { id: victim.user.id } }))).mfaEnabledAt).not.toBeNull();
 
     // Samme for en admin med MFA, der kun har givet adgangskoden: → /mfa
     const admin2 = await user("ADMIN", { mfa: true });
@@ -134,12 +134,12 @@ describeDb("MFA i server actions og sessioner", () => {
     expect(state.error).toBeUndefined();
     expect(state.ok).toMatch(/inviteret som administrator/);
     expect(state.inviteLink).toMatch(/\/set-password\?token=/);
-    const created = await prisma.user.findUniqueOrThrow({ where: { email } });
+    const created = await asSystem(() => prisma.user.findUniqueOrThrow({ where: { email } }));
     expect(created).toMatchObject({ role: "ADMIN", passwordHash: null, mfaEnabledAt: null });
-    const log = await prisma.notificationLog.findFirst({ where: { recipientUserId: created.id, trigger: "admin_invited" } });
+    const log = await asSystem(() => prisma.notificationLog.findFirst({ where: { recipientUserId: created.id, trigger: "admin_invited" } }));
     expect(log?.status).toBe("SENT");
     expect(log?.preview).toBeNull(); // følsom: indholdet med linket gemmes ikke
-    const audits = (await prisma.auditLog.findMany({ where: { entityId: created.id } })).map((a) => a.action);
+    const audits = (await asSystem(() => prisma.auditLog.findMany({ where: { entityId: created.id } }))).map((a) => a.action);
     expect(audits).toEqual(expect.arrayContaining(["admin.create", "admin.invite"]));
     // Dublet afvises med en forklaring
     expect((await inviteAdminAction({}, formData({ name: "Ny Administrator", email }))).error).toMatch(/allerede inviteret/);
@@ -158,13 +158,13 @@ describeDb("MFA i server actions og sessioner", () => {
     const fullToken = cookieJar.get("abu_session")!;
     expect(fullToken).not.toBe(pendingToken);
     const { sha256 } = await import("@/lib/tokens");
-    expect(await prisma.session.findUnique({ where: { id: sha256(pendingToken) } })).toBeNull();
-    expect(await prisma.session.findUniqueOrThrow({ where: { id: sha256(fullToken) } })).toMatchObject({ mfaPending: false, mfaVerifiedAt: expect.any(Date) });
+    expect(await asSystem(() => prisma.session.findUnique({ where: { id: sha256(pendingToken) } }))).toBeNull();
+    expect(await asSystem(() => prisma.session.findUniqueOrThrow({ where: { id: sha256(fullToken) } }))).toMatchObject({ mfaPending: false, mfaVerifiedAt: expect.any(Date) });
     expect(cookieJar.get("abu_device")).toBeTruthy();
-    const devices = await prisma.trustedDevice.findMany({ where: { userId: u.id } });
+    const devices = await asSystem(() => prisma.trustedDevice.findMany({ where: { userId: u.id } }));
     expect(devices).toHaveLength(1);
     expect(devices[0].label).toBe("Chrome på macOS");
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).lastLoginAt).not.toBeNull();
+    expect((await asSystem(() => prisma.user.findUniqueOrThrow({ where: { id: u.id } }))).lastLoginAt).not.toBeNull();
 
     // Næste login fra samme enhed: ingen kode
     cookieJar.delete("abu_session");
@@ -178,7 +178,7 @@ describeDb("MFA i server actions og sessioner", () => {
     await redirectOf(login);
     const { changePasswordAction } = await import("./auth");
     expect((await changePasswordAction({}, formData({ current: "Rigtig-Adgangskode-1", password: "Ny-Adgangskode-2" }))).ok).toMatch(/betroede enheder er fjernet/);
-    expect(await prisma.trustedDevice.count({ where: { userId: u.id } })).toBe(0);
+    expect(await asSystem(() => prisma.trustedDevice.count({ where: { userId: u.id } }))).toBe(0);
     cookieJar.delete("abu_session");
     expect(await redirectOf(() => loginAction({}, formData({ email: u.email, password: "Ny-Adgangskode-2" })))).toBe("/mfa");
   });
@@ -195,7 +195,7 @@ describeDb("MFA i server actions og sessioner", () => {
     // «Jeg har gemt dem» uden bekræftet opsætning giver ikke adgang
     expect(await redirectOf(() => finishMfaSetupAction(formData({})))).toBe("/mfa");
     expect((await getSessionContext())?.stage).toBe("mfa_setup");
-    const secret = await getOrStartEnrollment(await prisma.user.findUniqueOrThrow({ where: { id: a.id } }));
+    const secret = await getOrStartEnrollment(await asSystem(() => prisma.user.findUniqueOrThrow({ where: { id: a.id } })));
     expect((await confirmMfaSetupAction({}, formData({ code: "000000" }))).error).toBeTruthy();
     const ok = await confirmMfaSetupAction({}, formData({ code: totp(secret) }));
     expect(ok.codes).toHaveLength(10);
@@ -214,9 +214,9 @@ describeDb("MFA i server actions og sessioner", () => {
     const target = await user("ADMIN", { mfa: true });
     await signIn(target.user.id, { verifiedMinutesAgo: 1 });
     await createTrustedDevice(target.user.id, { userAgent: null, ip: null }, 30);
-    expect(await deactivateAdmin(actor.user.id, target.user.id)).toMatchObject({ ok: true });
-    expect(await prisma.session.count({ where: { userId: target.user.id } })).toBe(0);
-    expect(await prisma.trustedDevice.count({ where: { userId: target.user.id } })).toBe(0);
+    expect(await asUser(actor.user, () => deactivateAdmin(actor.user.id, target.user.id))).toMatchObject({ ok: true });
+    expect(await asSystem(() => prisma.session.count({ where: { userId: target.user.id } }))).toBe(0);
+    expect(await asSystem(() => prisma.trustedDevice.count({ where: { userId: target.user.id } }))).toBe(0);
     const { getCurrentUser } = await import("@/lib/auth");
     expect(await getCurrentUser()).toBeNull();
     cookieJar.clear();
