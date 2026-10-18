@@ -6,8 +6,8 @@ import { audit } from "@/lib/audit";
 import { createPasswordToken, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
-import { getPriceBounds, savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
-import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
+import { savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
+import { setAdvisorActive } from "@/lib/advisor-activation";
 import { getEnv } from "@/lib/env";
 import { setHolidayBlocked } from "@/lib/holidays";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
@@ -89,25 +89,26 @@ export async function resendInviteAction(_prev: InviteState, formData: FormData)
   return { ok: sent ? `Ny invitation sendt til ${user.email}.` : "Mailen kunne ikke sendes – brug linket.", inviteLink: await displayLinkIfNeeded(user.id, sent) };
 }
 
-export async function toggleAdvisorActiveAction(formData: FormData) {
+export interface ActivationState {
+  ok?: string;
+  error?: string;
+  /** Tidsstempel for svaret, så samme besked to gange stadig vises/annonceres */
+  at?: number;
+}
+
+/**
+ * Aktivér/deaktivér med en dedikeret knap, der gemmer straks (QA #13). `active` er den ønskede tilstand. Aktivering
+ * afvises på serveren, indtil tjeklisten er opfyldt (se `setAdvisorActive`); deaktivering er altid tilladt.
+ */
+export async function setAdvisorActiveAction(_prev: ActivationState, formData: FormData): Promise<ActivationState> {
   const admin = await requireRole("ADMIN");
-  const id = String(formData.get("userId"));
-  const profile = await prisma.advisorProfile.findUnique({ where: { userId: id }, include: { user: true } });
-  if (!profile) redirectWith("/admin/advisors", "err", "Rådgiveren findes ikke.");
-  const activate = !profile.active;
-  await prisma.advisorProfile.update({ where: { userId: id }, data: { active: activate } });
-  await audit(admin.id, activate ? "advisor.activate" : "advisor.deactivate", "User", id);
+  const id = String(formData.get("userId") ?? "");
+  const want = String(formData.get("active") ?? "");
+  if (want !== "true" && want !== "false") return { error: "Ugyldig handling.", at: Date.now() };
+  const r = await setAdvisorActive(admin.id, id, want === "true");
   revalidatePath("/admin/advisors");
-  if (activate) {
-    const missing = missingReadiness((await loadReadiness([id], await getPriceBounds())).get(id) ?? []);
-    redirectWith("/admin/advisors", "ok", `${profile.user.name} er aktiveret og kan nu vælges af kunder.${missing.length ? ` Bemærk: mangler ${missing.join(", ")}.` : ""}`);
-  }
-  const boards = await boardsWithAdvisor(id);
-  redirectWith(
-    "/admin/advisors",
-    "ok",
-    `${profile.user.name} er deaktiveret.${boards.length ? ` Berørte kunder (vælg en ny rådgiver under Abonnementer): ${[...new Set(boards.map((b) => b.companyName))].join(", ")}.` : ""}`,
-  );
+  revalidatePath(`/admin/advisors/${id}`);
+  return r.ok ? { ok: r.message, at: Date.now() } : { error: r.error, at: Date.now() };
 }
 
 export async function processJobsAction() {

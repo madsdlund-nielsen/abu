@@ -197,12 +197,12 @@ export async function updateTagAction(id: string, patch: { name?: string; descri
 
 // ---------------------------------------------------------------- Rådgivere
 
-export async function updateAdvisorAction(userId: string, input: { priceDkk: number; active: boolean; tagIds: string[] }): R {
+/** Pris og tags. Aktiv/inaktiv ændres kun via `setAdvisorActiveAction` (tjeklisten håndhæves dér); et `active`-felt ignoreres. */
+export async function updateAdvisorAction(userId: string, input: { priceDkk: number; tagIds: string[] }): R {
   return guard(async (adminId) => {
     const p = z
       .object({
         priceDkk: z.number().int("Prisen skal være et helt antal kroner."),
-        active: z.boolean(),
         tagIds: z.array(z.string()).max(30),
       })
       .safeParse(input);
@@ -214,12 +214,11 @@ export async function updateAdvisorAction(userId: string, input: { priceDkk: num
     const tagCount = await prisma.tag.count({ where: { id: { in: p.data.tagIds } } });
     if (tagCount !== new Set(p.data.tagIds).size) return err("Et af tagsene findes ikke.");
     await prisma.$transaction([
-      prisma.advisorProfile.update({ where: { userId }, data: { pricePerMeetingDkk: p.data.priceDkk, active: p.data.active } }),
+      prisma.advisorProfile.update({ where: { userId }, data: { pricePerMeetingDkk: p.data.priceDkk } }),
       prisma.advisorTag.deleteMany({ where: { advisorId: userId, tagId: { notIn: p.data.tagIds } } }),
       prisma.advisorTag.createMany({ data: [...new Set(p.data.tagIds)].map((tagId) => ({ advisorId: userId, tagId })), skipDuplicates: true }),
     ]);
     await audit(adminId, "advisor.update", "User", userId);
-    if (exists.active !== p.data.active) await audit(adminId, p.data.active ? "advisor.activate" : "advisor.deactivate", "User", userId);
     refresh();
     revalidatePath(`/admin/advisors/${userId}`);
     return { ok: true };

@@ -1,15 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { describeDb, uid } from "../test/db";
-import { advisorReadiness, missingReadiness } from "./advisor-readiness";
+import { activationBlockedMessage, advisorReadiness, canActivate, missingReadiness } from "./advisor-readiness";
 import { rankSubstituteCandidates } from "./substitutes";
 import { toMatchAdvisors } from "./onboarding/catalog";
 
 describe("aktivering af rådgivere (QA #13, ejerens beslutning)", () => {
-  it("tjeklisten viser hvad der mangler (advarsel, ikke blokering)", () => {
+  it("tjeklisten viser hvad der mangler", () => {
     const items = advisorReadiness({ inviteAccepted: false, tagCount: 0, ruleCount: 2, bio: " ", priceDkk: 1750, priceBounds: { min: 500, max: 25000 } });
     expect(items.map((i) => [i.key, i.ok])).toEqual([["invite", false], ["tags", false], ["availability", true], ["bio", false], ["price", true]]);
     expect(missingReadiness(items)).toEqual(["invitation accepteret", "mindst ét kompetence-tag", "præsentation (bio)"]);
     expect(advisorReadiness({ inviteAccepted: true, tagCount: 1, ruleCount: 1, bio: "x", priceDkk: 100, priceBounds: { min: 500, max: 25000 } }).find((i) => i.key === "price")?.ok).toBe(false);
+  });
+
+  it("canActivate: aktivering kræver at hele tjeklisten er opfyldt (ejerens beslutning 18.10.2026)", () => {
+    const bounds = { min: 500, max: 25000 };
+    const ready = { inviteAccepted: true, tagCount: 1, ruleCount: 1, bio: "Erfaren bestyrelsesleder", priceDkk: 1750, priceBounds: bounds };
+    expect(canActivate(advisorReadiness(ready))).toBe(true);
+    // Hvert enkelt manglende punkt blokerer
+    expect(canActivate(advisorReadiness({ ...ready, inviteAccepted: false }))).toBe(false);
+    expect(canActivate(advisorReadiness({ ...ready, tagCount: 0 }))).toBe(false);
+    expect(canActivate(advisorReadiness({ ...ready, ruleCount: 0 }))).toBe(false);
+    expect(canActivate(advisorReadiness({ ...ready, bio: "   " }))).toBe(false);
+    expect(canActivate(advisorReadiness({ ...ready, priceDkk: 499 }))).toBe(false);
+    expect(canActivate(advisorReadiness({ ...ready, priceDkk: 25001 }))).toBe(false);
+    expect(canActivate(advisorReadiness({ ...ready, priceDkk: 25000 }))).toBe(true);
+    // En tom tjekliste (ukendt rådgiver) er aldrig klar
+    expect(canActivate([])).toBe(false);
+  });
+
+  it("afvist aktivering giver en dansk besked med det, der mangler", () => {
+    const items = advisorReadiness({ inviteAccepted: true, tagCount: 0, ruleCount: 0, bio: "x", priceDkk: 1750 });
+    expect(activationBlockedMessage("Mette", missingReadiness(items))).toBe("Mette kan ikke aktiveres endnu. Mangler: mindst ét kompetence-tag, ugentlig tilgængelighed.");
   });
 
   it("inaktive foreslås aldrig i matching", () => {

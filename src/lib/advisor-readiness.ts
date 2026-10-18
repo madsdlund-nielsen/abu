@@ -1,8 +1,13 @@
 import { prisma } from "./db";
 
 /**
- * Klar til aktivering? (ejerens beslutning, QA #13) Rådgivere aktiveres manuelt af admin. Tjeklisten vises ved
- * «Aktivér»-knappen; mangler noget, advares der, men aktivering blokeres ikke.
+ * Klar til aktivering? (QA #13) Rådgivere aktiveres manuelt af admin, og **aktivering er blokeret, indtil hele
+ * tjeklisten er opfyldt** (ejerens beslutning 18.10.2026 – tidligere kun en advarsel): invitation accepteret, mindst ét
+ * tag, ugentlig tilgængelighed, bio og en pris inden for det tilladte interval. Blokeringen håndhæves på serveren
+ * (`setAdvisorActive` i `advisor-activation.ts`), og UI'et viser det samme via `canActivate`.
+ *
+ * Deaktivering er altid tilladt. Holder en aktiv rådgiver senere op med at være klar (fx fjerner sit sidste tidsrum),
+ * deaktiveres vedkommende ikke automatisk; admin ser i stedet «Aktiv – mangler: …» i listen og på detaljesiden.
  */
 export interface ReadinessInput {
   inviteAccepted: boolean;
@@ -35,6 +40,16 @@ export function missingReadiness(items: ReadinessItem[]): string[] {
   return items.filter((x) => !x.ok).map((x) => x.label.charAt(0).toLowerCase() + x.label.slice(1));
 }
 
+/** Må rådgiveren aktiveres? Kun når alle punkter er opfyldt (en tom liste – fx ukendt rådgiver – er aldrig klar). */
+export function canActivate(items: ReadinessItem[]): boolean {
+  return items.length > 0 && items.every((x) => x.ok);
+}
+
+/** Dansk fejlbesked, når aktivering afvises. */
+export function activationBlockedMessage(name: string, missing: string[]): string {
+  return `${name} kan ikke aktiveres endnu. Mangler: ${missing.join(", ")}.`;
+}
+
 /** Kunder med et aktivt/afventende board, som rådgiveren sidder i (advarsel ved deaktivering). */
 export async function boardsWithAdvisor(advisorId: string): Promise<{ subscriptionId: string; companyName: string; status: string }[]> {
   const rows = await prisma.subscriptionAdvisor.findMany({
@@ -46,7 +61,7 @@ export async function boardsWithAdvisor(advisorId: string): Promise<{ subscripti
     .sort((a, b) => a.companyName.localeCompare(b.companyName, "da"));
 }
 
-/** Tjeklisten for flere rådgivere på én gang (admin-listen). */
+/** Tjeklisten for flere rådgivere på én gang (admin-listen). Læser altid den gemte tilstand i databasen. */
 export async function loadReadiness(advisorIds: string[], priceBounds?: { min: number; max: number }): Promise<Map<string, ReadinessItem[]>> {
   const profiles = await prisma.advisorProfile.findMany({
     where: { userId: { in: advisorIds } },
