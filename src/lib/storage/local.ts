@@ -1,4 +1,4 @@
-import { createWriteStream, openAsBlob } from "node:fs";
+import { createReadStream, createWriteStream, openAsBlob } from "node:fs";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -63,6 +63,17 @@ export class LocalStorage implements StorageProvider {
 
   async openBlob(key: string, mime: string) {
     return { blob: await openAsBlob(this.resolve(key), { type: mime }), cleanup: async () => {} };
+  }
+
+  async openStream(key: string) {
+    const full = this.resolve(key);
+    try {
+      const s = await stat(full);
+      if (!s.isFile()) return null;
+      return { body: createReadStream(full), size: s.size };
+    } catch {
+      return null;
+    }
   }
 
   async delete(key: string) {

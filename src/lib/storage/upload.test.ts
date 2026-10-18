@@ -56,6 +56,19 @@ describe("streamet upload (H-5)", () => {
     expect((await readFile(path.join(dir, "rec/ok"))).subarray(0, 3).toString()).toBe("ID3");
   });
 
+  it("LocalStorage.openStream streamer et objekt og giver null, når det ikke findes", async () => {
+    const s = new LocalStorage(dir);
+    await s.putStream("avatars/a/x.webp", chunks(Buffer.from("RIFF\0\0\0\0WEBPVP8 "), Buffer.alloc(100)), { maxBytes: 1000, contentType: "image/webp" });
+    const obj = await s.openStream("avatars/a/x.webp");
+    expect(obj?.size).toBe(116);
+    const parts: Buffer[] = [];
+    for await (const c of obj!.body) parts.push(Buffer.from(c));
+    expect(Buffer.concat(parts).subarray(8, 12).toString()).toBe("WEBP");
+    expect(await s.openStream("avatars/a/findes-ikke.webp")).toBeNull();
+    expect(await s.openStream("avatars/a")).toBeNull(); // mappe, ikke fil
+    await expect(s.openStream("../udenfor")).rejects.toThrow(/Ugyldig/);
+  });
+
   it("afviser stier uden for lageret", async () => {
     const s = new LocalStorage(dir);
     await expect(s.putStream("../udenfor", chunks(MP3), { maxBytes: 100 })).rejects.toThrow(/Ugyldig/);

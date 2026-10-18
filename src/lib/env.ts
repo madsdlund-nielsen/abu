@@ -93,6 +93,8 @@ const schema = z.object({
   S3_BUCKET: z.string().default(""),
   S3_ACCESS_KEY_ID: z.string().default(""),
   S3_SECRET_ACCESS_KEY: z.string().default(""),
+  /** true (standard) = path-style-URL'er (endpoint/bucket/nøgle). false = virtual-hosted (bucket.endpoint/nøgle). */
+  S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
 });
 
 export type Env = z.infer<typeof schema>;
