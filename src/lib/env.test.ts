@@ -4,7 +4,7 @@ import { assertBootConfig, EnvConfigError, parseEnv, productionConfigProblems, r
 /** En komplet, gyldig produktionskonfiguration (falske værdier). */
 const PROD = {
   NODE_ENV: "production",
-  DATABASE_URL: "postgresql://abu:x@db:5432/abu",
+  DATABASE_URL: "postgresql://abu_app:0123456789abcdef0123456789abcdef@db.internal:5432/abu?sslmode=verify-full",
   APP_URL: "https://abu.example.com",
   APP_SECRET: "a".repeat(48),
   CRON_SECRET: "c".repeat(48),
@@ -88,6 +88,31 @@ describe("produktions-guard (C-1)", () => {
     expect(text).toMatch(/COOKIE_SECURE=false/);
   });
 
+  it("RLS fase 0: DATABASE_URL skal bruge TLS til andre værter end socket/loopback/compose-«postgres»", () => {
+    const pw = "0123456789abcdef0123456789abcdef";
+    const problems = (url: string) => productionConfigProblems(parseEnv({ ...PROD, DATABASE_URL: url }), { ...PROD, DATABASE_URL: url }).join("\n");
+    expect(problems(`postgresql://abu_app:${pw}@db.internal:5432/abu`)).toMatch(/skal bruge TLS/);
+    expect(problems(`postgresql://abu_app:${pw}@db.internal:5432/abu?sslmode=disable`)).toMatch(/skal bruge TLS/);
+    for (const mode of ["require", "verify-ca", "verify-full"]) expect(problems(`postgresql://abu_app:${pw}@10.0.0.5/abu?sslmode=${mode}`)).toBe("");
+    // Undtagelsen (dokumenteret i README): compose-databasen på det interne netværk, loopback og Unix-socket
+    for (const url of [`postgresql://abu_app:${pw}@postgres:5432/abu`, `postgresql://abu_app:${pw}@127.0.0.1/abu`, "postgresql://abu_app@localhost/abu?host=/var/run/postgresql"]) {
+      expect(problems(url)).toBe("");
+    }
+    expect(problems(`postgresql://abu_app:${pw}@db/abu?sslmode=prefer`)).toMatch(/sslmode=prefer understøttes ikke/);
+  });
+
+  it("RLS fase 0: app-rollen, lang adgangskode og ingen ejer-/superbrugeradgang i app-processen", () => {
+    const pw = "0123456789abcdef0123456789abcdef";
+    const check = (extra: Record<string, string>) => productionConfigProblems(parseEnv({ ...PROD, ...extra }), { ...PROD, ...extra }).join("\n");
+    expect(check({ DATABASE_URL: `postgresql://abu_owner:${pw}@postgres/abu` })).toMatch(/app-rollen abu_app, ikke «abu_owner»/);
+    expect(check({ DATABASE_URL: `postgresql://postgres:${pw}@postgres/abu` })).toMatch(/ikke «postgres»/);
+    expect(check({ DATABASE_URL: "postgresql://abu_app:abu@postgres/abu" })).toMatch(/mindst 24 tegn/);
+    for (const key of ["DATABASE_URL_MIGRATE", "DATABASE_URL_PROVISION", "ABU_OWNER_PASSWORD", "POSTGRES_PASSWORD"]) {
+      expect(check({ [key]: "noget" })).toMatch(new RegExp(`${key} må ikke være sat i app-processen`));
+      expect(check({ [key]: "" })).toBe(""); // compose tømmer dem i app-servicen
+    }
+  });
+
   it("ukendte værdier er en fejl, ikke et stille fald tilbage til standard", () => {
     expect(() => parseEnv({ PAYMENT_PROVIDER: "frisbi" })).toThrow(/PAYMENT_PROVIDER: ugyldig værdi "frisbi" \(tilladt: mock, frisbii\)/);
     expect(() => parseEnv({ IN_PROCESS_SCHEDULER: "ja" })).toThrow(/IN_PROCESS_SCHEDULER/);
@@ -116,6 +141,7 @@ describe("produktions-guard (C-1)", () => {
     expect(line).toMatch(/MFA_ENCRYPTION_KEY=sat/);
     expect(line).not.toContain(PROD.MFA_ENCRYPTION_KEY);
     expect(line).not.toContain(PROD.FRISBII_PRIVATE_KEY);
-    expect(line).not.toContain("x@db");
+    expect(line).not.toContain("0123456789abcdef");
+    expect(line).toMatch(/db=abu_app@db\.internal \(sslmode=verify-full, pool=10\)/);
   });
 });

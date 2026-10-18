@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DbUrlError, DEV_DATABASE_URL, parseDbUrl, tlsExemptDbHost, type DbUrlInfo } from "./db-config";
 
 const bool = z
   .enum(["true", "false", "1", "0", ""])
@@ -11,7 +12,12 @@ const schema = z.object({
    * Tom = production, når NODE_ENV=production (også `next start` og Docker), ellers development.
    */
   APP_ENV: z.enum(["production", "staging", "development", "test"]).optional(),
-  DATABASE_URL: z.string().min(1).default("postgresql://abu:abu@localhost:5432/abu"),
+  /** Appens forbindelse – rollen abu_app (kun DML). Migrationer/seed/create-admin bruger DATABASE_URL_MIGRATE (ejeren). */
+  DATABASE_URL: z.string().min(1).default(DEV_DATABASE_URL),
+  /** Sti til CA-certifikatet (PEM) for TLS til databasen (sslmode=verify-full/verify-ca i DATABASE_URL). */
+  DATABASE_SSL_CA: z.string().default(""),
+  /** Højst så mange databaseforbindelser pr. app-proces. */
+  DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   APP_URL: z.string().url().default("http://localhost:3000"),
   COOKIE_SECURE: z.enum(["true", "false", ""]).optional(),
   /**
@@ -149,6 +155,36 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
+/** Variabler med ejer-/superbrugeradgang til databasen. Må ikke findes i app-processen i produktion. */
+export const OWNER_ONLY_VARS = ["DATABASE_URL_MIGRATE", "DATABASE_URL_PROVISION", "ABU_OWNER_PASSWORD", "POSTGRES_PASSWORD"] as const;
+const MIN_DB_PASSWORD_LENGTH = 24;
+
+/**
+ * DATABASE_URL i produktion: gyldig URL, TLS (sslmode=require/verify-ca/verify-full) undtagen for en lokal socket/loopback
+ * eller compose-databasen «postgres» på det interne netværk, ikke ejer-/superbrugerrollen ved navn (selve rollen tjekkes
+ * også mod databasen ved opstart, se db-guard.ts) og en lang adgangskode.
+ */
+export function databaseUrlProblems(url: string): string[] {
+  let db: DbUrlInfo;
+  try {
+    db = parseDbUrl(url);
+  } catch (e) {
+    return [e instanceof DbUrlError ? e.message : "DATABASE_URL er ugyldig."];
+  }
+  const p: string[] = [];
+  if (!tlsExemptDbHost(db.host) && (db.sslmode === null || db.sslmode === "disable")) {
+    p.push(
+      `DATABASE_URL til værten «${db.host}» skal bruge TLS: tilføj ?sslmode=verify-full (anbefalet; CA-fil i DATABASE_SSL_CA) eller ?sslmode=require. ` +
+        `Kun en lokal socket/loopback og compose-databasen «postgres» er undtaget.`,
+    );
+  }
+  if (db.user === "abu_owner" || db.user === "postgres") p.push(`DATABASE_URL skal bruge app-rollen abu_app, ikke «${db.user}».`);
+  if (!db.socket && db.password.length < MIN_DB_PASSWORD_LENGTH) {
+    p.push(`Databaseadgangskoden i DATABASE_URL skal være mindst ${MIN_DB_PASSWORD_LENGTH} tegn (generér med: openssl rand -hex 32).`);
+  }
+  return p;
+}
+
 /**
  * Produktions-guard (ren funktion): hvad mangler, før appen må køre i produktion? Tom liste = OK.
  * Mock/console/local-udbydere, manglende hemmeligheder og http-adresser afvises. Værdier logges aldrig, kun navne.
@@ -163,6 +199,9 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   };
 
   if (!raw.DATABASE_URL) p.push("DATABASE_URL skal sættes eksplicit.");
+  else p.push(...databaseUrlProblems(env.DATABASE_URL));
+  // Ejer- og superbrugeradgang hører kun til migrate/provisionering – aldrig i den kørende app (RLS fase 0)
+  for (const key of OWNER_ONLY_VARS) if (raw[key]) p.push(`${key} må ikke være sat i app-processen (kun til migrationer/provisionering).`);
   if (!env.APP_URL.startsWith("https://") || isLocalUrl(env.APP_URL)) p.push("APP_URL skal være en offentlig https://-adresse.");
   if (env.COOKIE_SECURE === "false") p.push("COOKIE_SECURE=false er ikke tilladt i produktion.");
   if (env.TRUSTED_PROXY_HOPS < 1) p.push("TRUSTED_PROXY_HOPS skal være mindst 1 (antal reverse proxies foran appen, fx Caddy = 1).");
@@ -211,6 +250,16 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   return p;
 }
 
+/** Rolle, vært, TLS-tilstand og poolstørrelse – aldrig adgangskoden. */
+function describeDb(env: Env): string {
+  try {
+    const db = parseDbUrl(env.DATABASE_URL);
+    return `${db.user || "?"}@${db.host} (sslmode=${db.sslmode ?? "disable"}, pool=${env.DATABASE_POOL_MAX})`;
+  } catch {
+    return "ugyldig URL";
+  }
+}
+
 /** Én linje til opstartsloggen: hvilke udbydere er valgt, og hvilke hemmeligheder er sat. Aldrig værdier. */
 export function describeConfig(env: Env, appEnv: AppEnv): string {
   const set = (v: string) => (v ? "sat" : "mangler");
@@ -224,6 +273,7 @@ export function describeConfig(env: Env, appEnv: AppEnv): string {
     `lager=${env.STORAGE_PROVIDER}`,
     `cvr=${env.CVR_PROVIDER}`,
     `APP_URL=${env.APP_URL}`,
+    `db=${describeDb(env)}`,
     `proxy-hop=${env.TRUSTED_PROXY_HOPS}`,
     `APP_SECRET=${set(env.APP_SECRET)}`,
     `CRON_SECRET=${set(env.CRON_SECRET)}`,

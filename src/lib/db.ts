@@ -1,12 +1,16 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
+import { DEV_DATABASE_URL, pgPoolConfig } from "./db-config";
 
-/** Standard for lokal udvikling. I produktion skal DATABASE_URL være sat (se prod-guard i env.ts). */
-export const DEV_DATABASE_URL = "postgresql://abu:abu@localhost:5432/abu";
+export { DEV_DATABASE_URL };
 
-/** Prisma 7 forbinder via en driver-adapter (node-postgres) i stedet for den gamle Rust-motor. */
+/**
+ * Prisma 7 forbinder via en driver-adapter (node-postgres) i stedet for den gamle Rust-motor. Poolstørrelse, TLS
+ * (sslmode + DATABASE_SSL_CA) og timeouts kommer fra `pgPoolConfig` (src/lib/db-config.ts). I produktion skal
+ * DATABASE_URL være sat og pege på app-rollen abu_app (prod-guard i env.ts + db-guard.ts).
+ */
 export function createPrismaClient(url = process.env.DATABASE_URL || DEV_DATABASE_URL): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+  return new PrismaClient({ adapter: new PrismaPg(pgPoolConfig(url)) });
 }
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
