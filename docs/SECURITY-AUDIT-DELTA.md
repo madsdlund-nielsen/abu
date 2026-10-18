@@ -294,3 +294,74 @@ pages, booking, avatar upload/remove with header checks), production-mode boots,
 - **RI actions** (e.g. `AuditLog.userId ON DELETE SET NULL`) run as the table owner with RLS not forced — that is fine, but do not rely on policies to block cascades.
 - **Tests** run as `abu_app`; once policies bite, DB tests need a `system` context helper for setup/cleanup (the owner connection in `src/test/db.ts` is the natural place).
 - **Grants for new tables** come from `ALTER DEFAULT PRIVILEGES` only when the table is created by `abu_owner`; never run migrations as another role (re-run `npm run db:roles` if that happens). Every new sensitive table should get an explicit `REVOKE` in its migration, like `AuditLog`.
+
+### Part B — RLS Phases 1–3 (done, 2026-10-18)
+
+Policies on **all 34 tables** in `public` (`ENABLE` + `FORCE`; only `_prisma_migrations` is exempt — `abu_app` has no access to it at
+all). Commits: `6300bc0` (context + Prisma extension), `92a4acb` (helper functions + policies migration `20261020090000_rls_policies`),
+`df52a23` (code paths), `cbbe909` (tests), docs in this commit. How it works, the add-a-table checklist, safe admin SQL and the system-context
+rules are in README «Row-Level Security».
+
+| Item | Status | Note |
+|---|---|---|
+| Principal context | Done | `src/lib/db-context.ts`: `AsyncLocalStorage` principal `{ userId, role: ADMIN/ADVISOR/CUSTOMER/anon/system, sessionId?, onboardingToken? }`. Set centrally in `getSessionContext()` (`src/lib/auth.ts`, behind `getCurrentUser`/`requireUser`/`requireRole`): `anon` pre-login (plus the hash of the onboarding cookie), the user for a full session, `anon` + session id for an MFA-pending session; login/logout/onboarding start update it in the same request. Memoised per request (keyed on Next's work store). `system` only via `withSystemContext(reason, fn)` with a constant, grep-able reason. |
+| Prisma extension | Done | `src/lib/db.ts`: every operation outside a transaction runs as a batch transaction `[set_config(…), query]`, values bound at call time (so Prisma's cross-request `findUnique` batching cannot mix principals); interactive transactions set the context once as their first statement; `$transaction([…])` rejected (all 12 array call sites converted); raw queries covered. An adapter guard rejects any statement outside a transaction and any transaction whose first statement is not the context statement. No principal → `DbContextError`; no `app.role` → policies return nothing. |
+| Helper functions | Done | Schema `rls` (owned by `abu_owner`, `REVOKE ALL FROM PUBLIC`, `USAGE`/`EXECUTE` to `abu_app`/`abu_jobs`). Invoker, inlinable, `STABLE`: `app_user_id()` (only for a user role), `app_role()` (known roles only), `app_session_id()`, `app_onboarding_token()`, `app_is_admin()`, `app_is_system()` (`app.role='system'` or `current_user` = the migrating owner), `app_caller_is_system()`. Definer (`SET search_path = pg_catalog, pg_temp`): ownership sets (`app_customer_subscription_ids`, `app_advisor_subscription_ids`, `app_meeting_ids`, `app_board_advisor_ids`, `app_board_peer_ids`, `app_is_*_of_*`, `app_session_user_id`) and capability functions (`user_directory`, `lead_eligible_ids`, `advisor_busy`, `advisor_lead_load`, `pending_upload_total`, `rate_limit_hit`/`rate_limit_reset`, `capture_onboarding_lead`). |
+| Owner / seed / create-admin | Done | Owner exempt via `app_is_system()` (owner name baked in at migration time); seed and `create-admin` also run in `withSystemContext`. |
+| Background work | Done | `processJobs`, `enqueueJob`, cron route, notification engine, webhooks (after signature/secret check), idempotency keys, CVR cache, alerts, onboarding cleanup in `withSystemContext`. `abu_jobs` not used: one pool is enough, no job needs > 15 s per statement; policies key on `app.role`, so a separate jobs client can be added later without policy changes. |
+| Allow-list test | Done | `src/lib/db-context.test.ts`: every `withSystemContext` call site and reason must be in `ALLOW`; only listed request handlers under `src/app` may enter it; no `$transaction([…])`, no `*Unsafe` raw queries, `runAsPrincipal` only in auth. |
+| Coverage test | Done | `src/lib/rls.test.ts` fails if any `public` table lacks `relrowsecurity` + `relforcerowsecurity` or has no policy (exempt: `_prisma_migrations`); the production startup guard (`db-guard.ts`) refuses to start for the same reason and logs `RLS=ja`. |
+| Indexes | Done | `MeetingParticipant(userId, meetingId)` (replaces `(userId)`), `SubscriptionAdvisor(advisorId)`, `Recording(uploadedById)`. |
+
+**Per-table policies** (S = system incl. owner, A = admin; every table allows S; «own» = `app_user_id()` matches):
+
+| Table | Read | Write |
+|---|---|---|
+| User | self, own session's user (also MFA-pending), A, S; peers only via `rls.user_directory` (id, name, role) | update: self (guard trigger: name, phone, passwordHash, deletion request, consents, opt-outs; `id/email/role/createdAt` not updatable by `abu_app` at all), A, S; insert/delete: A, S |
+| Session | own (cookie hash) and own user's, A, S | insert/update: S (auth internals); delete: own, A, S |
+| TrustedDevice | own, A, S | insert/update: S; delete: own, A, S |
+| MfaRecoveryCode | own (count), S | S only |
+| PasswordToken | A, S | A, S |
+| AdvisorProfile | active (public catalog/avatars), own, board/meeting peers, A, S | update: own (guard: title, bio, photo), A, S; insert/delete: A, S |
+| Tag / AdvisorTag | COMPETENCE public (any context); ADMIN tags only A, S (`leadEligible` via `rls.lead_eligible_ids`) | A, S |
+| OnboardingQuestion / Answer / AnswerTagWeight | active/visible rows to any context (test pre-login); all to A | A, S |
+| ContentBlock | any context | A |
+| NotificationTemplate / NotificationRule | A, S | A, S |
+| AppSetting | non-alert keys to any context; `alert:*` A, S | A, S |
+| OnboardingSession | own (cookie hash = `app.onboarding_token`), A, S | insert/update/delete own; S |
+| Lead | own onboarding session's lead, A, S | insert: S or `rls.capture_onboarding_lead` (token-scoped); update own session's lead, S; delete own (unconsented), A, S |
+| MarketingConsent | own user, own session's lead, A, S | insert own lead, S; update own user/lead, S; delete A, S |
+| CustomerProfile | self, advisors in the customer's boards/meetings, A, S | A, S (created at signup in system context) |
+| Subscription | customer, board advisors, A, S | insert/update: customer (checkout, plan change, cancel), A, S; delete: customer's own PENDING, A, S |
+| SubscriptionAdvisor | customer and board advisors, A, S | customer (own board), A, S |
+| Meeting | participants, customer of the subscription, A, S | customer on own subscription (book/cancel/rollback), A, S |
+| MeetingParticipant | own and participant lists of accessible meetings, A, S | insert: customer (booking), A, S; update/delete: A, S |
+| Recording | accessible meetings, A, S | insert: participating advisor (upload), A, S; update/delete: uploader, A, S |
+| Transcript | accessible meetings, A, S | A, S (pipeline) |
+| AvailabilityRule / AvailabilityBlock | own advisor, customers whose board includes the advisor, A, S | own advisor, A, S |
+| NotificationLog | recipient, A, S | A (test send, resend), S |
+| AuditLog | A, S | insert: S, or any authenticated user with `userId` = self/null (no UPDATE/DELETE grant — append-only from Phase 0) |
+| WebhookEvent, RateLimit, CvrLookupCache, IdempotencyKey | S | S (`RateLimit` via `rls.rate_limit_hit/reset` from any context) |
+| Job | S, A (counts on the admin dashboard) | S |
+
+**Deviations from the brief (with reasons).**
+- *Anon INSERT on Lead/MarketingConsent:* step 1 creates the onboarding session first, then calls `rls.capture_onboarding_lead` (definer, token-scoped: needs the caller's own session, upserts by e-mail and links the lead to that session); the consent row is inserted as anon under the "own session's lead" policy. A plain anon `INSERT` policy cannot be scoped to the session because the lead id is not known before the insert.
+- *Peer data:* instead of row access to other users' `User` rows, peers get `rls.user_directory` (id, name, role only) — no e-mail, phone, hashes or MFA columns leak, and Prisma includes of `user` on other people were replaced.
+- *Self-update columns:* a per-principal guard trigger (`rls.guard_self_update`) instead of column privileges (which are role-wide and would also block admin/system); column privileges are used for the identity columns (`id`, `email`, `role`, `createdAt`).
+- *Cross-tenant computations* (busy times at booking, lead load/eligibility, pending upload total, rate limits) run in narrow definer functions instead of widening row policies.
+- *Admin* may read `Job` (dashboard counts) and write `NotificationLog` (test send/resend) — both existing admin features. Customers may write `SubscriptionAdvisor`/`Meeting`/`MeetingParticipant` for their own subscription because checkout, plan change and booking run as the customer.
+- *Additional system-context call sites* beyond the brief's list: notification engine, idempotency keys, CVR cache, alerts, onboarding cleanup, the e-mail-matched parts of GDPR export/erasure, and the token-verified unsubscribe. All are in the allow-list.
+- *`app_user_id()` is role-gated* (returns the id only for ADMIN/ADVISOR/CUSTOMER), so an unknown role with a user id gets nothing.
+- `listActiveAdvisors` (dead code) removed. The opportunistic `completePastMeetings()` in `(app)/layout` is unchanged but now only touches meetings the signed-in user may update (RLS); the job processor and the cron route complete all past meetings in the system context.
+
+**Measured overhead** (local, Postgres 16 on the same host, production build, 40 sequential requests per path after 5 warm-ups, median ms, before → after): `/api/health` 4.7 → 4.7, `/login` 11.4 → 11.8, `/kom-i-gang` 14.1 → 13.7, customer `/dashboard` 26.6 → 44.9, `/book` 199.3 → 221.7, `/meetings/<id>` 21.7 → 33.6, `/account/subscription` 23.3 → 39.6, advisor `/dashboard` 17.8 → 33.2, advisor meeting page 20.8 → 41.2, `/availability` 14.2 → 22.2, `/admin` 18.5 → 32.2, `/admin/meetings` 12.2 → 17.7. Per Prisma call: `findUnique` 1.03 → 2.32 ms, `findMany` 1.70 → 2.76 ms, an interactive transaction with 3 queries 2.90 → 3.60 ms — i.e. ≈ 3 extra round trips (BEGIN, `set_config`, COMMIT) per top-level operation; on a remote DB this scales with the network RTT. Mitigation if needed: group a page's reads into one interactive transaction. `EXPLAIN ANALYZE` as `abu_app` with 30 000 meetings / 120 000 participants: customer dashboard 0.9 ms, meeting page lookups ≤ 1.1 ms each, booking `advisor_busy` 8 ms (540 rows), anon catalog < 0.1 ms + directory 2.3 ms; the advisor dashboard with 1 800 own meetings 10.7 ms (owner 7.0 ms) — the policy filter is a hashed subplan, evaluated per future meeting while walking `Meeting_startsAt_idx`.
+
+**Verification.** `npm run lint`, `npx tsc --noEmit`, `npm test` (68 files, 460 tests, all DB tests as `abu_app` with RLS against a freshly provisioned and migrated `abu_rls_test`), `npm run build`, `npm audit --omit=dev --audit-level=high` (0). `npm run db:roles` → `prisma migrate deploy` (as `abu_owner`) → seed on a fresh database. Chromium (Playwright) against the production build (`APP_ENV=development`) as `abu_app`: MFA login (dev TOTP) and all 15 admin pages; onboarding anon → account → mock payment; booking; advisor upload → transcription job → customer sees transcript, other customer gets 404; availability + photo upload/public serving; admin CMS (texts, tag, weight); notification test send + log; leads CSV (and unauthenticated refusal); admin invite → MFA setup; lead balancing; unsubscribe link; GDPR export + erasure; cron/jobs — 64 checks, **0** `row-level security`/`permission denied`/`42501`/`DbContextError`/alert lines in the server log.
+
+**Residual risks.**
+- The context lives in transaction-local GUCs: SQL injection that can run arbitrary statements as `abu_app` could call `set_config('app.role','system',true)` itself. RLS still blocks the common injection shapes (a single injected predicate or `UNION` inside the app's own transaction), but it is not a boundary against arbitrary SQL execution; the adapter guard and the absence of `*Unsafe` raw queries are the mitigations. A signed/HMAC'd context or per-role DB logins would be the next step.
+- Definer capability functions are callable by any SQL running as `abu_app`; each checks the caller's context and returns only the minimum (ids, names, times, counts).
+- Every top-level operation is a transaction (~3 extra round trips); keep the DB close to the app.
+- The per-request memo uses Next's internal `workAsyncStorage` (`next/dist/server/app-render/work-async-storage.external`); a Next upgrade could move it (covered by tests and the e2e run).
+- Board customers can read their advisors' `AvailabilityBlock` rows including the free-text reason (as before in the app; the booking UI does not show it).
+- Step-1 lead capture links an existing (unconverted) lead with the same e-mail to the new onboarding session, so at the database level that session can read the lead row (name, phone, step) — the app never displays it, step 1 is IP rate-limited (30/window), and before RLS `abu_app` could read every lead anyway.
