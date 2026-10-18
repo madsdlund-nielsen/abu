@@ -13,6 +13,10 @@ ansvarlig rådgiver (`admin/24`, `25`, `onboarding/11`, `12`, `kunde/09`). Rådg
 foto-URL (`raadgiver/03`, `admin/04c`, `onboarding/13`); testbillederne er genererede portrætter (ingen rigtige personer). Øvrige billeder er fra før disse ændringer og viser
 fx board-builderen uden markøren «Kan være ansvarlig».
 
+Opdateret 19.10.2026: platform-administratorer og totrinsbekræftelse (`admin/30`–`40`, `konto/`, `mobil/09`), optaget mod en frisk
+database (`abu_mfa`: migrate deploy + seed + `create-admin` for `mads@qlim8.com`). TOTP-koderne er beregnet i Playwright-scriptet ud fra
+hemmeligheden på opsætningssiden; ingen CSP-fejl i konsollen.
+
 ## Offentlig (`offentlig/`)
 
 | Fil | Beskrivelse |
@@ -97,6 +101,29 @@ fx board-builderen uden markøren «Kan være ansvarlig».
 | `23-helligdage.png` | Helligdage og lukkedage, der spærres for booking. |
 | `24-ansvarlige-fordeling.png` | Ansvarlige rådgivere: fordeling pr. kvalificeret rådgiver og et udligningsforslag (board, fra → til), der kun anvendes efter bekræftelse. |
 | `25-abonnement-ansvarlig.png` | Abonnement: admin har skiftet ansvarlig rådgiver (kun kvalificerede i boardet kan vælges). |
+| `30-mfa-opsaetning-paakraevet.png` | Ny administrator (fra `create-admin`) efter valg af adgangskode: tvungen opsætning af totrinsbekræftelse. QR-koden er tegnet lokalt som SVG, nøglen vises i grupper til manuel indtastning; menuen er skjult, og alle andre sider omdirigerer hertil. |
+| `31-mfa-gendannelseskoder.png` | Opsætningen er bekræftet med en kode: 10 gendannelseskoder vises én gang med «Download (.txt)» og «Jeg har gemt dem». |
+| `32-login-kode-husk-enhed.png` | Login trin 2: koden fra appen (numerisk felt, sendes automatisk ved 6 cifre) og «Husk denne enhed i 30 dage». |
+| `33-login-gendannelseskode.png` | Login med en gendannelseskode i stedet for appen. |
+| `34-administratorer-invitation.png` | Admin → Administratorer: Anna er inviteret (status «Inviteret», MFA ikke opsat); linket vises, fordi e-mail kører i konsol-tilstand. |
+| `35-administratorer-liste.png` | Listen med status, MFA, seneste login og betroede enheder; «Nulstil MFA» og «Deaktivér» – ikke på din egen række. |
+| `36-administrator-deaktiveret.png` | Anna er deaktiveret: logget ud overalt og kan ikke logge ind igen. |
+| `37-sidste-aktive-administrator.png` | Mads er den eneste aktive administrator: ingen kan deaktivere ham, og siden anbefaler at invitere en mere (nødprocedure: `create-admin --reset-mfa`). |
+| `38-bekraeft-med-kode-kraeves.png` | Bekræftelsen er ældre end 15 minutter: handlingerne er spærret, til der er bekræftet med kode igen. |
+| `39-bekraeft-med-kode.png` | `/mfa/bekraeft`: ny kode til følsomme handlinger; derefter tilbage til siden. |
+| `40-notifikationer-administrator-inviteret.png` | Notifikationer: den låste udløser «Administrator inviteret» med sin redigerbare skabelon. |
+
+## Konto og totrinsbekræftelse (`konto/`)
+
+| Fil | Beskrivelse |
+|---|---|
+| `01-adgangskode-under-10-tegn-afvist.png` | Invitationslinket fra `create-admin`: en adgangskode på 8 tegn afvises af serveren (mindst 10 tegn) – ingen undtagelse fra politikken. |
+| `02-totrin-og-betroede-enheder.png` | Konto for en administrator: MFA slået til, gendannelseskoder tilbage, betroede enheder med «Denne enhed», udløb (ingen forlængelse) og «Fjern». |
+| `03-gendannelseskode-brugt.png` | Efter login med en gendannelseskode: beskeden om, at koden er brugt, og 9 af 10 tilbage. |
+| `04-gendannelseskode-genbrug-afvist.png` | Samme gendannelseskode virker ikke igen. |
+| `05-raadgiver-mfa-valgfri.png` | Rådgiverens konto: totrinsbekræftelse er valgfri og slået fra. |
+| `06-raadgiver-opsaet-mfa.png` | Valgfri opsætning for en rådgiver («Ekstra sikkerhed», med «Annullér»). |
+| `07-raadgiver-mfa-slaaet-til.png` | Rådgiverens MFA er slået til; kan slås fra igen med en kode. |
 
 ## Mobil, 390 px (`mobil/`)
 
@@ -110,3 +137,4 @@ fx board-builderen uden markøren «Kan være ansvarlig».
 | `06-moedeside-aaben.png` | Mødesiden med åbent videorum på mobil. |
 | `07-admin-cms.png` | Onboarding-CMS i admin på mobil. |
 | `08-admin-navigation.png` | Admin-navigationen foldet ud på mobil. |
+| `09-mfa-kode.png` | Login trin 2 (kode fra appen) på mobil – ingen vandret scroll. |

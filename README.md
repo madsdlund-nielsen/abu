@@ -27,11 +27,23 @@ Seed-brugere:
 
 | Rolle | Login | Adgangskode |
 |---|---|---|
-| Admin | `admin@abu.local` | `Admin12345!` |
+| Admin | `admin@abu.local` | `Admin12345!` + kode fra totrinsbekræftelse (se nedenfor) |
 | Kunde (aktivt abonnement: 3 rådgivere, hver 8. uge) | `kunde@abu.local` | `Kunde12345!` |
 | Rådgivere (8 stk., fx `mette.lindberg@abu.local`) | se `prisma/seed-data.ts` | `Raadgiver123!` |
 
-Seed opretter også danske standardtekster og -regler til notifikationer (23 skabeloner, 23 regler), og fire rådgivere får det interne tag «Lead-kvalificeret».
+Seed opretter også danske standardtekster og -regler til notifikationer (24 skabeloner, 24 regler), og fire rådgivere får det interne tag «Lead-kvalificeret».
+
+**Totrinsbekræftelse for seed-admin (kun lokal udvikling).** Administratorer skal altid bruge totrinsbekræftelse. Seed giver
+`admin@abu.local` MFA med en **kendt, kun-lokal TOTP-hemmelighed**, så den kan logge ind lokalt og i Playwright uden opsætning:
+
+```
+ABUDEVTOTPSECRETONLYFORLOCALDEV2
+```
+
+Tilføj den i en godkendelses-app («Indtast nøgle», tidsbaseret, 6 cifre, 30 sek.), eller beregn koden i en test (RFC 6238, SHA-1).
+Hemmeligheden er offentlig og må kun bruges til demodata; seed afvises i produktion (H-1), og en produktions-admin oprettes med
+`npm run create-admin` og opsætter sin egen hemmelighed ved første login. Seed-admin har ingen gendannelseskoder (lav dem under
+*Konto → Totrinsbekræftelse*). Rådgivere og kunden i seed har ikke MFA (valgfrit for dem).
 
 Hele flowet virker i mock-tilstand: onboarding (`/kom-i-gang`) → testbetaling (`/subscribe/mock-betaling`, ét klik) → book → åbn
 mødet → upload optagelse (som rådgiver/admin) → transskription og resumé vises på mødesiden. Mails og SMS skrives **redigeret**
@@ -66,7 +78,7 @@ docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   
 | `npm run db:migrate` | Ny migration under udvikling |
 | `npm run db:deploy` | Anvend migrationer (produktion) |
 | `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) |
-| `npm run create-admin -- --email … --name …` | Opretter første administrator og udskriver et engangslink til at vælge adgangskode |
+| `npm run create-admin -- --email … --name …` | Opretter første administrator og udskriver et engangslink til at vælge adgangskode (uden flag spørger scriptet i terminalen; `--reset` nyt link, `--reset-mfa` nødprocedure) |
 | `npm run storage:check` | Tjekker objektlageret med appens konfiguration: skriver, læser og sletter et testobjekt; med S3 også privat bucket og CORS (se `docs/HETZNER-S3.md`) |
 
 ## Onboarding og CMS
@@ -155,7 +167,9 @@ src/
     slots.ts           Ren funktion: ledige tider for et board (testet)
     quota.ts           Kvoteperioder, aflysningsregler (testet)
     booking.ts         Booking/aflysning med revalidering i DB-transaktion (advisory locks)
-    auth.ts            Hashing (bcryptjs), DB-sessioner (SHA-256 af tilfældigt token), rate limit, invite/reset-tokens
+    auth.ts            Hashing (bcryptjs), DB-sessioner (SHA-256 af tilfældigt token) med MFA-trin, re-verifikation, invite/reset-tokens
+    mfa/               TOTP (RFC 6238), AES-256-GCM-kryptering, gendannelseskoder, betroede enheder; sign-in.ts: login-forløbet
+    admin-users.ts     Administratorer: invitation, deaktivering (sidste-admin-værn), nulstilling af MFA
     jobs.ts, pipeline.ts  DB-baseret jobkø (FOR UPDATE SKIP LOCKED) og transskriptions-pipeline
     payments/ video/ transcription/ messaging/ storage/   Adaptere med mock-implementering (messaging: e-mail + SMS, inMobile)
     avatar*.ts         Rådgiverfotos: validering, sharp-behandling, lagring, adgang og servering (/api/avatar)
@@ -178,6 +192,46 @@ Rådgivere inviteres af admin og vælger selv adgangskode via et engangslink (7 
 5 forkerte forsøg (15 min, derefter fordoblet, højst 24 t) uanset IP; derudover er der rate limits pr. betroet klient-IP
 (`TRUSTED_PROXY_HOPS`). Alle rate limits ligger i Postgres-tabellen `RateLimit`, så de overlever genstart og deles mellem instanser.
 Booking og «opret rådgiver» er idempotente (formular-nøgle), så dobbeltklik giver samme resultat.
+
+**Totrinsbekræftelse (MFA, `src/lib/mfa/`).** TOTP efter RFC 6238 (HMAC-SHA1, 6 cifre, 30 sek., ±1 trin) implementeret med Nodes
+`crypto` (testet mod RFC 4226/6238-vektorerne) – virker med Authy, Google Authenticator, Microsoft Authenticator og 1Password.
+- **Påkrævet for ADMIN, valgfri for rådgivere og kunder** (*Konto → Totrinsbekræftelse*). Efter adgangskoden får sessionen trinnet
+  «adgangskode godkendt, kode mangler» (`Session.mfaPending`, 15 min). Den kan kun nå `/mfa`, `/mfa/opsaet` og log ud:
+  `requireUser`/`requireRole` (og dermed alle sider, server actions og API-ruter) afviser den – ikke kun via omdirigering. En admin
+  uden MFA (ny, nulstillet eller ældre session) sendes til `/mfa/opsaet` og kan intet andet, før opsætningen er bekræftet.
+- **Opsætning:** 160 bit tilfældig hemmelighed, QR-kode tegnet lokalt som SVG med `qrcode` (låst version, ingen ekstern tjeneste, CSP
+  uændret), hemmeligheden også som tekst i grupper, otpauth-URI med issuer «Advisory Board Unlimited» og e-mailen. MFA slås først til
+  efter en gyldig kode. Derefter vises 10 gendannelseskoder én gang (kun SHA-256 gemmes) med «Download (.txt)» og «Jeg har gemt dem».
+- **Opbevaring:** hemmeligheden krypteres med AES-256-GCM (nøgle afledt med HKDF af `MFA_ENCRYPTION_KEY`, bruger-id som associated
+  data) og et nøgle-id i værdien, så nøglen kan roteres: ny nøgle i `MFA_ENCRYPTION_KEY`, den gamle i `MFA_ENCRYPTION_KEY_PREVIOUS`;
+  hemmeligheder krypteres om ved næste brug. `MFA_ENCRYPTION_KEY` kræves i produktion (C-1-guarden).
+- **Værn:** et brugt tidstrin kan ikke bruges igen (replay, atomisk), rate limit pr. bruger og pr. betroet klient-IP i Postgres-lageret,
+  og kontoen spærres efter 5 forkerte koder med samme eskalering som login (H-2), men med egen tæller, så et korrekt password ikke
+  nulstiller den.
+- **Login:** kode (auto-send ved 6 cifre, `autocomplete="one-time-code"`) eller gendannelseskode. Sessionen roteres (nyt token), når
+  koden er godkendt. Antal resterende gendannelseskoder vises under Konto, og nye kan laves med en aktuel kode.
+- **«Husk denne enhed i 30 dage»:** et tilfældigt token i cookien `abu_device` (httpOnly, Secure i produktion, SameSite=Lax); kun dets
+  SHA-256 gemmes i `TrustedDevice` med grov beskrivelse («Chrome på macOS») og omtrentlig IP (/24 eller /48). Adgangskoden kræves
+  altid; kun koden springes over. Udløbet forlænges **ikke** ved brug. Varigheden sættes i *Admin → Administratorer* (standard og højst
+  30 dage, 0 = slået fra; en lavere værdi gælder straks). Brugeren ser og fjerner sine enheder under Konto. Alle enheder tilbagekaldes
+  ved skift/nulstilling af adgangskode, nulstilling eller fravalg af MFA, deaktivering og sletning af kontoen.
+- **Følsomme admin-handlinger** kræver en kode, der højst er 15 minutter gammel i den aktuelle session (`requireFreshMfa`, ellers
+  `/mfa/bekraeft`): invitere, deaktivere og nulstille MFA for administratorer, fjerne en administrators enheder, varigheden for betroede
+  enheder, notifikationsindstillinger, sletning af konti og anvendelse af udligningsforslaget for ansvarlige rådgivere. Et login fra en
+  betroet enhed tæller ikke som frisk.
+- **Audit-log:** `auth.mfa_enabled`, `auth.mfa_disabled`, `auth.mfa_failed`, `auth.lockout`, `auth.mfa_recovery_used`,
+  `auth.mfa_recovery_regenerated`, `auth.mfa_login`, `auth.mfa_reverified`, `auth.device_trusted`, `auth.device_revoked`,
+  `auth.devices_revoked`, `auth.login_trusted_device`.
+- **GDPR:** eksporten viser, om MFA er slået til, og listen over betroede enheder (ingen hemmeligheder, hashes eller tokens);
+  sletning fjerner al MFA-data.
+
+**Administratorer (`/admin/administratorer`, også via Konto og admin-forsiden).** Liste med navn, e-mail, status
+(aktiv/inviteret/deaktiveret), MFA-status, seneste login og antal betroede enheder. Admin kan invitere en administrator (navn + e-mail:
+ADMIN uden adgangskode + invitationsmail via notifikationerne, skabelonen «Administrator inviteret» – låst og redigerbar som de andre;
+linket vises også for den inviterende, når e-mail kører i konsol-tilstand), sende en ny invitation, deaktivere (sessioner, betroede
+enheder og ubrugte links tilbagekaldes), nulstille en anden administrators MFA og fjerne en administrators betroede enheder. Man kan ikke
+deaktivere sig selv eller den sidste aktive administrator (også ved samtidige forsøg: advisory lock). En deaktiveret administrator
+genaktiveres ved at invitere e-mailen igen. Alle handlinger er kun for ADMIN på serveren, kræver frisk kode, er rate-limited og audit-logges.
 
 **Rådgivere: aktivering og profil (`src/lib/advisor-activation.ts`, `advisor-readiness.ts`).** Rådgivere oprettes inaktive og aktiveres
 manuelt af admin med en dedikeret knap («Aktivér rådgiver»/«Deaktivér rådgiver», egen server action, bekræftelse, audit-log). Aktivering
@@ -290,6 +344,7 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | `APP_URL` | `https://…` (ikke localhost) |
    | `DATABASE_URL` / `POSTGRES_PASSWORD` | sat eksplicit; stærk adgangskode |
    | `APP_SECRET`, `CRON_SECRET` | mindst 32 tilfældige tegn hver (`openssl rand -base64 48`) |
+   | `MFA_ENCRYPTION_KEY` | mindst 32 tilfældige tegn, forskellig fra `APP_SECRET`; krypterer TOTP-hemmeligheder. Gem den sikkert – mistes den, skal alle opsætte MFA igen. Rotation: ny værdi her, den gamle i `MFA_ENCRYPTION_KEY_PREVIOUS` |
    | `TRUSTED_PROXY_HOPS` | ≥ 1 |
    | `PAYMENT_PROVIDER=frisbii` + `FRISBII_PRIVATE_KEY`, `FRISBII_WEBHOOK_SECRET` | betaling |
    | `VIDEO_PROVIDER=whereby` + `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET` | video |
@@ -300,10 +355,16 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | `APP_ENV` | tom (eller `production`) – sæt **aldrig** `development` i drift |
 
 4. `docker compose up -d --build` – `migrate`-servicen kører `prisma migrate deploy` (med `NODE_ENV=production`), derefter starter appen.
-5. Opret den første administrator (kør **aldrig** seed i produktion – det afvises):
-   `docker compose run --rm migrate npm run create-admin -- --email admin@firma.dk --name "Fornavn Efternavn"`.
-   Scriptet udskriver et engangslink (7 dage) i terminalen; åbn det og vælg adgangskode. Der står ingen adgangskode i koden eller loggen.
-   Nyt link til en eksisterende admin: `npm run create-admin -- --email admin@firma.dk --reset`.
+5. **Opret den første administrator** (kør **aldrig** seed i produktion – det afvises). Ejerens konto:
+   `docker compose run --rm migrate npm run create-admin -- --email mads@qlim8.com --name "Mads"`
+   (uden `--email`/`--name` spørger scriptet, når det køres med en terminal, fx `docker compose run --rm -it migrate npm run create-admin`).
+   Scriptet udskriver et engangslink (7 dage) i terminalen; åbn det og vælg en adgangskode på **mindst 10 tegn** (der er ingen undtagelser
+   fra politikken, og der står ingen adgangskode i koden, seed, dokumentationen eller loggen – H-1). Derefter skal administratoren opsætte
+   totrinsbekræftelse med en godkendelses-app og gemme de 10 gendannelseskoder. Flere administratorer inviteres derefter i appen under
+   *Admin → Administratorer*.
+   Nyt link til en eksisterende admin: `npm run create-admin -- --email admin@firma.dk --reset`. Nødprocedure, hvis den eneste
+   administrator har mistet både telefon og gendannelseskoder: `npm run create-admin -- --email admin@firma.dk --reset-mfa` (nyt link,
+   MFA nulstilles, alle sessioner logges ud; kræver adgang til serveren og audit-logges).
 6. Cron (kun hvis `IN_PROCESS_SCHEDULER=false`; ellers kører jobkøen og notifikationerne hvert minut i appen): `* * * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://abu.example.dk/api/cron/process-jobs`.
 7. Backup: `pg_dump` af Postgres-volumen dagligt (fx til Hetzner Storage Box) med testet gendannelse.
 8. Overvågning: alle driftsalarmer står i loggen med præfikset `[ALERT]` (SMS-lofter, blokerede SMS-lande, fejl i audit-loggen) og under
@@ -327,3 +388,13 @@ TEST_DATABASE_URL=postgresql://abu:abu@localhost:5432/abu_test npm test   # ogs�
 npm run lint && npm run typecheck && npm run build
 npm audit --omit=dev --audit-level=high
 ```
+
+MFA-tests: TOTP mod RFC 4226/6238-vektorerne, vindue og replay (`src/lib/mfa/totp.test.ts`), kryptering, manipulation og rotation
+(`crypto.test.ts`), gendannelseskoder, betroede enheder (30 dage, ingen forlængelse, tilbagekaldelse) og lockout (`service.test.ts`,
+`trusted-device.test.ts`), sessionstrin, re-verifikation og at en MFA-ventende session ikke kan køre admin-handlinger – server actions
+kaldt direkte med en rigtig session (`src/app/actions/mfa-session.test.ts`), samt invitation og sidste-admin-værn (`src/lib/admin-users.test.ts`).
+
+**End-to-end (Playwright, scripts uden for repoet).** Seed-admin logger ind med koden fra udviklingshemmeligheden ovenfor; nye
+administratorer (fx fra `create-admin`) opsætter MFA på `/mfa/opsaet`, og testen læser hemmeligheden fra `[data-testid=mfa-secret]` og
+beregner koderne selv (RFC 6238). Husk, at et tidstrin kun kan bruges én gang (replay-værn): vent til næste 30-sekunders trin mellem to
+logins med samme hemmelighed.

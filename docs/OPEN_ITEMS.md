@@ -34,6 +34,8 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 12. **Møder holdes altid med hele boardet (18.10.2026)** – aldrig 1:1 eller med et reduceret board. Admin kan udskifte en rådgiver i et møde og tilføje ekstra deltagere, men ikke fjerne en, så mødet kommer under boardets størrelse. Slettes en rådgiver, markeres de berørte møder for admin.
 13. **Ansvarlig rådgiver (18.10.2026):** hvert board har præcis én ansvarlig rådgiver blandt rådgivere med det interne tag «Lead-kvalificeret»; rollerne fordeles automatisk efter belastning, og eksisterende boards omfordeles kun efter admins bekræftelse (`/admin/ansvarlige`).
 
+14. **Platform-administratorer og totrinsbekræftelse (19.10.2026):** ejerens admin er `mads@qlim8.com` og oprettes med `npm run create-admin` (ingen adgangskode i kode eller docs; ejerens foreslåede adgangskode på 8 tegn er under minimum på 10 tegn, og politikken er bevaret uden undtagelse). Administratorer inviterer andre administratorer i appen og skal bruge totrinsbekræftelse (TOTP); for rådgivere og kunder er det valgfrit. «Husk denne enhed» gælder højst 30 dage og forlænges ikke ved brug. Seed-admin bruger en dokumenteret, kun-lokal TOTP-hemmelighed.
+
 ## 2b. Beslutninger du stadig skal tage
 
 1. **Prisformel – besluttet.** Ejeren har bekræftet, at formlen er korrekt og at alle priser er ekskl. moms. Formlen er nu *sum af rådgivernes mødepriser × (52 / uger) / 12* (hver rådgiver har sin egen pris, standard 1.750 kr.). Ved 1.750 kr. for alle giver den tabellen:
@@ -54,6 +56,12 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 8. **Den ansvarlige rådgivers rolle.** Får den ansvarlige rådgiver ekstra opgaver eller honorar – fx et højere mødehonorar, rollen som vært i mødet, eller at modtage resuméet først? I dag er rollen kun en markering (kundens faste kontakt), og alle i boardet behandles ens.
 9. **Tekster om ansvarlig rådgiver i onboardingen.** «Kan være ansvarlig», «Ansvarlig rådgiver: Tildeles automatisk» og blokeringsbeskeden er faste tekster i board-builderen; skal de kunne redigeres i Admin → Onboarding → Tekster?
 10. **Nye notifikationsregler efter deploy.** Udløseren «Ansvarlig rådgiver ændret» får standardregler ved seed; i en eksisterende database oprettes de med «Indlæs standarder» under Admin → Notifikationer.
+
+11. **Totrinsbekræftelse – åbne spørgsmål.**
+    - Skal MFA også være påkrævet for rådgivere (de ser kundernes transskriptioner)? I dag er det valgfrit.
+    - Skal admin kunne nulstille MFA for en rådgiver eller kunde, der har mistet telefon og gendannelseskoder? I dag kan kun en administrators MFA nulstilles af en anden administrator (og via `create-admin --reset-mfa` på serveren); andre må slå MFA fra med en gendannelseskode.
+    - WebAuthn/passkeys som alternativ til TOTP er ikke bygget.
+    - `MFA_ENCRYPTION_KEY` skal genereres og opbevares sikkert før lancering (mistes den, skal alle opsætte MFA igen).
 
 ## 3. Juridisk / GDPR
 

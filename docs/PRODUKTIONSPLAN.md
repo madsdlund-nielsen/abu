@@ -58,6 +58,14 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
 
 **Rådgiverfotos (18.10.2026):** foto-URL er erstattet af upload (`/profile` og `/admin/advisors/[id]`). Billeder valideres ud fra indholdet (kun JPEG/PNG/WebP ≤ 5 MB, ingen SVG), behandles med `sharp` (EXIF/GPS fjernes, 512 + 96 px WebP, grænse mod dekompressionsbomber), gemmes i den private bucket og serveres af `/api/avatar` med immutable-cache. CSP'ens `img-src` er strammet til `'self'` (ingen eksterne billedværter, som lækkede besøgendes IP). Sletning (GDPR) fjerner billederne, eksporten viser dem som metadata, og upload/fjernelse audit-logges. Hetzner-bucketten oprettes efter `docs/HETZNER-S3.md` og tjekkes med `npm run storage:check`.
 
+**Platform-administratorer og totrinsbekræftelse (19.10.2026):**
+- Ejerens administrator `mads@qlim8.com` oprettes i produktion med `npm run create-admin -- --email mads@qlim8.com --name "Mads"` (engangslink, ingen adgangskode i kode/seed/docs – H-1 bevaret). Ejerens foreslåede adgangskode (8 tegn) er under minimum på 10 tegn og afvises; der er ingen undtagelse fra politikken.
+- *Admin → Administratorer* (`/admin/administratorer`): liste (navn, e-mail, MFA-status, seneste login, aktiv/deaktiveret), invitation med mail via notifikationerne (skabelonen «Administrator inviteret», låst), ny invitation, deaktivering (sessioner og betroede enheder tilbagekaldes), nulstilling af en anden administrators MFA. Man kan ikke deaktivere sig selv eller den sidste aktive administrator.
+- **MFA (TOTP)** er påkrævet for administratorer og valgfri for rådgivere og kunder. Håndhæves i `requireUser`/`requireRole` (sessionstrinnet «kode mangler»), ikke kun med omdirigeringer. Hemmeligheder krypteres med AES-256-GCM (`MFA_ENCRYPTION_KEY`, nu en del af C-1-guarden, med nøgle-id til rotation), replay-værn, rate limit og lockout som H-2, 10 gendannelseskoder, «Husk denne enhed i 30 dage» uden forlængelse, re-verifikation (≤ 15 min) til følsomme admin-handlinger, audit-log og GDPR-eksport/-sletning.
+- Seed-admin har MFA med en dokumenteret, kun-lokal TOTP-hemmelighed (README); seed afvises stadig i produktion.
+- Verificeret med enheds- og DB-tests (RFC-vektorer, kryptering, replay, lockout, betroede enheder, server actions med en MFA-ventende session, sidste-admin-værn) og end-to-end i Chromium mod et produktionsbuild. Skærmbilleder: `docs/screens/admin/30`–`40`, `docs/screens/konto/`, `docs/screens/mobil/09-mfa-kode.png`.
+- **Før lancering:** sæt `MFA_ENCRYPTION_KEY` (mindst 32 tilfældige tegn) i produktion og gem den i jeres hemmelighedshåndtering; kør `create-admin` for ejeren; invitér mindst én administrator mere, så I ikke låser jer ude.
+
 **Ud over planen (18.10.2026):** CI i GitHub Actions (`ab7ed4a`: npm ci, audit, lint, typetjek, tests mod Postgres, build, prod-guard-boot, `docker build`), `.dockerignore` holder `.env*` ude af imaget, og Docker-imaget er bygget og kørt lokalt (mock-konfiguration nægter at starte; dev-konfiguration svarer).
 
 ## Fase 3 – Konti, integrationer og jura (kræver dig)
@@ -74,7 +82,7 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
 
 ## Fase 4 – Drift og lancering
 - **Infrastruktur:** Docker Compose på Hetzner med Caddy (automatisk TLS og HSTS) foran appen, ingen offentlig databaseport, firewall og fail2ban, automatiske sikkerhedsopdateringer af OS og månedlig genbygning af image.
-- **Hemmeligheder:** genereres med `openssl rand` og gemmes i Docker secrets eller en `.env`, som kun root kan læse, uden for repoet. Der er en dokumenteret rotationsprocedure.
+- **Hemmeligheder:** (inkl. `MFA_ENCRYPTION_KEY`) genereres med `openssl rand` og gemmes i Docker secrets eller en `.env`, som kun root kan læse, uden for repoet. Der er en dokumenteret rotationsprocedure.
 - **Backup:**
   - Daglig `pg_dump`, krypteret og gemt uden for serveren i Hetzner Storage Box i et andet datacenter.
   - 30 dages opbevaring.
@@ -95,7 +103,7 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
     - Mails og SMS'er vist i rigtige klienter (Outlook, Gmail, Apple Mail).
     - Docker-build i CI.
     - Rigtigt sessionsudløb.
-  - En gennemgang med `npm run create-admin`.
+  - En gennemgang med `npm run create-admin` (ejerens konto `mads@qlim8.com`), opsætning af totrinsbekræftelse og invitation af en administrator mere.
   - Restore-test.
   - Ekstern pentest (anbefalet, f.eks. et dansk firma) før de første betalende kunder.
 - **Efter lancering:** månedlig afhængighedsopdatering, kvartalsvis gennemgang af adgang og logs og årlig pentest.
