@@ -6,6 +6,15 @@
 #  - På PR'er mod main, men kun når PR'en er klar til review (ikke draft) og ændrer kode – ikke ved rene docs-ændringer.
 #  - Manuelt via "Run workflow" i GitHub.
 # Der køres ikke længere på push til main eller på hvert commit på feature-branches.
+#
+# D-6 – paths-ignore og påkrævede checks: en PR, der KUN ændrer docs/** eller *.md, starter slet ikke denne workflow.
+# Gøres "Lint, typer, test, build, audit" eller "Docker-build" til et påkrævet status-check i branch protection, venter
+# sådan en PR for evigt på et check, der aldrig kommer ("Expected — Waiting for status to be reported"). Gør derfor
+# ikke disse jobs påkrævede (deploy.yml kører alligevel CI før deploy), eller fjern paths-ignore, hvis de skal være det.
+#
+# Databasen (RLS fase 0): service-containeren har kun superbrugeren `postgres`. `npm run db:roles` opretter abu_owner og
+# abu_app med tilfældige adgangskoder pr. kørsel; migrationerne kører som abu_owner, og alle tests kører som abu_app
+# (TEST_DATABASE_URL), så rolleopdelingen (kun DML, ingen DDL/TRUNCATE) bliver testet i CI.
 name: CI
 
 on:
@@ -38,18 +47,18 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: abu
-          POSTGRES_PASSWORD: abu
+          # Kun provisionering i denne flygtige container (aldrig en rigtig adgangskode)
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: abu_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U abu -d abu_test"
+          --health-cmd "pg_isready -U postgres -d abu_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://abu:abu@localhost:5432/abu_test
-      TEST_DATABASE_URL: postgresql://abu:abu@localhost:5432/abu_test
+      DATABASE_URL_PROVISION: postgresql://postgres:postgres@localhost:5432/abu_test
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -69,13 +78,27 @@ jobs:
       - name: Typetjek
         run: npx tsc --noEmit
 
-      - name: Migrér testdatabase
+      - name: Databaseroller (abu_owner + abu_app, tilfældige adgangskoder pr. kørsel)
+        run: |
+          owner="$(openssl rand -hex 24)"; app="$(openssl rand -hex 24)"
+          echo "::add-mask::$owner"; echo "::add-mask::$app"
+          {
+            echo "ABU_OWNER_PASSWORD=$owner"
+            echo "ABU_APP_PASSWORD=$app"
+            echo "DATABASE_URL_MIGRATE=postgresql://abu_owner:$owner@localhost:5432/abu_test"
+            echo "DATABASE_URL=postgresql://abu_app:$app@localhost:5432/abu_test"
+            echo "TEST_DATABASE_URL=postgresql://abu_app:$app@localhost:5432/abu_test"
+            echo "TEST_DATABASE_URL_OWNER=postgresql://abu_owner:$owner@localhost:5432/abu_test"
+          } >> "$GITHUB_ENV"
+          ABU_OWNER_PASSWORD="$owner" ABU_APP_PASSWORD="$app" npm run db:roles
+
+      - name: Migrér testdatabase (som ejeren abu_owner)
         run: npx prisma migrate deploy
 
       - name: Prod-config-guard (enhedstest)
         run: npx vitest run src/lib/env.test.ts
 
-      - name: Test (enheds- og DB-tests)
+      - name: Test (enheds- og DB-tests som app-rollen abu_app)
         run: npm test
 
       - name: Build

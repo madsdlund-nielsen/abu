@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { describeDb, uid, ownerDb } from "../test/db";
 import { leadCounts, leadSpread, pickLead, proposeBalancing, type BalanceBoard } from "./lead";
 import { suggestBoard, type MatchAdvisor } from "./matching";
 
@@ -169,7 +169,7 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     expect(await applyBalancing(admin.id, [{ subscriptionId: s.id, from: other, to: back }])).toEqual({ applied: 1, skipped: 0 });
     const actions = (await prisma.auditLog.findMany({ where: { entityId: s.id, userId: admin.id } })).map((l) => l.action).sort();
     expect(actions).toEqual(["subscription.lead.balance", "subscription.lead.set"]);
-    await prisma.auditLog.deleteMany({ where: { userId: admin.id } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { userId: admin.id } });
   });
 
   it("kataloget viser aldrig admin-tags, men markerer hvem der kan være ansvarlig", async () => {

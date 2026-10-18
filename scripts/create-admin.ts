@@ -7,6 +7,7 @@
  * Linket skrives kun til denne terminal (ikke til app-loggen). Det udløber efter 7 dage og kan kun bruges én gang.
  * Der kan ikke angives en adgangskode (H-1). Ved første login skal administratoren opsætte totrinsbekræftelse.
  */
+import "./owner-db-env"; // FØRST: kør som ejeren (DATABASE_URL_MIGRATE), før Prisma-klienten indlæses
 import { createInterface } from "node:readline";
 import { createAdminInvite, CREATE_ADMIN_USAGE, resolveCreateAdminArgs } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";

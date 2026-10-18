@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { describeDb, uid, ownerDb } from "../test/db";
 import { deactivationProblem } from "./admin-users";
 
 vi.mock("next/headers", async () => (await import("../test/request")).nextHeadersMock);
@@ -25,7 +25,7 @@ describeDb("administratorer mod databasen", () => {
   const ids: string[] = [];
   afterAll(async () => {
     const { prisma } = await import("./db");
-    await prisma.auditLog.deleteMany({ where: { OR: [{ userId: { in: ids } }, { entityId: { in: ids } }] } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { OR: [{ userId: { in: ids } }, { entityId: { in: ids } }] } });
     await prisma.user.deleteMany({ where: { id: { in: ids } } });
   });
 

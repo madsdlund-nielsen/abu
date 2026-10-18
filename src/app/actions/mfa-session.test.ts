@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { describeDb, uid } from "../../test/db";
+import { describeDb, uid, ownerDb } from "../../test/db";
 import { cookieJar, formData, redirectOf } from "../../test/request";
 
 // Server actions kaldes direkte med en rigtig session i cookie-krukken (ingen mock af requireRole): det er selve
@@ -42,7 +42,7 @@ describeDb("MFA i server actions og sessioner", () => {
   beforeEach(() => cookieJar.clear());
   afterAll(async () => {
     const { prisma } = await import("@/lib/db");
-    await prisma.auditLog.deleteMany({ where: { userId: { in: ids } } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { userId: { in: ids } } });
     await prisma.user.deleteMany({ where: { id: { in: ids } } });
     await prisma.user.deleteMany({ where: { email: { startsWith: "inv-", endsWith: "@test.dk" } } });
   });

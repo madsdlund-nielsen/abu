@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 import { crc32 } from "node:zlib";
 import sharp from "sharp";
 import { afterAll, describe, expect, it } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { describeDb, uid, ownerDb } from "../test/db";
 import { AVATAR_ERRORS, MAX_AVATAR_BYTES, newAvatarKeys, processAvatar, validateAvatarInput } from "./avatar";
 import { avatarObjectKeys, avatarSizeFor, avatarSrc, avatarVersion, canViewAvatar, thumbKeyFor, visibleAvatarVersion } from "./avatar-url";
 import { detectImageType } from "./media-type";
@@ -209,7 +209,7 @@ describeDb("profilbillede mod databasen: upload, skift, fjern, adgang og sletnin
   const ids: string[] = [];
   afterAll(async () => {
     const { prisma } = await import("./db");
-    await prisma.auditLog.deleteMany({ where: { entityId: { in: ids } } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { entityId: { in: ids } } });
     await prisma.user.deleteMany({ where: { id: { in: ids } } });
   });
 

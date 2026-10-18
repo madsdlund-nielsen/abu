@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { describeDb, uid, ownerDb } from "../test/db";
 import { hasWholeBoard } from "./booking";
 import { canRemoveWithoutReplacement, meetingAdvisorChangeError, WHOLE_BOARD_ERROR } from "./meeting-admin";
 
@@ -129,6 +129,6 @@ describeDb("hele boardet i databasen: fjern, udskift, board-ændring og sletning
     expect(alert?.value).not.toMatch(/Slettes/);
     const below = await meetingsBelowBoard(new Date("2029-12-01T00:00:00Z"));
     expect(below.find((m) => m.id === meeting.id)).toMatchObject({ advisors: 1, boardSize: 2 });
-    await prisma.auditLog.deleteMany({ where: { entityId: meeting.id } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { entityId: meeting.id } });
   });
 });

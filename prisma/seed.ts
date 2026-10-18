@@ -1,4 +1,5 @@
 /* Seed: admin, tags (inkl. det interne «Lead-kvalificeret» på 4 rådgivere), 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
+import "../scripts/owner-db-env"; // FØRST: kør som ejeren (DATABASE_URL_MIGRATE), før Prisma-klienten indlæses
 import bcrypt from "bcryptjs";
 import { seedRefusal } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { describeDb, uid } from "../../test/db";
+import { describeDb, uid, ownerDb } from "../../test/db";
 
 // Server actions kaldes direkte: requireRole returnerer en admin, og revalidatePath er en no-op uden for Next.
 const adminRef = vi.hoisted(() => ({ id: "" }));
@@ -36,7 +36,7 @@ describeDb("aktivering af rådgivere via server action (blokeret indtil klar)", 
 
   afterAll(async () => {
     const { prisma } = await import("@/lib/db");
-    await prisma.auditLog.deleteMany({ where: { userId: adminRef.id } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { userId: adminRef.id } });
     await prisma.user.deleteMany({ where: { id: { in: ids } } });
     await prisma.tag.deleteMany({ where: { id: tagId } });
   });
@@ -132,7 +132,7 @@ describeDb("admin retter rådgiverens profil", () => {
   });
   afterAll(async () => {
     const { prisma } = await import("@/lib/db");
-    await prisma.auditLog.deleteMany({ where: { userId: adminRef.id } });
+    await (await ownerDb()).auditLog.deleteMany({ where: { userId: adminRef.id } });
     await prisma.user.deleteMany({ where: { id: { in: ids } } });
   });
 
