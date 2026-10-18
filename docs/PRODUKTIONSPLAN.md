@@ -56,6 +56,8 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
 | 24 | **QA** Helligdage og heldagsfravær | Danske helligdage spærres automatisk for booking, og admin kan slå enkelte dage til eller fra. Fravær kan slutte kl. 24:00. | ✅ Udført – `b844507` (24:00 i `3e96719`). Admin → Helligdage. |
 | 25 | **QA** Mindre UX og tilgængelighed | "Spring til indhold"-link, kompakt admin-navigation på mobil, tydelig frekvensvælger i mobil-board-builderen, CMS-mailpreview der ikke er afskåret, læsbar samtykkeversion i leads, "Dit eget advisory board" og ens fejltekster. `/api/admin/leads` svarer 401 uden login. | ✅ Udført – `b6c45d5`. |
 
+**Rådgiverfotos (18.10.2026):** foto-URL er erstattet af upload (`/profile` og `/admin/advisors/[id]`). Billeder valideres ud fra indholdet (kun JPEG/PNG/WebP ≤ 5 MB, ingen SVG), behandles med `sharp` (EXIF/GPS fjernes, 512 + 96 px WebP, grænse mod dekompressionsbomber), gemmes i den private bucket og serveres af `/api/avatar` med immutable-cache. CSP'ens `img-src` er strammet til `'self'` (ingen eksterne billedværter, som lækkede besøgendes IP). Sletning (GDPR) fjerner billederne, eksporten viser dem som metadata, og upload/fjernelse audit-logges. Hetzner-bucketten oprettes efter `docs/HETZNER-S3.md` og tjekkes med `npm run storage:check`.
+
 **Ud over planen (18.10.2026):** CI i GitHub Actions (`ab7ed4a`: npm ci, audit, lint, typetjek, tests mod Postgres, build, prod-guard-boot, `docker build`), `.dockerignore` holder `.env*` ude af imaget, og Docker-imaget er bygget og kørt lokalt (mock-konfiguration nægter at starte; dev-konfiguration svarer).
 
 ## Fase 3 – Konti, integrationer og jura (kræver dig)
@@ -66,7 +68,7 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
 | Transskribering | Mistral-konto med EU-hosting og DPA. Test med en rigtig dansk optagelse. | Dig → mig |
 | E-mail og SMS | inMobile-konto: API-nøgle, afsendernavn, e-maildomæne med SPF/DKIM/DMARC og DPA. Herefter verificerer jeg API-felterne. | Dig → mig |
 | CVR | cvrapi.dk. Overvej en betalt nøgle, hvis gratis-kvoten ikke rækker. | Dig |
-| Hosting | Hetzner (DE) eller Simply.com (DK): server, managed Postgres eller Postgres på serveren, Object Storage og domæne med TLS. | Dig → mig |
+| Hosting | Hetzner (DE) eller Simply.com (DK): server, managed Postgres eller Postgres på serveren, Object Storage og domæne med TLS. Object Storage: trin for trin i `docs/HETZNER-S3.md` (privat bucket, nøgler, CORS, livscyklus, versionering, DPA); `npm run storage:check` bekræfter opsætningen. | Dig → mig |
 | Kontrast (QA #14) | ✅ Afprøvet og beholdt efter ejerens beslutning (`f0ec529`): charcoal-tekst på guldknapper (5,57:1), navy eyebrows på lyse flader (11,97:1), plus pladsholdere, stepper og guld som tekst rettet til AA – alt via design-tokens. Før/efter og målinger: `docs/screens/kontrast/`. Mellemvej, hvis guldet savnes: «guld-blæk» #81693c til eyebrows (én token). | Dig (endelig godkendelse) |
 | Jura | Advokatgennemgang af vilkår, privatlivspolitik, samtykketekster (optagelse og marketing) og opbevaringsperioder. Fortegnelse (art. 30). DPIA for optagelse og transskribering. DPA'er med alle leverandører. | Dig + advokat |
 
@@ -77,7 +79,7 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
   - Daglig `pg_dump`, krypteret og gemt uden for serveren i Hetzner Storage Box i et andet datacenter.
   - 30 dages opbevaring.
   - Gendannelsen testes hver måned.
-  - Object Storage med versionering.
+  - Object Storage med versionering og livscyklusregler (gamle versioner slettes efter 30 dage) – se `docs/HETZNER-S3.md`.
 - **Overvågning og alarmer (EU-værktøjer):**
   - Oppetid: f.eks. Better Stack (EU-region) eller selvhostet Uptime Kuma.
   - Fejl: selvhostet GlitchTip.

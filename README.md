@@ -41,6 +41,8 @@ slet ikke. Invitationslinket vises i stedet for admin i UI'et, når e-mail køre
 Stakken er Next.js 16 (App Router, `src/proxy.ts`), React 19 og Prisma 7 med driver-adapteren `@prisma/adapter-pg`
 (forbindelsen konfigureres i `prisma.config.ts`; Prisma læser ikke længere `.env` af sig selv – det gør `prisma.config.ts`).
 Alle versioner er låst i `package.json`; installér med `npm ci`.
+Billedbehandlingen bruger `sharp` (open source, libvips) med en fast version; `npm ci` henter den færdigbyggede binær til
+platformen (`@img/sharp-linux-x64` + libvips på `node:22-bookworm-slim` og i CI), så der skal ikke installeres systempakker.
 
 Seed er **kun til udvikling**: det afvises, når `NODE_ENV=production` eller `APP_ENV=production` (H-1).
 
@@ -65,6 +67,7 @@ docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   
 | `npm run db:deploy` | Anvend migrationer (produktion) |
 | `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) |
 | `npm run create-admin -- --email … --name …` | Opretter første administrator og udskriver et engangslink til at vælge adgangskode |
+| `npm run storage:check` | Tjekker objektlageret med appens konfiguration: skriver, læser og sletter et testobjekt; med S3 også privat bucket og CORS (se `docs/HETZNER-S3.md`) |
 
 ## Onboarding og CMS
 
@@ -155,6 +158,7 @@ src/
     auth.ts            Hashing (bcryptjs), DB-sessioner (SHA-256 af tilfældigt token), rate limit, invite/reset-tokens
     jobs.ts, pipeline.ts  DB-baseret jobkø (FOR UPDATE SKIP LOCKED) og transskriptions-pipeline
     payments/ video/ transcription/ messaging/ storage/   Adaptere med mock-implementering (messaging: e-mail + SMS, inMobile)
+    avatar*.ts         Rådgiverfotos: validering, sharp-behandling, lagring, adgang og servering (/api/avatar)
     notifications/     Udløsere, regler, skabeloner, planlægning (ren), udsendelse, afmelding, log
     content/           Redigerbare onboarding-tekster (standarder + ContentBlock)
     meeting-join.ts, meeting-admin.ts, board-admin.ts, substitutes.ts, leads.ts   Mødevindue, admin-ændringer, leads
@@ -181,7 +185,29 @@ er **blokeret**, indtil tjeklisten er opfyldt: invitation accepteret, mindst ét
 inden for intervallet (standard 500-25.000 kr.). Serveren afviser også forfalskede requests med en dansk liste over det, der mangler.
 Deaktivering er altid tilladt og viser de berørte kunders boards. En aktiv rådgiver, der senere ikke er klar, deaktiveres ikke automatisk,
 men vises som «Aktiv – mangler: …». Statusbadget viser altid den gemte tilstand (AKTIV/INAKTIV). Admin kan rette rådgiverens titel, bio,
-foto-URL og mobilnummer på `/admin/advisors/[id]` med samme validering som rådgiverens egen profil (audit-logget).
+mobilnummer og profilbillede på `/admin/advisors/[id]` med samme validering som rådgiverens egen profil (audit-logget).
+Tjeklisten viser også «Profilbillede (valgfrit)», men et foto er ikke et krav for aktivering.
+
+**Rådgiverfotos (`src/lib/avatar.ts`, `avatar-url.ts`, `avatar-serve.ts`).** Rådgiveren (`/profile`) og admin
+(`/admin/advisors/[id]`) uploader, skifter og fjerner profilbilledet (kvadratisk forhåndsvisning, «Vælg billede» /
+«Skift billede» / «Fjern billede», træk og slip). Der er ingen foto-URL længere: eksterne billeder lækkede besøgendes
+IP-adresser til tredjepart, og CSP'ens `img-src` er nu kun `'self' data: blob:`.
+- Kun JPEG, PNG og WebP på højst 5 MB, genkendt ud fra filens første bytes (samme magic bytes-hjælper som optagelser,
+  `detectImageType` i `media-type.ts`). SVG (XSS), GIF, HEIC m.fl. afvises. Mindst 200 × 200 px.
+- Behandling med `sharp` (libvips, fast version): roteres efter EXIF, **alle metadata fjernes** (EXIF/GPS/XMP/ICC),
+  centreret beskæring til kvadrat, 512 × 512 WebP (kvalitet 82) + 96 × 96-miniature. Højst 50 megapixel ind
+  (`limitInputPixels`, mod dekompressionsbomber), tidsgrænse pr. billede og samme grænse for samtidigt tungt arbejde som upload af optagelser.
+- Lagres via storage-adapteren (lokalt / Hetzner Object Storage, **privat** bucket) som `avatars/<id>/<tilfældig>.webp`
+  og `…-96.webp`. Et nyt billede sletter de gamle objekter; upload, skift og fjernelse audit-logges (`advisor.photo.*`).
+- Serveres af appen: `GET /api/avatar/<id>?size=512|96&v=<version>` streamer fra lageret med `Content-Type: image/webp`,
+  `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` og `Cache-Control: public, max-age=31536000, immutable`
+  (versionen er tidspunktet for seneste upload, så en ny upload giver en ny URL). Manglende billede, ukendt rådgiver
+  og manglende adgang giver det samme 404.
+- **Adgang (beslutning):** onboarding-kataloget (`/kom-i-gang`) vises før login, så **aktive** rådgiveres fotos er
+  offentlige – de er jo netop til at blive vist for kommende kunder. **Inaktive** rådgiveres fotos ser kun admin og
+  rådgiveren selv (`private`-cache); alle andre får 404, og siderne viser initialer i stedet.
+- Én komponent, `<AdvisorAvatar>` (`src/components/advisor-avatar.tsx`), bruges overalt: board-builder og katalog,
+  kundens dashboard, mødesiden, admin-listerne, abonnementer og mødeadministration. Små visninger bruger miniaturen.
 
 **Møder holdes altid med hele boardet** (ejerens beslutning). Booking kræver alle boardets pladser; admin kan udskifte en rådgiver i et
 møde eller tilføje en ekstra deltager, men ikke fjerne en rådgiver, så mødet får færre end boardet («udskift i stedet»). Slettes en
@@ -210,8 +236,8 @@ optagelsesnotits er accepteret. Manuel upload går aldrig gennem en server actio
 (`DELETE_RECORDINGS_AFTER_TRANSCRIPTION`). Jobs behandles i processen og kan samles op via `GET/POST /api/cron/process-jobs`
 med `Authorization: Bearer $CRON_SECRET` (kald fra fx cron hvert minut).
 
-**GDPR.** Dataeksport (JSON med udvalgte felter – fx aldrig værtens mødelink eller udbyder-id'er) og sletningsanmodning under *Konto*; sletning
-opsiger abonnementet hos betalingsudbyderen, sletter optagelser i lageret og webhook-data med kundens oplysninger og fjerner notifikationslog,
+**GDPR.** Dataeksport (JSON med udvalgte felter – fx aldrig værtens mødelink eller udbyder-id'er; profilbilledet som metadata med lagernøgler og tidspunkt plus en note om, hvordan selve billedet hentes eller rekvireres) og sletningsanmodning under *Konto*; sletning
+opsiger abonnementet hos betalingsudbyderen, sletter optagelser og en rådgivers profilbillede (begge størrelser) i lageret og webhook-data med kundens oplysninger og fjerner notifikationslog,
 leads og samtykker; webhook-payloads ryddes efter 30 dage; audit-log over admin-handlinger og adgang til transskriptioner (fejl i audit-loggen
 giver en driftsalarm); samtykke ved tilmelding (vilkår, optagelse, evt. markedsføring med ordret tekst og version); afmelding via link/STOP/Konto; notifikationsloggen (standard 12 mdr.) og leads med samtykke (24 mdr.) ryddes af jobkøen; ingen tredjeparts-analytics eller eksterne fonte.
 
@@ -222,7 +248,7 @@ giver en driftsalarm); samtykke ved tilmelding (vilkår, optagelse, evt. markeds
 | Hosting (app + Postgres) | Hetzner Cloud eller Simply.com VPS | DE / DK | Docker-image + docker-compose |
 | Abonnementsbetaling | Frisbii (tidl. Reepay) | DK | Hosted checkout + webhooks, MobilePay/kort |
 | Videomøder | Whereby Embedded | NO (EØS) | REST-API til rum, cloud-optagelse til egen S3 |
-| Optagelser | Hetzner Object Storage (S3) | DE | Brug `@aws-sdk/client-s3` kun som klientbibliotek |
+| Optagelser og rådgiverfotos | Hetzner Object Storage (S3) | DE / FI | Privat bucket; `@aws-sdk/client-s3` kun som klientbibliotek. Opsætning: `docs/HETZNER-S3.md` |
 | Transskription + resumé | Mistral AI (Voxtral + chat) | FR | Adapteren gør selvhostet Whisper muligt |
 | SMS og e-mail (påmindelser, beskeder) | inMobile | DK | API v4 via `fetch`; SMTP (Simply.com/Brevo) kan bruges til e-mail i stedet |
 
@@ -239,8 +265,9 @@ Valget er drevet af, at ingen amerikanske selskaber er databehandlere. Se `docs/
 2. **Whereby:** `VIDEO_PROVIDER=whereby`, `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET`, optagelses-bucket (`WHEREBY_RECORDING_*`);
    webhook til `{APP_URL}/api/webhooks/video`.
 3. **Storage:** `STORAGE_PROVIDER=s3` med `S3_*` (Hetzner Object Storage-endpoint, fx `https://fsn1.your-objectstorage.com`).
-   Bucketten skal have en CORS-regel, der tillader `POST` fra `APP_URL` (direkte upload fra browseren). Endpointet tilføjes automatisk
-   til CSP'ens `connect-src`.
+   Trin for trin (bucket, nøgler, CORS, livscyklus, versionering, DPA): **`docs/HETZNER-S3.md`**. Bucketten skal være privat og
+   have en CORS-regel, der tillader `POST` fra `APP_URL` (direkte upload fra browseren). Endpointet tilføjes automatisk
+   til CSP'ens `connect-src`. Kontrollér med `npm run storage:check`.
 4. **Mistral:** `TRANSCRIPTION_PROVIDER=mistral`, `MISTRAL_API_KEY`.
 5. **inMobile (SMS og e-mail):** `SMS_PROVIDER=inmobile`, `EMAIL_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `SMS_SENDER`, `EMAIL_FROM`; peg inMobile-webhook til `{APP_URL}/api/webhooks/inmobile` med hemmeligheden i headeren `x-webhook-secret` (eller `?secret=…`, hvis inMobile ikke kan sende headers). Rotation: sæt den gamle i `INMOBILE_WEBHOOK_SECRET_PREVIOUS`. SMS sendes kun til lande på tilladt-listen (standard Danmark) og med lofter pr. nummer og døgn (*Admin → Notifikationer → Indstillinger*). Sæt også `APP_SECRET` (signerede afmeldingslinks). API-felterne er skrevet efter bedste viden og skal verificeres (se `docs/OPEN_ITEMS.md`). Alternativ til e-mail: `EMAIL_PROVIDER=smtp` + `SMTP_*`.
 6. **CVR:** `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` (standard i produktion), eller `virk` + `CVR_VIRK_USERNAME`/`CVR_VIRK_PASSWORD`.
@@ -268,7 +295,7 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | `VIDEO_PROVIDER=whereby` + `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET` | video |
    | `TRANSCRIPTION_PROVIDER=mistral` + `MISTRAL_API_KEY` | transskription |
    | `EMAIL_PROVIDER=inmobile` eller `smtp` (+ `SMTP_HOST`), `SMS_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `EMAIL_FROM` | beskeder |
-   | `STORAGE_PROVIDER=s3` + `S3_ENDPOINT` (https), `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | lager |
+   | `STORAGE_PROVIDER=s3` + `S3_ENDPOINT` (https), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | lager (`docs/HETZNER-S3.md`) |
    | `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` med jeres kontaktadresse (eller `virk` + login) | CVR |
    | `APP_ENV` | tom (eller `production`) – sæt **aldrig** `development` i drift |
 
@@ -282,7 +309,7 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
 8. Overvågning: alle driftsalarmer står i loggen med præfikset `[ALERT]` (SMS-lofter, blokerede SMS-lande, fejl i audit-loggen) og under
    *Driftsalarmer* på admin-forsiden. Sæt log-overvågningen til at alarmere på `[ALERT]` og `[config] Appen starter ikke`.
 
-**Sikkerhedsheaders** sættes af `src/proxy.ts`: CSP med nonce pr. request (scripts kun med nonce, `frame-src` kun Whereby), HSTS (2 år,
+**Sikkerhedsheaders** sættes af `src/proxy.ts`: CSP med nonce pr. request (scripts kun med nonce, `frame-src` kun Whereby, `img-src 'self' data: blob:` – ingen eksterne billedværter), HSTS (2 år,
 `includeSubDomains`; overvej `preload`, når domænet er endeligt), Permissions-Policy (kamera/mikrofon/skærmdeling kun på mødesiderne),
 `X-Frame-Options`, `Referrer-Policy` og `nosniff`. Alle sider renderes dynamisk, fordi noncen skal være ny pr. request.
 
