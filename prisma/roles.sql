@@ -12,7 +12,8 @@
 --   abu_app    appen: LOGIN, ingen superbruger/BYPASSRLS/CREATEROLE/CREATEDB, ikke ejer, intet medlemskab.
 --              Kun SELECT/INSERT/UPDATE/DELETE på tabellerne + USAGE på sekvenser. Ingen DDL, ingen TRUNCATE.
 --              AuditLog er append-only (SELECT/INSERT), og _prisma_migrations er helt lukket.
---   abu_jobs   som abu_app, men med længere timeouts. Forberedt til fase 1 (system-/cron-kontekst); appen bruger den ikke endnu.
+--   abu_jobs   som abu_app, men med længere timeouts. Reserveret til system-/cronjobs med lange sætninger; appen bruger den
+--              ikke (RLS-systemkonteksten er app.role = 'system' på abu_app, se README «Row-Level Security»).
 --
 -- Adgangskoder står ALDRIG i repoet. De sendes ind som sessionsvariablerne abu.owner_password, abu.app_password og
 -- abu.jobs_password (klartekst eller en SCRAM-SHA-256-verifikator). Tom = adgangskoden ændres ikke.
@@ -117,7 +118,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE abu_owner IN SCHEMA public GRANT SELECT, INSER
 ALTER DEFAULT PRIVILEGES FOR ROLE abu_owner IN SCHEMA public REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLES FROM abu_app, abu_jobs;
 ALTER DEFAULT PRIVILEGES FOR ROLE abu_owner IN SCHEMA public GRANT USAGE ON SEQUENCES TO abu_app, abu_jobs;
 
--- 8. Følsomme tabeller (gentages i migrationen 20261019100000_db_roles_phase0, som kører efter tabellerne er oprettet)
+-- 8. Følsomme tabeller og RLS-rettigheder (gentages i migrationerne 20261019100000_db_roles_phase0 og
+--    20261020090000_rls_policies, som kører efter tabellerne er oprettet)
 DO $sensitive$
 BEGIN
   IF to_regclass('public."_prisma_migrations"') IS NOT NULL THEN
@@ -125,6 +127,20 @@ BEGIN
   END IF;
   IF to_regclass('public."AuditLog"') IS NOT NULL THEN
     REVOKE UPDATE, DELETE ON TABLE public."AuditLog" FROM abu_app, abu_jobs;
+  END IF;
+  -- RLS (migrationen 20261020090000_rls_policies): en brugers identitet (id, e-mail, rolle, oprettet) kan app-rollerne
+  -- ikke ændre – GRANT ovenfor gav UPDATE på hele tabellen igen, så kolonnerettighederne sættes på ny
+  IF to_regclass('public."User"') IS NOT NULL THEN
+    REVOKE UPDATE ON TABLE public."User" FROM abu_app, abu_jobs;
+    EXECUTE format('GRANT UPDATE (%s) ON TABLE public."User" TO abu_app, abu_jobs',
+      (SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) FROM pg_attribute a
+        WHERE a.attrelid = 'public."User"'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+          AND a.attname NOT IN ('id', 'email', 'role', 'createdAt')));
+  END IF;
+  -- RLS-hjælpefunktionerne (schema rls, oprettet af migrationen): kun app-rollerne må bruge dem
+  IF to_regnamespace('rls') IS NOT NULL THEN
+    GRANT USAGE ON SCHEMA rls TO abu_app, abu_jobs;
+    GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA rls TO abu_app, abu_jobs;
   END IF;
 END
 $sensitive$;

@@ -417,6 +417,8 @@ model SubscriptionAdvisor {
   advisor        AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
 
   @@id([subscriptionId, advisorId])
+  /// RLS: «boards, jeg sidder i» (rls.app_advisor_subscription_ids)
+  @@index([advisorId])
 }
 
 model Meeting {
@@ -451,7 +453,8 @@ model MeetingParticipant {
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([meetingId, userId])
-  @@index([userId])
+  /// RLS: «mine møder» (politikkerne på Meeting/MeetingParticipant) som index-only scan
+  @@index([userId, meetingId])
 }
 
 model Recording {
@@ -469,6 +472,8 @@ model Recording {
   meeting    Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@index([meetingId])
+  /// RLS: egne uploads (politikken og loftet pr. bruger)
+  @@index([uploadedById])
 }
 
 model Transcript {

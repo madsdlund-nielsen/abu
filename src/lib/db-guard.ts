@@ -24,6 +24,13 @@ export interface DbRoleFacts {
   schemaCreate: boolean;
   /** Er forbindelsen krypteret (TLS)? */
   ssl: boolean;
+  /**
+   * RLS (fase 1–3): tabeller i public uden ENABLE + FORCE ROW LEVEL SECURITY (undtagen _prisma_migrations), og om
+   * kontekstfunktionerne i schema rls findes og må bruges. Uden dem ville en fejl i appens kode ikke længere være
+   * begrænset af databasen – appen starter ikke i produktion.
+   */
+  tablesWithoutRls: number;
+  rlsFunctions: boolean;
 }
 
 export const DB_ROLE_FACTS_SQL = `
@@ -37,7 +44,11 @@ SELECT r.rolname AS "user",
        pg_has_role(r.oid, (SELECT relowner FROM pg_class WHERE oid = to_regclass('public."User"')), 'MEMBER') AS "ownsUserTable",
        pg_has_role(r.oid, (SELECT datdba FROM pg_database WHERE datname = current_database()), 'MEMBER') AS "ownsDatabase",
        has_schema_privilege(r.oid, 'public', 'CREATE') AS "schemaCreate",
-       coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) AS "ssl"
+       coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) AS "ssl",
+       (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname <> '_prisma_migrations'
+           AND NOT (c.relrowsecurity AND c.relforcerowsecurity)) AS "tablesWithoutRls",
+       coalesce(to_regprocedure('rls.app_role()') IS NOT NULL AND has_function_privilege(r.oid, 'rls.app_role()', 'EXECUTE'), false) AS "rlsFunctions"
   FROM pg_roles r
  WHERE r.rolname = current_user`;
 
@@ -53,11 +64,13 @@ export function dbRoleProblems(f: DbRoleFacts): string[] {
   if (f.ownsUserTable || f.ownedObjects > 0) p.push(`${who} ejer tabeller (eller er medlem af ejerrollen). Appen skal bruge abu_app, ikke ejeren abu_owner.`);
   if (f.ownsDatabase) p.push(`${who} ejer databasen.`);
   if (f.schemaCreate) p.push(`${who} kan oprette objekter i schema public (DDL). Kør npm run db:roles.`);
+  if (f.tablesWithoutRls > 0) p.push(`${f.tablesWithoutRls} tabel(ler) mangler Row-Level Security (ENABLE + FORCE) – er migrationen 20261020090000_rls_policies kørt (som abu_owner)?`);
+  if (!f.rlsFunctions) p.push(`«${f.user}» kan ikke bruge RLS-funktionerne i schema rls – kør migrationerne og npm run db:roles.`);
   return p;
 }
 
 export function describeDbRole(f: DbRoleFacts): string {
-  return `[db] rolle=${f.user} · TLS=${f.ssl ? "ja" : "nej"} · superbruger=${f.superuser ? "ja" : "nej"} · BYPASSRLS=${f.bypassRls ? "ja" : "nej"} · ejer=${f.ownsUserTable || f.ownedObjects > 0 ? "ja" : "nej"}`;
+  return `[db] rolle=${f.user} · TLS=${f.ssl ? "ja" : "nej"} · superbruger=${f.superuser ? "ja" : "nej"} · BYPASSRLS=${f.bypassRls ? "ja" : "nej"} · ejer=${f.ownsUserTable || f.ownedObjects > 0 ? "ja" : "nej"} · RLS=${f.tablesWithoutRls === 0 && f.rlsFunctions ? "ja" : "NEJ"}`;
 }
 
 /** Én forbindelse (ikke appens pool), én forespørgsel, lukkes igen. Samme TLS-opsætning som appen. */
