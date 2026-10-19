@@ -251,3 +251,62 @@ privilege split and startup guard are correct, and the MFA/session/fresh-MFA mec
 or High** findings. The single Medium (**M-1**, anonymous cross-subject onboarding-lead/consent takeover) should be fixed
 before merge or explicitly risk-accepted by the owner given its limited-sensitivity data; the four Low and two Info items
 are defense-in-depth hardening that can land as follow-ups. With M-1 addressed, this is safe to merge.
+
+---
+
+## Remediation status
+
+**Date:** 2026-10-19. Each fix lives in its own new migration (applied migrations untouched); every commit was checked with lint,
+`tsc --noEmit` and the full test suite as `abu_app` against a freshly provisioned + migrated test DB.
+
+| ID | Status | Commit | Fix (one line) |
+|---|---|---|---|
+| M-1 | Fixed | `0a203b1` | One lead per onboarding session (`Lead.email` no longer unique); `rls.capture_onboarding_lead(email, name)` only creates/updates the caller's own unconverted lead (never `ON CONFLICT (email)`), `OnboardingSession.leadId` settable only by the function (trigger), consent INSERT bound to own lead + `userId` NULL/self, withdrawal only by the account, admin, system (signed link/STOP) or the session that gave it; identical HTTP response; admin leads grouped per e-mail; GDPR export only account-linked rows (migration `20261021090000_lead_session_scope`). |
+| M-2 | Fixed | `97973bb` | `audit_log_insert` requires `"userId" = rls.app_user_id()` for authenticated roles, `NULL` only in system context; `audit(null)` outside system is refused with an alert; device-trust audit written in its auth-internal system context (`20261021091000_audit_log_actor`). |
+| R-1 | Fixed | `e772796` | `SubscriptionAdvisor` insert/update WITH CHECK for customers via `rls.board_seat_allowed` (active advisor = `rls.advisor_is_selectable`, frozen price = current price, `isLead` only with the lead tag) – mirrors `resolveBoard`; `changePlanAction` keeps the previous lead only if still eligible (`20261021092000_board_seat_check`). |
+| R-2 | Fixed | `03e7ec2` | `rls.rate_limit_hit(bucket, subject, window)` derives the key in the DB (same SHA-256), uses DB time, caps the window (1 s–27 h); outside system only buckets whose subject is the caller's own user/session/onboarding id; pre-auth buckets (IP, e-mail, token, budget, alerts) counted in system context; `rate_limit_reset` system-only (`20261021093000_rate_limit_scope`). |
+| R-3 | Fixed | `238fbe3` | `rls.advisor_busy` clamps customer/advisor windows to [now − 1 day, now + 16 weeks + 2 days], admin/system ≤ 20 weeks, validates arguments (1–20 ids, no NULLs, from < to) and returns only start/end of BOOKED/COMPLETED meetings (no status) (`20261021094000_advisor_busy_window`). |
+| R-4 | Fixed | `72d0d06` | `rls.app_board_advisor_ids` / `rls.app_board_peer_ids` count only PENDING/ACTIVE/PAST_DUE subscriptions; CANCELLED boards no longer grant profile/availability/busy/name visibility (shared meetings still show participant names) (`20261021095000_board_live_status`). |
+| N-1 | Fixed (root cause found) | `87126ca` | Reproduced deterministically against the review build: with a stale/invalid session cookie Next renders the admin page in parallel with the layout, so the page queried as the (correctly resolved) `anon` principal before the layout's redirect → `Tag` upsert 42501. Not a `workAsyncStorage` mis-resolution. Every admin page now calls `requireRole("ADMIN")` itself (test-enforced); `getLeadTagId` never upserts outside admin/system; the `workAsyncStorage` dependency is feature-probed with a test pinned to next@16, missing work store in a Next request throws `DbContextError`, and a mid-request principal change without login/logout throws. |
+| Residual: forgeable context under SQLi | Hardened | `221fe6f` | Signed context: `app.ctx` = HMAC-SHA256 over role/user/session/onboarding token with `DB_CONTEXT_SECRET` (prod guard: ≥ 32 chars, not the dev key, not reused); the DB keeps only HMAC pads in `rls.context_key` (no privileges for `abu_app`), `rls.ctx_ok()` (definer) verifies (±5 min) and every context function requires it; all policies/helpers rewritten to `(SELECT rls.app_…())` InitPlans; `npm run db:context-key`; startup guard requires `signeret kontekst=ja` and rejects the dev key in production (`20261021100000_context_signing`). |
+
+**Verification (2026-10-19).**
+
+- `npm run lint`, `npx tsc --noEmit`, `npm run build`: clean. `npm audit --omit=dev --audit-level=high`: 0 vulnerabilities.
+  `npm test` as `abu_app` against a fresh provisioned + migrated `abu_fix_test`: 70 files, 481 tests passed
+  (new: `src/lib/rls-remediation.test.ts`, `src/lib/db-context-request.test.ts`, plus additions in `rls.test.ts`, `db-context.test.ts`,
+  `rate-limit.test.ts`, `leads-admin.test.ts`, `env.test.ts`, `db-guard.test.ts`, `db-privileges.test.ts`).
+- Adversarial psql re-run of this report's scenarios as `abu_app` (same statements; before = `abu_sec3` with the old migrations,
+  after = `abu_fix` where the injected SQL runs inside the app's validly signed context):
+  - M-1: before – victim lead relinked (`leadV`), name overwritten, phone/IP/user-agent read, phone/userId/convertedAt updated, consent
+    withdrawn, foreign-`userId` consent inserted, session relinked. After – old signature does not exist; new call returns a fresh lead
+    (`≠ leadV`); victim lead/consent: 0 rows visible, UPDATEs hit 0 rows, foreign-`userId` INSERT and direct relink rejected (42501).
+  - M-2: before – customer inserted a `userId NULL` "system" row. After – rejected (42501).
+  - R-1: before – inactive advisor added, `SECRET-BIO`/`SECRET-REASON` read. After – INSERT rejected, 0 rows.
+  - R-2: before – arbitrary key set with a 10-year window and deleted. After – old signatures gone (42883); another user's
+    `mfa-user`/`login-unknown` key and reset rejected (42501); oversized window rejected (22023).
+  - R-3: before – 100-year window returned every busy slot with status. After – only the one BOOKED slot inside the booking window,
+    no status column (far-future, past and cancelled meetings excluded).
+  - Forged system context (`set_config('app.role','system')`, session- or transaction-level, with or without a garbage `app.ctx`, and
+    inside a signed customer transaction): before – full access (11 users, all leads/consents/sessions/transcripts). After – 0 rows
+    everywhere, `rls.app_role()` NULL; `rls.context_key` → permission denied.
+- Playwright (Chromium, `/opt/pw-browsers`) against the production build (`APP_ENV=development`, `abu_app`, signed context, real random
+  `DB_CONTEXT_SECRET`): 73 checks passed – onboarding step 1 with a new e-mail and with an existing lead's e-mail (same redirect, same
+  unchecked consent box, identical page text; victim lead unchanged), full onboarding → mock payment, booking, meeting page with
+  upload/transcript, admin leads list (one row, «2 tilmeldinger»), unsubscribe, MFA login (dev secret), all admin pages, CMS,
+  notifications, invite + MFA setup, balancing, GDPR export/erasure, cron/jobs. Server log: **0** RLS errors (0 errors overall).
+- Overhead of context signing (pgbench, same transaction shape, old vs new schema): context statement +0.004 ms; policy-heavy queries
+  +0.3–0.4 ms; large scans faster (catalog 1.6 → 0.6 ms) thanks to InitPlans; customer pages +3–8 ms median (`/book` +30 ms).
+
+**Remaining risks.**
+
+- An attacker with code execution in the app process (or its environment) has `DB_CONTEXT_SECRET`; signing raises the floor only
+  against SQL injection. An injection still runs with the signed context of the request it rides in (that principal's rows only) and can
+  replay that same signature for ≤ 5 minutes (not bound to the transaction id, to avoid an extra round trip per query).
+- Marketing consent from onboarding step 1 is not double-opt-in: anyone can add (not read or withdraw) consent for an e-mail they typed;
+  sending and unsubscribe work per e-mail. Consider a confirmation e-mail before the first marketing send.
+- Unlinked leads with the same e-mail are not in a customer's self-service GDPR export (account e-mails are not verified at signup);
+  handle such access requests manually. Erasure still deletes every lead with the account's e-mail (admin-approved).
+- Free-text absence reasons remain readable by the board's own customers (accepted; UI hides them); `rls.advisor_busy` still reveals
+  start/end of a shared advisor's other meetings inside the booking window (inherent to availability).
+- The per-request principal memo still relies on Next's internal `workAsyncStorage` (pinned to next@16, probed by a test, fail-closed).

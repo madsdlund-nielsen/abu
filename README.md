@@ -23,6 +23,7 @@ cp .env.example .env          # alle integrationer er "mock" som standard
 npm install
 npm run db:roles              # opretter rollerne abu_owner/abu_app og rettighederne (én gang pr. database; idempotent)
 npx prisma migrate deploy     # opretter tabellerne – som ejeren abu_owner (DATABASE_URL_MIGRATE)
+npm run db:context-key        # nøglen til den signerede RLS-kontekst (som abu_owner; lokalt udviklingsnøglen, se Row-Level Security)
 npm run db:seed               # demodata – også som abu_owner
 npm run dev                   # http://localhost:3000 – appen kører som abu_app (kun DML)
 ```
@@ -83,6 +84,7 @@ docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Enheds- og integrationstests (vitest). DB-tests kører kun med `TEST_DATABASE_URL` (en separat testdatabase, migreret med `prisma migrate deploy`); ellers springes de over |
 | `npm run db:roles` | Opretter/opdaterer databaserollerne `abu_owner`, `abu_app` og `abu_jobs` og deres rettigheder (`prisma/roles.sql`) i databasen i `DATABASE_URL_PROVISION` (superbruger); adgangskoder fra `ABU_*_PASSWORD`, sendt som SCRAM-verifikatorer. Idempotent |
+| `npm run db:context-key` | Installerer nøglen til den signerede databasekontekst (`DB_CONTEXT_SECRET`, uden for produktion udviklingsnøglen) i `rls.context_key` – som `abu_owner` (`DATABASE_URL_MIGRATE`), efter migrationerne. Idempotent; `-- --prune` fjerner gamle nøgler efter en rotation |
 | `npm run db:migrate` | Ny migration under udvikling (som `abu_owner`; Prismas skyggedatabase kræver lokalt `ALTER ROLE abu_owner CREATEDB`) |
 | `npm run db:deploy` | Anvend migrationer (produktion) – som `abu_owner` via `DATABASE_URL_MIGRATE` |
 | `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) – som `abu_owner` |
@@ -369,6 +371,7 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | `DATABASE_SSL_CA` | sti til databasens CA-certifikat (PEM), når den ikke er udstedt af en offentlig CA |
    | `APP_SECRET`, `CRON_SECRET` | mindst 32 tilfældige tegn hver (`openssl rand -base64 48`) |
    | `MFA_ENCRYPTION_KEY` | mindst 32 tilfældige tegn, forskellig fra `APP_SECRET`; krypterer TOTP-hemmeligheder. Gem den sikkert – mistes den, skal alle opsætte MFA igen. Rotation: ny værdi her, den gamle i `MFA_ENCRYPTION_KEY_PREVIOUS` |
+   | `DB_CONTEXT_SECRET` | mindst 32 tilfældige tegn (`openssl rand -base64 48`), forskellig fra de andre hemmeligheder og ikke udviklingsnøglen; signerer RLS-konteksten. Samme værdi i app og `migrate` (compose-migrate installerer den med `db:context-key`). Rotation: se *Row-Level Security* |
    | `TRUSTED_PROXY_HOPS` | ≥ 1 |
    | `PAYMENT_PROVIDER=frisbii` + `FRISBII_PRIVATE_KEY`, `FRISBII_WEBHOOK_SECRET` | betaling |
    | `VIDEO_PROVIDER=whereby` + `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET` | video |
@@ -379,8 +382,9 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | `APP_ENV` | tom (eller `production`) – sæt **aldrig** `development` i drift |
 
 4. `docker compose up -d --build` – ved første start opretter Postgres rollerne (`docker/postgres/initdb`), `migrate`-servicen kører
-   `prisma migrate deploy` som `abu_owner` (med `NODE_ENV=production`), og derefter starter appen som `abu_app`. Opstartsloggen viser
-   `[db] rolle=abu_app · TLS=… · superbruger=nej · BYPASSRLS=nej · ejer=nej`.
+   `prisma migrate deploy` og `db:context-key` som `abu_owner` (med `NODE_ENV=production`), og derefter starter appen som `abu_app`.
+   Opstartsloggen viser `[db] rolle=abu_app · TLS=… · superbruger=nej · BYPASSRLS=nej · ejer=nej · RLS=ja · signeret kontekst=ja`
+   (appen starter ikke i produktion, hvis databasen ikke accepterer dens signatur eller accepterer udviklingsnøglen).
 5. **Opret den første administrator** (kør **aldrig** seed i produktion – det afvises). Ejerens konto:
    `docker compose run --rm migrate npm run create-admin -- --email mads@qlim8.com --name "Mads"`
    (uden `--email`/`--name` spørger scriptet, når det køres med en terminal, fx `docker compose run --rm -it migrate npm run create-admin`).
@@ -443,7 +447,8 @@ Appen kører **aldrig** som ejer eller superbruger (`docs/SECURITY-AUDIT-DELTA.m
 3. **Ekstern/administreret Postgres:** opret databasen, og kør med en superbruger-URL (kun i din egen terminal, aldrig i `.env` på app-serveren):
    `DATABASE_URL_PROVISION=postgresql://postgres:…@db-vært:5432/abu?sslmode=verify-full DATABASE_SSL_CA=/sti/ca.pem ABU_OWNER_PASSWORD=… ABU_APP_PASSWORD=… npm run db:roles`.
    Sæt derefter `DATABASE_URL=postgresql://abu_app:…@db-vært:5432/abu?sslmode=verify-full` (app) og `DATABASE_URL_MIGRATE` (kun migrate).
-4. Kontrollér opstartsloggen: `[db] rolle=abu_app · … · ejer=nej` (og `TLS=ja` for en ekstern database).
+4. Kontrollér opstartsloggen: `[db] rolle=abu_app · … · ejer=nej · RLS=ja · signeret kontekst=ja` (og `TLS=ja` for en ekstern database).
+   Uden compose: kør `npm run db:context-key` (som ejeren, med samme `DB_CONTEXT_SECRET` som appen) efter `prisma migrate deploy`.
 5. **Skift af adgangskode:** ny værdi i `.env`, `docker compose run --rm db-roles` (eller `npm run db:roles`), derefter `docker compose up -d`.
 
 ### Row-Level Security (RLS fase 1–3)
@@ -460,22 +465,60 @@ har adgang til) har `ENABLE` + `FORCE ROW LEVEL SECURITY` og politikker, der spe
    `requireUser`/`requireRole`): uden cookie `anon` (med hash af onboarding-cookien), med en fuld session brugerens id og rolle, med en
    MFA-ventende session kun `anon` + sessionens id. Login/log ud opdaterer principalen i samme request.
 2. **Prisma-udvidelsen** (`src/lib/db.ts`): hver operation kører i en transaktion, hvis første sætning er
-   `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true), …` med bundne parametre (transaktionslokalt – sikkert
-   med pgBouncer i transaction-mode). Interaktive `$transaction(async (tx) => …)` sætter konteksten én gang; `$transaction([…])` (array)
+   `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true), …, set_config('app.ctx', $5, true)` med bundne
+   parametre (transaktionslokalt – sikkert med pgBouncer i transaction-mode). `app.ctx` er en HMAC-signatur over de fire værdier (se
+   *Signeret kontekst* nedenfor). Interaktive `$transaction(async (tx) => …)` sætter konteksten én gang; `$transaction([…])` (array)
    afvises; `$queryRaw`/`$executeRaw` er dækket på samme måde. En vagt i driver-adapteren afviser enhver sætning uden for en transaktion
    og enhver transaktion, der ikke starter med kontekst-sætningen. **Mangler principalen, fejler forespørgslen** (`DbContextError`), og
    uden `app.role` ser politikkerne ingen rækker (fail-closed).
 3. **Politikkerne** bruger hjælpefunktioner i schemaet `rls` (ejet af `abu_owner`, `REVOKE ALL FROM PUBLIC`, `EXECUTE` til
    `abu_app`/`abu_jobs`): `rls.app_user_id()`, `app_role()`, `app_is_admin()`, `app_is_system()` m.fl. er `STABLE`, `SECURITY INVOKER` og
-   inlinebare. Ejerskabs-opslag på tværs af tabeller (`app_customer_subscription_ids()`, `app_meeting_ids()`, `app_board_advisor_ids()` …)
+   inlinebare – og giver kun en rolle, hvis signaturen i `app.ctx` er gyldig (`rls.ctx_ok()`). I politikkerne kaldes de altid som
+   `(SELECT rls.app_user_id())` (InitPlan: én gang pr. forespørgsel, ikke pr. række). Ejerskabs-opslag på tværs af tabeller (`app_customer_subscription_ids()`, `app_meeting_ids()`, `app_board_advisor_ids()` …)
    er `SECURITY DEFINER` med `SET search_path = pg_catalog, pg_temp` (undgår rekursion mellem politikker). Ejeren `abu_owner` er undtaget
    via `app_is_system()` (migrationer, seed, `create-admin`, definer-funktionerne).
 4. **Kapabilitets-funktioner** (definer) giver præcis det, en rolle har brug for på tværs af ejerskab – uden adgang til rækkerne:
-   `rls.user_directory(ids)` (navn/rolle på kolleger, kunde ↔ board, aktive rådgivere), `rls.advisor_busy(…)` (optagettider for
-   boardets rådgivere ved booking), `rls.advisor_lead_load(…)` og `rls.lead_eligible_ids(…)` (ansvarlig rådgiver), `rls.pending_upload_total`,
-   `rls.rate_limit_hit/rate_limit_reset` og `rls.capture_onboarding_lead` (trin 1, token-scoped). Selvbetjente ændringer af `User` og
+   `rls.user_directory(ids)` (navn/rolle på kolleger i levende boards og møder, aktive rådgivere), `rls.advisor_busy(…)` (kun start/slut
+   for boardets rådgiveres optagende møder i bookingvinduet, R-3), `rls.advisor_lead_load(…)` og `rls.lead_eligible_ids(…)` (ansvarlig
+   rådgiver), `rls.board_seat_allowed(…)` (kundens boardplads: aktiv rådgiver, aktuel pris, ansvarlig kun med lead-tag, R-1),
+   `rls.pending_upload_total`, `rls.rate_limit_hit/rate_limit_reset` (nøglen afledes i databasen af spand og emne, databasens tid; uden
+   for systemkonteksten kun for kalderens egen identitet, nulstilling kun i system – R-2) og `rls.capture_onboarding_lead` (trin 1:
+   opretter/opdaterer kun tilmeldingens eget lead – M-1). Selvbetjente ændringer af `User` og
    `AdvisorProfile` begrænses af triggeren `rls.guard_self_update` (kun navn, telefon, adgangskode, samtykker/opt-out hhv. titel, bio,
    foto); `id`, `email`, `role` og `createdAt` på `User` kan `abu_app` slet ikke opdatere (kolonnerettigheder).
+
+**Signeret kontekst (hærdning efter `docs/SECURITY-AUDIT-MFA-RLS.md`).** Uden signatur kunne enhver, der kører SQL som `abu_app` (fx en
+SQL-injektion), selv kalde `set_config('app.role', 'system', …)`. Nu:
+
+- Appen signerer pr. transaktion: `app.ctx = <kid>.<udstedt ms>.<nonce>.<HMAC-SHA256>` over rolle, bruger-id, session og onboarding-token
+  (`src/lib/db-context-sign.ts`). HMAC-nøglen afledes af **`DB_CONTEXT_SECRET`** (kræves i produktion; prod-guarden afviser < 32 tegn,
+  udviklingsnøglen og genbrug af en anden hemmelighed). Uden for produktion bruges en fast, offentlig udviklingsnøgle.
+- Databasen har kun HMAC-paddene i `rls.context_key` (ejet af `abu_owner`; `abu_app`/`abu_jobs` har ingen rettigheder til tabellen).
+  `rls.ctx_ok()` (SECURITY DEFINER) verificerer signaturen og udstedelsestidspunktet (±5 min af transaktionens start) og returnerer kun en
+  boolean. Uden gyldig signatur er der ingen rolle → ingen rækker (fail closed). Ejeren er stadig undtaget via `current_user`.
+- Nøglen installeres med `npm run db:context-key` (som ejeren, efter migrationerne; compose-`migrate` og CI gør det). Opstartstjekket
+  logger `signeret kontekst=ja` og nægter i produktion at starte, hvis databasen ikke accepterer appens signatur eller accepterer
+  udviklingsnøglen.
+- **Rotation:** ny værdi → `npm run db:context-key` (begge nøgler gælder nu) → genstart appen med den nye værdi →
+  `npm run db:context-key -- --prune`.
+- **Hvad det ikke dækker:** en angriber med kode-eksekvering i app-processen (eller adgang til dens miljø) kender nøglen; en SQL-injektion
+  arver stadig den signerede kontekst for den request, den kører i (kun den principals rækker), og kan genbruge den signatur i op til 5
+  minutter (kun samme principal). Signaturen er ikke bundet til transaktions-id'et (det ville koste en ekstra rundtur pr. forespørgsel).
+
+**Leads og samtykke (M-1).** Hver tilmelding har sit eget lead (`Lead.email` er ikke unik). Trin 1 opretter/opdaterer kun tilmeldingens
+eget lead – en e-mail, der allerede har et lead (en anden tilmelding, en kunde), giver et nyt, isoleret lead og præcis samme svar.
+`OnboardingSession.leadId` kan kun sættes af `rls.capture_onboarding_lead` (trigger). Samtykke kan kun indsættes for eget lead med
+`"userId"` NULL eller = egen bruger, og kun trækkes tilbage af kontoen selv, admin, systemet (signeret afmeldingslink, STOP) eller den
+tilmelding, der selv gav det, indtil det knyttes til en konto. Admin ser leads samlet pr. e-mail (antal tilmeldinger); afsendelse og
+afmelding går stadig på e-mailen. GDPR-eksporten indeholder kun leads/samtykker/tilmeldinger, der er knyttet til kontoen.
+
+**Request-principalen og admin-sider (N-1).** Next renderer layout og side parallelt, så layoutets `requireRole("ADMIN")` beskytter ikke
+sidens forespørgsler (med en udløbet session-cookie kørte siden som `anon`, og RLS afviste – det var den sporadiske `Tag`-fejl i
+sikkerhedsgennemgangen). Hver side under `src/app/admin` kalder derfor selv `requireRole("ADMIN")` først (håndhævet af
+`src/lib/db-context.test.ts`). Huskningen af principalen pr. request bruger Next' interne `workAsyncStorage`
+(`next/dist/server/app-render/work-async-storage.external`); afhængigheden er låst til next@16, en test fejler, hvis modulet eller API'et
+flytter, og i Next-serveren kastes `DbContextError` frem for et stille opslag pr. forespørgsel, hvis work store mangler. Skifter den
+opslåede principal midt i en request uden login/logud (fx fuld session → anon), kastes `DbContextError`.
 
 **Systemkonteksten.** `withSystemContext("område.formål", fn)` er den eneste vej til `app.role = 'system'`. Den er til jobs/cron/
 planlæggeren, verificerede webhooks, seed/`create-admin`, auth-internt (login på e-mail, reset-/invitationstokens, MFA for en ventende
@@ -500,25 +543,34 @@ med `DATABASE_URL_JOBS` peges på `abu_jobs` uden at ændre politikkerne (de afh
    `prisma/roles.sql` (afsnit 8, genanvendes ved `npm run db:roles`).
 2. `ALTER TABLE "X" ENABLE ROW LEVEL SECURITY; ALTER TABLE "X" FORCE ROW LEVEL SECURITY;` – migrationen afbrydes ellers ikke, men
    `src/lib/rls.test.ts` og opstartstjekket (`db-guard.ts`, `RLS=ja` i loggen) fejler for en tabel uden.
-3. Politikker pr. kommando (`FOR SELECT/INSERT/UPDATE/DELETE`), altid med `rls.app_is_system() OR rls.app_is_admin() OR …` efter appens
-   regler, og en `COMMENT ON POLICY` med begrundelsen. Husk: `INSERT … RETURNING` (Prismas `create`) kræver også SELECT-politik på den nye
-   række; slå kun op i andre RLS-tabeller via en `SECURITY DEFINER`-hjælper (ellers rekursion).
-4. Tests i `src/lib/rls.test.ts`: positive og negative tilfælde pr. rolle (også rå SQL som `abu_app`) og intet uden kontekst.
+3. Politikker pr. kommando (`FOR SELECT/INSERT/UPDATE/DELETE`), altid med `(SELECT rls.app_is_system()) OR (SELECT rls.app_is_admin()) OR …`
+   efter appens regler, og en `COMMENT ON POLICY` med begrundelsen. Kontekstfunktionerne skrives **altid** som `(SELECT rls.app_…())`
+   (InitPlan; ellers verificeres signaturen pr. række – `src/lib/rls-remediation.test.ts` fejler for et kald uden). WITH CHECK skal binde
+   kolonner med en bruger (`"userId"`, `"createdById"` …) til `(SELECT rls.app_user_id())`, ikke kun ejerskabet af rækken. Husk:
+   `INSERT … RETURNING` (Prismas `create`) kræver også SELECT-politik på den nye række; slå kun op i andre RLS-tabeller via en
+   `SECURITY DEFINER`-hjælper (ellers rekursion). En ny definer-funktion skal have `SET search_path = pg_catalog, pg_temp`, tjekke konteksten
+   selv og returnere så lidt som muligt; giv den IKKE en høj `COST` (så slår JIT til).
+4. Tests i `src/lib/rls.test.ts`: positive og negative tilfælde pr. rolle (også rå SQL som `abu_app` med appens signerede kontekst,
+   `rawAsApp`/`contextStatement` i `src/test/db.ts`) og intet uden kontekst.
 5. Kode, der skal læse tabellen uden en bruger (job, webhook), kører i `withSystemContext` med en ny begrundelse i `ALLOW`.
 
-**Admin-SQL sikkert.** Brug aldrig app-URL'en med en håndrullet `set_config('app.role','system')` til ad hoc-arbejde. Til
+**Admin-SQL sikkert.** En håndrullet `set_config('app.role','system')` som `abu_app` giver nu ingenting (ingen signatur). Til
 driftsforespørgsler: `psql` med `DATABASE_URL_MIGRATE` (ejeren `abu_owner` er undtaget via `app_is_system()`), helst i en transaktion
-med `BEGIN; … ROLLBACK;`, til den er verificeret. Vil du se, hvad en bestemt bruger ser (fejlsøgning), så som `abu_app`:
-`BEGIN; SELECT set_config('app.user_id', '<id>', true), set_config('app.role', 'CUSTOMER', true); SELECT …; ROLLBACK;` –
-konteksten forsvinder med transaktionen. Datarettelser hører hjemme i en migration (kører som ejeren).
+med `BEGIN; … ROLLBACK;`, til den er verificeret. Vil du se, hvad en bestemt bruger ser (fejlsøgning), skal konteksten signeres med
+`DB_CONTEXT_SECRET` – lokalt fx `npx tsx -e 'import { contextParams } from "./src/lib/db-context"; console.log(contextParams({ userId: "<id>", role: "CUSTOMER" }))'`
+og de fem værdier i `SELECT set_config('app.user_id', …, true), …, set_config('app.ctx', …, true)` som `abu_app` i en transaktion (gyldig i
+5 minutter). Gør det ikke med produktionens hemmelighed i en delt shell-historik. Datarettelser hører hjemme i en migration (kører som ejeren).
 
 **Ydelse.** Hver operation uden for en transaktion koster tre ekstra korte sætninger (BEGIN, `set_config`, COMMIT): målt ca. 1–1,3 ms pr.
-Prisma-kald lokalt og 0–22 ms pr. side (medianen; se `docs/SECURITY-AUDIT-DELTA.md`, «RLS Phases 1–3»). Politikkernes ejerskabs-opslag er
+Prisma-kald lokalt og 0–22 ms pr. side (medianen; se `docs/SECURITY-AUDIT-DELTA.md`, «RLS Phases 1–3»). Den signerede kontekst (målt
+lokalt med pgbench, samme transaktionsform som appen, gammelt mod nyt skema): selve kontekst-sætningen +0,004 ms; politiktunge
+forespørgsler +0,3–0,4 ms (én verifikation, ca. 40–60 µs, pr. kontekstkald, der påstår en rolle); forespørgsler over mange rækker hurtigere
+end før (fx rådgiverkataloget 1,6 → 0,6 ms), fordi kontekstfunktionerne nu er InitPlans. Pr. side +3–8 ms (bookingsiden +30 ms). Politikkernes ejerskabs-opslag er
 hashede subplaner over indeks (`MeetingParticipant(userId, meetingId)`, `SubscriptionAdvisor(advisorId)`, `Subscription(customerId)`,
 `Recording(uploadedById)`).
 
 **CI** (`.github/workflows/ci.yml`): `npm ci`, `npm audit --omit=dev --audit-level=high`, lint, typetjek, `npm run db:roles` (tilfældige
-adgangskoder pr. kørsel), migrationer som `abu_owner`, alle tests som `abu_app` mod en Postgres-service (så rolleopdelingen testes),
+adgangskoder og `DB_CONTEXT_SECRET` pr. kørsel), migrationer og `db:context-key` som `abu_owner`, alle tests som `abu_app` mod en Postgres-service (så rolleopdelingen testes),
 build, et tjek af at produktionsbuildet nægter at starte med mock-konfiguration, og `docker build`. CI starter ikke på PR'er, der kun
 ændrer `docs/**` eller `*.md` (`paths-ignore`). Gør derfor **ikke** CI-jobbene til påkrævede status-checks i branch protection – en
 ren docs-PR ville så vente for evigt på et check, der aldrig kommer (D-6); `deploy.yml` kører CI før hver deploy alligevel. Afhængigheder opdateres ugentligt og
@@ -531,6 +583,8 @@ npm test                                                     # enhedstests; DB-t
 # DB-tests: testdatabasen provisioneres og migreres som ejeren, og testene kører som app-rollen (som i CI)
 DATABASE_URL_PROVISION=postgresql://postgres:…@localhost:5432/abu_test npm run db:roles
 DATABASE_URL_MIGRATE=postgresql://abu_owner:…@localhost:5432/abu_test npx prisma migrate deploy
+# Nøglen til den signerede kontekst installeres automatisk af testenes global-setup (via TEST_DATABASE_URL_OWNER); ellers:
+DATABASE_URL_MIGRATE=postgresql://abu_owner:…@localhost:5432/abu_test npm run db:context-key
 TEST_DATABASE_URL=postgresql://abu_app:…@localhost:5432/abu_test \
 TEST_DATABASE_URL_OWNER=postgresql://abu_owner:…@localhost:5432/abu_test npm test
 npm run lint && npm run typecheck && npm run build
@@ -546,7 +600,8 @@ RLS-tests: `src/lib/rls.test.ts` kører som `abu_app` med Prisma og rå SQL og f
 LEVEL SECURITY` eller politikker (tilladt undtagelse: `_prisma_migrations`). Den viser bl.a., at en kunde ikke kan læse en anden kundes
 abonnement, møder eller transskription (heller ikke med rå SQL eller ved at forfalske audit-rækker), at en rådgiver ikke ser møder, hen ikke
 deltager i, at anon kun ser aktive rådgiverprofiler og kompetence-tags, at admin-tags er usynlige for andre end admin, at en MFA-ventende
-session kun ser sig selv, at intet virker uden kontekst, og at jobkøen virker i systemkonteksten. `src/lib/db-context.test.ts` håndhæver
+session kun ser sig selv, at intet virker uden kontekst, og at jobkøen virker i systemkonteksten. `src/lib/rls-remediation.test.ts` gentager
+beviserne fra `docs/SECURITY-AUDIT-MFA-RLS.md` (M-1, M-2, R-1–R-4, forfalsket systemkontekst) som `abu_app` og viser, at de nu fejler. `src/lib/db-context.test.ts` håndhæver
 tilladelseslisten for systemkonteksten (se ovenfor). Testdata oprettes med `asSystem`, og koden under test kører med `asUser`/`asAnon` eller
 en rigtig session (`src/test/db.ts`).
 

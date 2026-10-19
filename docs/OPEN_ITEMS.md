@@ -139,9 +139,27 @@ Stripe, Zoom/Teams/Daily, OpenAI/Deepgram/AssemblyAI, Vercel/AWS, Auth0/Clerk, S
 - **`prisma migrate dev`** (nye migrationer lokalt) kræver, at `abu_owner` må oprette Prismas skyggedatabase: lokalt `ALTER ROLE abu_owner CREATEDB` (aldrig i produktion).
 - **RLS fase 1–3 er udført** (`docs/SECURITY-AUDIT-DELTA.md` → «Part B — RLS Phases 1–3», README → *Row-Level Security*). Tilbage:
   - **Efter udrulning:** tjek `[db] … RLS=ja` i opstartsloggen (migrationen `20261020090000_rls_policies` giver selv rettighederne; `npm run db:roles` genanvender dem, hvis rollerne oprettes senere).
-  - **Kendte rester (accepteret):** konteksten ligger i transaktionslokale GUC'er – SQL-injektion, der kan køre vilkårlige sætninger, kan sætte `app.role` selv (næste skridt: signeret kontekst eller én DB-rolle pr. app-rolle); definer-funktionerne kan kaldes af al SQL som `abu_app` (de tjekker selv konteksten og returnerer kun det nødvendige); ca. tre ekstra korte sætninger pr. operation (hold databasen tæt på appen); afhængighed af Next' interne `workAsyncStorage` til memo pr. request; kunder kan læse fritekst-årsagen på deres rådgiveres fraværsblokke.
+  - **Kendte rester (accepteret):** definer-funktionerne kan kaldes af al SQL som `abu_app` (de tjekker selv den signerede kontekst og returnerer kun det nødvendige); ca. tre ekstra korte sætninger pr. operation (hold databasen tæt på appen); afhængighed af Next' interne `workAsyncStorage` til memo pr. request (låst til next@16, testet og fail-closed – genbekræft ved hver Next-major); kunder kan læse fritekst-årsagen på deres rådgiveres fraværsblokke.
   - **`abu_jobs`** er provisioneret, men bruges ikke. Får et job brug for mere end 15 s pr. sætning, så `SET LOCAL statement_timeout` i jobbets transaktion eller en separat klient som `abu_jobs` (politikkerne afhænger af `app.role`, ikke af rollen).
   - **Ny tabel:** tjeklisten i README (rettigheder, `ENABLE`/`FORCE`, politikker med `COMMENT`, tests i `src/lib/rls.test.ts`); `rls.test.ts` og opstartstjekket fejler for en tabel uden RLS.
 - **D-5 (beslutning):** board-builderen viser «Kan være ansvarlig» (afledt `leadEligible`) også før login. Bevidst; skal det skjules for besøgende, ændres `loadCatalog()`.
 - **D-7:** når `deploy.yml` får et rigtigt deploy-trin (ssh/docker), behold `permissions: contents: read`, `environment: production` med påkrævede reviewers, ingen utroværdige værdier i `run:`, og hemmeligheder kun via `production`-miljøet.
 - **Rådgiverfotos og cache (D-1):** et fjernet eller slettet foto kan stå i en browser-/proxy-cache i højst 5 minutter (derefter 404). Nævn det sammen med bucket-versioneringen (30 dage) i privatlivspolitikken.
+
+## 8. Sikkerhedsgennemgang af MFA, roller og RLS (19.10.2026)
+
+Alle fund i `docs/SECURITY-AUDIT-MFA-RLS.md` er rettet (se «Remediation status» med commits). Tilbage:
+
+- **Ejeren skal (før lancering):** sætte `DB_CONTEXT_SECRET` (`openssl rand -base64 48`) i serverens `.env` (app og `migrate`), gemme den i
+  password-manageren og tjekke `[db] … signeret kontekst=ja` i opstartsloggen. Rotation: README → *Row-Level Security* → «Signeret
+  kontekst» (installér ny → genstart → `npm run db:context-key -- --prune`).
+- **Beslutning – dobbelt opt-in:** markedsføringssamtykke fra onboarding trin 1 bekræftes ikke på e-mail. Efter M-1 kan ingen læse eller
+  trække en andens samtykke tilbage, men en besøgende kan stadig tilføje et samtykke for en e-mail, hen har skrevet. Overvej en
+  bekræftelsesmail før første markedsføringsudsendelse (juragennemgang).
+- **GDPR-indsigt:** selvbetjent dataeksport indeholder kun leads/samtykker/tilmeldinger, der er knyttet til kontoen. Øvrige leads med samme
+  e-mail (fx ufuldendte tilmeldinger før kontoen) udleveres efter en manuel anmodning (admin → Leads, søg på e-mailen).
+- **Kendte rester (accepteret):** en SQL-injektion kører stadig med den signerede kontekst for den request, den rammer (kun den principals
+  rækker), og kan genbruge den signatur i op til 5 minutter; kode-eksekvering i app-processen giver nøglen. `rls.advisor_busy` viser stadig
+  start/slut for en delt rådgivers andre møder inden for bookingvinduet (nødvendigt for ledige tider).
+- **Nye migrationer/politikker:** skriv kontekstfunktionerne som `(SELECT rls.app_…())` (testen fejler ellers) og bind bruger-kolonner i
+  WITH CHECK til den indloggede bruger – tjeklisten i README er opdateret.

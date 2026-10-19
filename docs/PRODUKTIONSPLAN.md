@@ -73,6 +73,21 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
 - **RLS fase 1–3 er udført (18.10.2026, `6300bc0`–`cbbe909`, `docs/SECURITY-AUDIT-DELTA.md` → «Part B — RLS Phases 1–3»):** alle 34 tabeller har `ENABLE` + `FORCE ROW LEVEL SECURITY` med politikker, der spejler appens autorisation (kunde, rådgiver, admin, før login, system). Principalen sættes ét sted (`getSessionContext`), hver Prisma-operation kører i en transaktion med `set_config` (bundne parametre), og mangler konteksten, afvises forespørgslen. Jobs, webhooks, cron, seed og auth-internt kører i `withSystemContext("…")` efter en tilladelsesliste, som en test håndhæver. Ekstra tid pr. side ca. 0–22 ms lokalt (tre korte sætninger pr. operation). Verificeret med 460 tests som `abu_app` og et end-to-end-forløb af alle hovedflows mod et produktionsbuild uden en eneste RLS-fejl i loggen.
 - **Det skal du gøre:** intet ekstra ved udrulning – migrationen kører som `abu_owner` som de andre. Migrationen giver selv `abu_app`/`abu_jobs` rettighederne til `rls`-funktionerne og kolonnerettighederne; `npm run db:roles` genanvender dem, hvis rollerne oprettes eller genskabes senere. Ny tabel: følg tjeklisten i README → *Row-Level Security*.
 
+**Sikkerhedsgennemgang af MFA, roller og RLS – rettet (19.10.2026, `docs/SECURITY-AUDIT-MFA-RLS.md` → «Remediation status»):**
+- **M-1 (`0a203b1`):** et lead og et markedsføringssamtykke hører nu til den tilmelding, der oprettede dem. En besøgende, der skriver en
+  andens e-mail i trin 1, får sit eget lead og præcis samme side – kan ikke se, ændre eller trække den andens samtykke tilbage. Admin ser
+  leads samlet pr. e-mail med antal tilmeldinger.
+- **M-2, R-1–R-4 (`97973bb`, `e772796`, `03e7ec2`, `238fbe3`, `72d0d06`):** audit-loggen kan ikke forfalskes som systemrækker; kundens
+  board kun med aktive rådgivere til aktuel pris; rate limits kun for egen identitet (nulstilling kun internt); rådgiverkalenderen kun i
+  bookingvinduet og uden status; opsagte boards giver ikke længere indsigt i hinanden.
+- **N-1 (`87126ca`):** årsagen til den sporadiske RLS-fejl på admin-forsiden er fundet (udløbet cookie + parallel rendering) og fjernet;
+  hver admin-side tjekker selv rollen.
+- **Signeret databasekontekst (`221fe6f`):** en SQL-injektion kan ikke længere give sig selv systemadgang med `set_config` – databasen
+  kræver en HMAC med `DB_CONTEXT_SECRET`. Ekstra tid ca. 0,3–0,4 ms på de tungeste forespørgsler, 3–8 ms pr. side.
+- **Det skal du gøre før lancering:** generér `DB_CONTEXT_SECRET` (`openssl rand -base64 48`), læg den i serverens `.env` (bruges af både
+  `app` og `migrate`) og jeres password-manager. `docker compose up` installerer den i databasen; tjek `[db] … signeret kontekst=ja` i
+  opstartsloggen. Uden compose: `npm run db:context-key` som ejeren efter migrationerne.
+
 **Ud over planen (18.10.2026):** CI i GitHub Actions (`ab7ed4a`: npm ci, audit, lint, typetjek, tests mod Postgres, build, prod-guard-boot, `docker build`), `.dockerignore` holder `.env*` ude af imaget, og Docker-imaget er bygget og kørt lokalt (mock-konfiguration nægter at starte; dev-konfiguration svarer).
 
 ## Fase 3 – Konti, integrationer og jura (kræver dig)
@@ -89,7 +104,7 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
 
 ## Fase 4 – Drift og lancering
 - **Infrastruktur:** Docker Compose på Hetzner med Caddy (automatisk TLS og HSTS) foran appen, ingen offentlig databaseport, firewall og fail2ban, automatiske sikkerhedsopdateringer af OS og månedlig genbygning af image.
-- **Hemmeligheder:** (inkl. `MFA_ENCRYPTION_KEY`) genereres med `openssl rand` og gemmes i Docker secrets eller en `.env`, som kun root kan læse, uden for repoet. Der er en dokumenteret rotationsprocedure.
+- **Hemmeligheder:** (inkl. `MFA_ENCRYPTION_KEY` og `DB_CONTEXT_SECRET`) genereres med `openssl rand` og gemmes i Docker secrets eller en `.env`, som kun root kan læse, uden for repoet. Der er en dokumenteret rotationsprocedure.
 - **Backup:**
   - Daglig `pg_dump`, krypteret og gemt uden for serveren i Hetzner Storage Box i et andet datacenter.
   - 30 dages opbevaring.
@@ -100,7 +115,7 @@ Estimat: 2–3 dage (inkl. QA-punkterne).
   - Fejl: selvhostet GlitchTip.
   - Alarmer ved fejlede webhooks, høje SMS-udgifter, fejlede jobs i køen, gentagne fejlede logins og fejl i audit-loggen.
 - **CI (GitHub Actions):** lint, typetjek, test (som `abu_app`), build, `npm audit` og secret-scanning ved hver PR, plus et tjek af, at prod-konfigurationen ikke bruger mock. Branch-beskyttelse på `main` – men gør ikke CI-jobbene til påkrævede checks, så længe `paths-ignore` springer rene docs-PR'er over (D-6, se README «CI»).
-- **Database:** rollerne fra RLS fase 0 (README *Database og roller*); ved en database på en anden server altid `sslmode=verify-full`. RLS-politikker (fase 1–3) er på; opstartsloggen skal vise `RLS=ja`.
+- **Database:** rollerne fra RLS fase 0 (README *Database og roller*); ved en database på en anden server altid `sslmode=verify-full`. RLS-politikker (fase 1–3) er på; opstartsloggen skal vise `RLS=ja · signeret kontekst=ja`.
 - **Pre-launch-tjekliste:**
   - Staging-miljø med rigtige testkonti.
   - End-to-end-test af betaling, møde, optagelse, transskription og notifikationer.
