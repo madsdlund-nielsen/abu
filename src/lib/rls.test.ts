@@ -180,7 +180,7 @@ describeDb("Row-Level Security: alle tabeller og politikker (abu_app)", () => {
       expect((await q(`DELETE FROM "Meeting"`)).rowCount).toBe(0);
       // Hjælpefunktionerne giver heller intet uden kontekst
       expect((await q(`SELECT * FROM rls.user_directory($1)`, [[w.v1.id, w.c1.id]])).rows).toEqual([]);
-      await expect(q(`SELECT rls.rate_limit_hit('x', now()::timestamp, now()::timestamp)`)).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`SELECT rls.rate_limit_hit('login-ip', 'x', 60)`)).rejects.toMatchObject({ code: "42501" });
     });
     // En ukendt rolle tæller som ingen kontekst
     await rawAs({ userId: w.c1.id, role: "superuser" as Principal["role"] }, async (q) => {
@@ -345,8 +345,10 @@ describeDb("Row-Level Security: alle tabeller og politikker (abu_app)", () => {
       await expect(q(`INSERT INTO "MarketingConsent" (id, "leadId", email, text, "textVersion", source) VALUES ($1, $2, 'x@rls.test', 't', 'v', 's')`, [uid("mc"), w.o2.lead.id])).rejects.toMatchObject({ code: "42501" });
       expect((await q(`INSERT INTO "MarketingConsent" (id, "leadId", email, text, "textVersion", source) VALUES ($1, $2, 'x@rls.test', 't', 'v', 's')`, [uid("mc"), w.o1.lead.id])).rowCount).toBe(1);
       await expect(q(`INSERT INTO "Lead" (id, email, name) VALUES ($1, $2, 'x')`, [uid("l"), `${uid()}@rls.test`])).rejects.toMatchObject({ code: "42501" });
-      // Rate limit virker før login via funktionen, men tabellen er lukket
-      expect((await q(`SELECT hits FROM rls.rate_limit_hit($1, now()::timestamp + interval '1 minute', now()::timestamp)`, [uid("anon-rl")])).rows[0].hits).toBe(1);
+      // Rate limit (R-2): kun for egen tilmelding (spanden onb-cvr-s med eget id) – ikke andres, ikke vilkårlige nøgler
+      expect((await q(`SELECT hits FROM rls.rate_limit_hit('onb-cvr-s', $1, 60)`, [w.o1.session.id])).rows[0].hits).toBe(1);
+      await expect(q(`SELECT hits FROM rls.rate_limit_hit('onb-cvr-s', $1, 60)`, [w.o2.session.id])).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`SELECT hits FROM rls.rate_limit_hit('login-ip', $1, 60)`, [uid("anon-rl")])).rejects.toMatchObject({ code: "42501" });
       expect((await q(`SELECT count(*)::int AS n FROM "RateLimit"`)).rows[0].n).toBe(0);
     });
   });

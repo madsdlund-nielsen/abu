@@ -42,8 +42,9 @@ const ALLOW: Record<string, string[]> = {
     "notifications.unsubscribe",
     "notifications.delivery_status",
   ],
-  // Systemtabeller (kun system): idempotens-nøgler, CVR-cache, driftsalarmer
+  // Systemtabeller (kun system): idempotens-nøgler, CVR-cache, driftsalarmer, rate limits uden identitet (R-2)
   "src/lib/idempotency.ts": ["idempotency.key"],
+  "src/lib/rate-limit.ts": ["ratelimit.count", "ratelimit.reset"],
   "src/lib/cvr/index.ts": ["cvr.cache", "cvr.cache"],
   "src/lib/alerts.ts": ["alerts.raise"],
   // Tværgående oprydning og GDPR (efter admins godkendelse / for den indloggede bruger selv)

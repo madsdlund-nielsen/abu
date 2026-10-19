@@ -220,6 +220,30 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
     await rawAsApp(as(w.admin), async (q) => expect((await q(seat, [w.sA.id, w.inactive.id, 1, false])).rowCount).toBe(1));
   });
 
+  // ------------------------------------------------------------------------------------------------------------ R-2
+  it("R-2: rate limit-funktionerne er bundet til kalderen (ingen vilkårlig nøgle, intet falsk tidspunkt, nulstilling kun i system)", async () => {
+    await rawAsApp(as(w.cA), async (q) => {
+      // Rapportens bevis (vilkårlig hashet nøgle + falsk nu/vindue) – den signatur findes ikke længere
+      await expect(q(`SELECT * FROM rls.rate_limit_hit('rlX', now()::timestamp + interval '10 years', now()::timestamp + interval '1 day')`)).rejects.toMatchObject({ code: "42883" });
+      await expect(q(`SELECT rls.rate_limit_reset('rlX')`)).rejects.toMatchObject({ code: "42883" });
+      // Nulstilling af en andens spærring: kun system
+      await expect(q(`SELECT rls.rate_limit_reset('mfa-user', $1)`, [w.cB.id])).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`SELECT rls.rate_limit_reset('mfa-user', $1)`, [w.cA.id])).rejects.toMatchObject({ code: "42501" });
+      // Tælle på en andens nøgle (spærre offeret ude) eller en spand uden identitet: afvist
+      await expect(q(`SELECT * FROM rls.rate_limit_hit('mfa-user', $1, 900)`, [w.cB.id])).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`SELECT * FROM rls.rate_limit_hit('login-unknown', 'offer@rem.test', 900)`)).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`SELECT * FROM rls.rate_limit_hit('login-ip', '203.0.113.9', 900)`)).rejects.toMatchObject({ code: "42501" });
+      // Eget id: ja – men vinduet er begrænset (ingen 10-års-spærring)
+      expect((await q(`SELECT hits FROM rls.rate_limit_hit('mfa-user', $1, 900)`, [w.cA.id])).rows[0].hits).toBe(1);
+      await expect(q(`SELECT * FROM rls.rate_limit_hit('mfa-user', $1, 315360000)`, [w.cA.id])).rejects.toMatchObject({ code: "22023" });
+    });
+    // Systemkonteksten (appens lager for IP/e-mail-spande): ja
+    await rawAsApp({ userId: null, role: "system" }, async (q) => {
+      expect((await q(`SELECT hits FROM rls.rate_limit_hit('login-ip', $1, 60)`, [uid("ip")])).rows[0].hits).toBe(1);
+      await expect(q(`SELECT rls.rate_limit_reset('login-ip', 'x')`)).resolves.toBeTruthy();
+    });
+  });
+
   // ------------------------------------------------------------------------------------------------- Signeret kontekst
   it("forfalsket kontekst: set_config('app.role','system') fra abu_app giver ingenting – kun appens signerede kontekst tæller", async () => {
     const count = `SELECT (SELECT count(*)::int FROM "User") AS users, (SELECT count(*)::int FROM "Subscription") AS subs, rls.app_role() AS role`;
@@ -231,6 +255,8 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
       expect((await q(count)).rows[0]).toEqual({ users: 0, subs: 0, role: null });
       await q(`SELECT set_config('app.role', 'ADMIN', true), set_config('app.user_id', $1, true)`, [w.admin.id]);
       expect((await q(count)).rows[0]).toEqual({ users: 0, subs: 0, role: null });
+      // Definer-funktionerne og RateLimit stoler heller ikke på den
+      await expect(q(`SELECT * FROM rls.rate_limit_hit('login-ip', 'x', 60)`)).rejects.toMatchObject({ code: "42501" });
     });
     // En SQL-injektion i en kundes (signerede) transaktion: genbrug signaturen med en anden rolle/bruger → ingen kontekst
     await rawAsApp(as(w.cA), async (q) => {
