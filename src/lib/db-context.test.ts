@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { currentPrincipal, DbContextError, explicitPrincipal, runAsPrincipal, setRequestPrincipalResolver, SYSTEM_REASON_PATTERN, withSystemContext } from "./db-context";
+import { contextParams, currentPrincipal, DbContextError, explicitPrincipal, runAsPrincipal, setRequestPrincipalResolver, SYSTEM_REASON_PATTERN, withSystemContext } from "./db-context";
+import { deriveContextKey, signContext } from "./db-context-sign";
 import { TRIGGERS } from "./notifications/triggers";
 
 /**
@@ -199,5 +200,22 @@ describe("Prisma-udvidelsen og adapter-vagten (uden database)", () => {
     await good.queryRaw({ sql: 'SELECT * FROM "Meeting"', args: [] });
     await good.executeRaw({ sql: "COMMIT", args: [] });
     expect(sent).toEqual([`${SET_CONTEXT_SQL_PREFIX}, $1, true)`, 'SELECT * FROM "Meeting"', "COMMIT"]);
+  });
+});
+
+describe("signeret databasekontekst (app.ctx)", () => {
+  it("contextParams signerer de fire værdier; signaturen afhænger af hver værdi og har ny nonce pr. transaktion", () => {
+    const p = contextParams({ userId: "u1", role: "CUSTOMER", sessionId: "s", onboardingToken: null });
+    expect(p.slice(0, 4)).toEqual(["u1", "CUSTOMER", "s", ""]);
+    expect(p[4]).toMatch(/^[0-9a-f]{16}\.\d+\.[0-9a-f]{24}\.[0-9a-f]{64}$/);
+    expect(contextParams({ userId: "u1", role: "CUSTOMER" })[4]).not.toBe(contextParams({ userId: "u1", role: "CUSTOMER" })[4]);
+    const k = deriveContextKey("test-secret-0123456789abcdef0123456789");
+    const sig = (v: [string, string, string, string]) => signContext(v, k, 1_000, "00".repeat(12)).split(".")[3];
+    const base = sig(["u1", "CUSTOMER", "", ""]);
+    expect(sig(["u1", "system", "", ""])).not.toBe(base);
+    expect(sig(["u2", "CUSTOMER", "", ""])).not.toBe(base);
+    expect(sig(["u1", "CUSTOMER", "x", ""])).not.toBe(base);
+    expect(sig(["u1", "CUSTOMER", "", "x"])).not.toBe(base);
+    expect(() => signContext(["u1|x", "CUSTOMER", "", ""], k)).toThrow(/«\|»/);
   });
 });

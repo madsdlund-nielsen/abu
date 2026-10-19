@@ -9,6 +9,7 @@ const PROD = {
   APP_SECRET: "a".repeat(48),
   CRON_SECRET: "c".repeat(48),
   MFA_ENCRYPTION_KEY: "m".repeat(48),
+  DB_CONTEXT_SECRET: "d".repeat(48),
   PAYMENT_PROVIDER: "frisbii",
   FRISBII_PRIVATE_KEY: "priv_x",
   FRISBII_WEBHOOK_SECRET: "whsec_x",
@@ -79,6 +80,18 @@ describe("produktions-guard (C-1)", () => {
     const same = { ...PROD, MFA_ENCRYPTION_KEY: PROD.APP_SECRET };
     expect(productionConfigProblems(parseEnv(same), same).join("\n")).toMatch(/forskellig fra APP_SECRET/);
     expect(() => assertBootConfig({ ...PROD, MFA_ENCRYPTION_KEY: "" }, silent)).toThrow(EnvConfigError);
+  });
+
+  it("kræver DB_CONTEXT_SECRET (signeret RLS-kontekst): mindst 32 tegn, ikke udviklingsnøglen og ikke en anden hemmelighed", async () => {
+    const { DB_CONTEXT_DEV_SECRET } = await import("./db-context-sign");
+    for (const raw of [{ ...PROD, DB_CONTEXT_SECRET: "" }, { ...PROD, DB_CONTEXT_SECRET: "kort" }]) {
+      expect(productionConfigProblems(parseEnv(raw), raw).join("\n")).toMatch(/DB_CONTEXT_SECRET skal være mindst 32/);
+    }
+    const dev = { ...PROD, DB_CONTEXT_SECRET: DB_CONTEXT_DEV_SECRET };
+    expect(productionConfigProblems(parseEnv(dev), dev).join("\n")).toMatch(/udviklingsnøglen/);
+    const same = { ...PROD, DB_CONTEXT_SECRET: PROD.MFA_ENCRYPTION_KEY };
+    expect(productionConfigProblems(parseEnv(same), same).join("\n")).toMatch(/DB_CONTEXT_SECRET skal være forskellig/);
+    expect(() => assertBootConfig({ ...PROD, DB_CONTEXT_SECRET: "" }, silent)).toThrow(EnvConfigError);
   });
 
   it("afviser localhost og COOKIE_SECURE=false", () => {

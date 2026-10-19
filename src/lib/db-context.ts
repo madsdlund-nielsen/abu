@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { workAsyncStorage } from "next/dist/server/app-render/work-async-storage.external";
+import { DB_CONTEXT_DEV_SECRET, deriveContextKey, signContext, type ContextKey } from "./db-context-sign";
+import { getEnv, isProductionEnv } from "./env";
 
 /**
  * Databasekontekst for Row-Level Security (RLS fase 1–3, docs/SECURITY-AUDIT-DELTA.md).
@@ -15,6 +17,9 @@ import { workAsyncStorage } from "next/dist/server/app-render/work-async-storage
  *  2. Ellers requesten: sessionen (`getSessionContext` i auth.ts – det ene centrale sted), dvs. den indloggede bruger,
  *     ellers `anon` (før login, også med en MFA-ventende session). Resultatet huskes pr. request.
  *  3. Hverken eller (fx et script eller en timer uden kontekst): ingen principal → fejl (fail closed).
+ *
+ * Konteksten er signeret (`app.ctx`, src/lib/db-context-sign.ts): databasen stoler kun på værdier med en gyldig HMAC
+ * fra nøglen i `DB_CONTEXT_SECRET`, så en SQL-injektion ikke kan forfalske `app.role = 'system'` eller en anden bruger.
  */
 
 export type PrincipalRole = "ADMIN" | "ADVISOR" | "CUSTOMER" | "anon" | "system";
@@ -137,7 +142,18 @@ export function clearRequestPrincipal(): void {
   if (key) requestMemo.delete(key);
 }
 
-/** Bundne parametre til `set_config` (rækkefølge som i SET_CONTEXT_SQL i db.ts). */
-export function contextParams(p: Principal): [string, string, string, string] {
-  return [p.userId ?? "", p.role, p.sessionId ?? "", p.onboardingToken ?? ""];
+// --------------------------------------------------------------------------------------------- Signeret kontekst
+
+/** Nøglen til `app.ctx` (DB_CONTEXT_SECRET; uden for produktion den offentlige udviklingsnøgle). */
+export function dbContextKey(): ContextKey {
+  const secret = getEnv().DB_CONTEXT_SECRET;
+  if (secret) return deriveContextKey(secret);
+  if (isProductionEnv()) throw new DbContextError("DB_CONTEXT_SECRET mangler – databasekonteksten kan ikke signeres (kræves i produktion).");
+  return deriveContextKey(DB_CONTEXT_DEV_SECRET);
+}
+
+/** Bundne parametre til `set_config` (rækkefølge som i SET_CONTEXT_SQL i db.ts): de fire værdier og signaturen. */
+export function contextParams(p: Principal, key: ContextKey = dbContextKey()): [string, string, string, string, string] {
+  const values = [p.userId ?? "", p.role, p.sessionId ?? "", p.onboardingToken ?? ""] as const;
+  return [...values, signContext(values, key)];
 }

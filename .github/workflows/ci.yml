@@ -80,9 +80,10 @@ jobs:
 
       - name: Databaseroller (abu_owner + abu_app, tilfældige adgangskoder pr. kørsel)
         run: |
-          owner="$(openssl rand -hex 24)"; app="$(openssl rand -hex 24)"
-          echo "::add-mask::$owner"; echo "::add-mask::$app"
+          owner="$(openssl rand -hex 24)"; app="$(openssl rand -hex 24)"; ctx="$(openssl rand -hex 32)"
+          echo "::add-mask::$owner"; echo "::add-mask::$app"; echo "::add-mask::$ctx"
           {
+            echo "DB_CONTEXT_SECRET=$ctx"
             echo "ABU_OWNER_PASSWORD=$owner"
             echo "ABU_APP_PASSWORD=$app"
             echo "DATABASE_URL_MIGRATE=postgresql://abu_owner:$owner@localhost:5432/abu_test"
@@ -94,6 +95,9 @@ jobs:
 
       - name: Migrér testdatabase (som ejeren abu_owner)
         run: npx prisma migrate deploy
+
+      - name: Nøgle til den signerede RLS-kontekst (som ejeren; samme DB_CONTEXT_SECRET som testene)
+        run: npm run db:context-key
 
       - name: Prod-config-guard (enhedstest)
         run: npx vitest run src/lib/env.test.ts

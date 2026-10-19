@@ -38,6 +38,12 @@ describe("opstartstjek af databaserollen (C-1 / RLS fase 0)", () => {
     expect(dbRoleProblems(OWNER).length).toBeGreaterThanOrEqual(3);
   });
 
+  it("signeret kontekst: appen starter ikke i produktion, hvis databasen ikke accepterer dens signatur eller accepterer udviklingsnøglen", () => {
+    expect(dbRoleProblems({ ...APP, contextSigned: true, devKeyAccepted: false })).toEqual([]);
+    expect(dbRoleProblems({ ...APP, contextSigned: false }).join()).toMatch(/npm run db:context-key/);
+    expect(dbRoleProblems({ ...APP, contextSigned: true, devKeyAccepted: true }).join()).toMatch(/Udviklingsnøglen.*--prune/);
+  });
+
   it("produktion: ejeren afvises (appen starter ikke); rollenavnet logges, URL og adgangskode aldrig", async () => {
     const logs: string[] = [];
     const url = "postgresql://abu_owner:SuperHemmeligAdgangskode123456@db/abu";

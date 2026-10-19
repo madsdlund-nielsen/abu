@@ -1,6 +1,6 @@
 import pg from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { asAnon, asSystem, asUser, describeDb, ownerDb, uid } from "../test/db";
+import { asAnon, asSystem, asUser, contextStatement, describeDb, ownerDb, uid } from "../test/db";
 import { pgClientConfig } from "./db-config";
 import { DbContextError, type Principal } from "./db-context";
 import { sha256 } from "./tokens";
@@ -99,12 +99,9 @@ async function rawAs<T>(ctx: Principal | null, fn: (q: (sql: string, params?: un
   try {
     await client.query("BEGIN");
     if (ctx) {
-      await client.query("SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true), set_config('app.session_id', $3, true), set_config('app.onboarding_token', $4, true)", [
-        ctx.userId ?? "",
-        ctx.role,
-        ctx.sessionId ?? "",
-        ctx.onboardingToken ?? "",
-      ]);
+      // Samme signerede kontekst-sætning som appen (src/lib/db.ts) – det en SQL-injektion i den kontekst ville have
+      const [sql, params] = await contextStatement(ctx);
+      await client.query(sql, params);
     }
     let n = 0;
     return await fn(async (sql, params) => {

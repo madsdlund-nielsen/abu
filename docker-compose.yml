@@ -61,7 +61,8 @@ services:
     build:
       context: .
       target: build
-    command: npx prisma migrate deploy
+    # Migrationer og derefter nøglen til den signerede RLS-kontekst (DB_CONTEXT_SECRET fra .env – samme som appens)
+    command: sh -c "npx prisma migrate deploy && npx tsx scripts/db-context-key.ts"
     env_file:
       - path: .env
         required: false

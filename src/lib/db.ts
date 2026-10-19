@@ -12,7 +12,8 @@ export { DEV_DATABASE_URL };
  *
  * Row-Level Security (RLS fase 1–3, README «Row-Level Security»):
  *  - Hver operation kører i en transaktion, hvis første sætning er SET_CONTEXT_SQL med bundne parametre fra principalen
- *    (src/lib/db-context.ts). `set_config(…, true)` er transaktionslokal – sikkert med pgBouncer i transaction-mode.
+ *    (src/lib/db-context.ts) og en HMAC-signatur over dem (`app.ctx`, src/lib/db-context-sign.ts) – databasen afviser en
+ *    kontekst uden gyldig signatur. `set_config(…, true)` er transaktionslokal – sikkert med pgBouncer i transaction-mode.
  *  - Model-operationer og `$queryRaw`/`$executeRaw` uden for en transaktion pakkes af query-udvidelsen i en
  *    batch-transaktion [set_config, forespørgslen]. Værdierne bindes, når operationen startes (i kalderens kontekst), så
  *    Prismas samling af `findUnique`-kald på tværs af requests (DataLoader) aldrig kan blande principaler.
@@ -25,9 +26,13 @@ export { DEV_DATABASE_URL };
  */
 export const SET_CONTEXT_SQL_PREFIX = "SELECT set_config('app.user_id'";
 
+/** `app.ctx` er signaturen over de fire værdier (src/lib/db-context-sign.ts); databasen stoler kun på en gyldig. */
+export const SET_CONTEXT_SQL =
+  "SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true), set_config('app.session_id', $3, true), set_config('app.onboarding_token', $4, true), set_config('app.ctx', $5, true)";
+
 const setContext = (db: { $executeRaw: PrismaClient["$executeRaw"] }, p: Principal) => {
-  const [userId, role, sessionId, onboardingToken] = contextParams(p);
-  return db.$executeRaw`SELECT set_config('app.user_id', ${userId}, true), set_config('app.role', ${role}, true), set_config('app.session_id', ${sessionId}, true), set_config('app.onboarding_token', ${onboardingToken}, true)`;
+  const [userId, role, sessionId, onboardingToken, ctx] = contextParams(p);
+  return db.$executeRaw`SELECT set_config('app.user_id', ${userId}, true), set_config('app.role', ${role}, true), set_config('app.session_id', ${sessionId}, true), set_config('app.onboarding_token', ${onboardingToken}, true), set_config('app.ctx', ${ctx}, true)`;
 };
 
 async function requirePrincipal(what: string): Promise<Principal> {

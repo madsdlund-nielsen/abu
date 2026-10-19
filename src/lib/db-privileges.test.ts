@@ -1,6 +1,6 @@
 import pg from "pg";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { asSystem, describeDb, uid } from "../test/db";
+import { asSystem, contextStatement, describeDb, uid } from "../test/db";
 import { pgClientConfig } from "./db-config";
 import { assertDbRuntimeRole, dbRoleProblems, readDbRoleFacts } from "./db-guard";
 import { EnvConfigError } from "./env";
@@ -91,7 +91,11 @@ describeDb("databaserollen abu_app: kun DML (RLS fase 0)", () => {
     // RLS: uden kontekst afvises alt; i systemkontekst må appen tilføje og læse – men stadig aldrig ændre eller slette
     await client.query("SAVEPOINT ctx");
     expect(await sqlState(client, `INSERT INTO "AuditLog" (id, action, entity, "entityId") VALUES ('${uid("al")}', 'test.rls', 'Test', 'x')`)).toBe("42501");
+    // En håndrullet systemkontekst (som en SQL-injektion kan sætte) giver intet – kun appens signerede kontekst tæller
     await client.query("SELECT set_config('app.role', 'system', true)");
+    expect(await sqlState(client, `INSERT INTO "AuditLog" (id, action, entity, "entityId") VALUES ('${uid("al")}', 'test.rls', 'Test', 'x')`)).toBe("42501");
+    const [sql, params] = await contextStatement({ userId: null, role: "system" });
+    await client.query(sql, params);
     expect(await sqlState(client, `INSERT INTO "AuditLog" (id, action, entity, "entityId") VALUES ('${uid("al")}', 'test.rls', 'Test', 'x')`)).toBeNull();
     expect(await sqlState(client, `SELECT count(*) FROM "AuditLog"`)).toBeNull();
     expect(await sqlState(client, `UPDATE "AuditLog" SET detail = 'ændret' WHERE action = 'test.rls'`)).toBe("42501");
@@ -107,6 +111,15 @@ describeDb("databaserollen abu_app: kun DML (RLS fase 0)", () => {
     await client.query("SET LOCAL statement_timeout = '100ms'");
     await expect(client.query("SELECT pg_sleep(1)")).rejects.toMatchObject({ code: "57014" });
     await client.query("ROLLBACK TO SAVEPOINT t");
+  });
+
+  it("opstartstjekket måler, at databasen accepterer appens signerede kontekst – og ikke en fremmed nøgle", async () => {
+    const facts = await readDbRoleFacts(appUrl);
+    expect(facts).toMatchObject({ contextSigned: true, devKeyAccepted: false });
+    const { deriveContextKey } = await import("./db-context-sign");
+    const wrong = await readDbRoleFacts(appUrl, deriveContextKey("en-anden-hemmelighed-0123456789abcdef"));
+    expect(wrong.contextSigned).toBe(false);
+    expect(dbRoleProblems(wrong).join(" ")).toMatch(/db:context-key/);
   });
 
   it.skipIf(!ownerUrl)("opstartstjekket afviser en forbindelse som ejeren abu_owner i produktion", async () => {

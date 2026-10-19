@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DbUrlError, DEV_DATABASE_URL, parseDbUrl, tlsExemptDbHost, type DbUrlInfo } from "./db-config";
+import { DB_CONTEXT_DEV_SECRET } from "./db-context-sign";
 
 const bool = z
   .enum(["true", "false", "1", "0", ""])
@@ -34,6 +35,12 @@ const schema = z.object({
    */
   MFA_ENCRYPTION_KEY: z.string().default(""),
   MFA_ENCRYPTION_KEY_PREVIOUS: z.string().default(""),
+  /**
+   * Signerer databasekonteksten (RLS): databasen stoler kun på app.role/app.user_id med en gyldig HMAC (src/lib/db-context-sign.ts).
+   * Kræves i produktion (mindst 32 tegn); samme værdi installeres i databasen med `npm run db:context-key` (som ejeren).
+   * Tom uden for produktion = en fast, offentlig udviklingsnøgle.
+   */
+  DB_CONTEXT_SECRET: z.string().default(""),
   /** Kør jobkøen og notifikationer hvert minut i selve app-processen. Slå fra, hvis en ekstern cron kalder /api/cron/process-jobs. */
   IN_PROCESS_SCHEDULER: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
   /** "Deltag i mødet" åbner så mange minutter før mødets start. */
@@ -194,7 +201,7 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   const need = (key: keyof Env & string, why: string) => {
     if (!String(env[key] ?? "").trim()) p.push(`${key} mangler (${why}).`);
   };
-  const secret = (key: "APP_SECRET" | "CRON_SECRET" | "MFA_ENCRYPTION_KEY", why: string) => {
+  const secret = (key: "APP_SECRET" | "CRON_SECRET" | "MFA_ENCRYPTION_KEY" | "DB_CONTEXT_SECRET", why: string) => {
     if (env[key].length < MIN_SECRET_LENGTH) p.push(`${key} skal være mindst ${MIN_SECRET_LENGTH} tilfældige tegn (${why}). Generér med: openssl rand -base64 48`);
   };
 
@@ -209,6 +216,11 @@ export function productionConfigProblems(env: Env, raw: RawEnv): string[] {
   secret("CRON_SECRET", "beskytter /api/cron/process-jobs");
   secret("MFA_ENCRYPTION_KEY", "krypterer hemmeligheder til totrinsbekræftelse");
   if (env.MFA_ENCRYPTION_KEY && env.MFA_ENCRYPTION_KEY === env.APP_SECRET) p.push("MFA_ENCRYPTION_KEY skal være forskellig fra APP_SECRET.");
+  secret("DB_CONTEXT_SECRET", "signerer databasekonteksten for Row-Level Security; installeres i databasen med npm run db:context-key");
+  if (env.DB_CONTEXT_SECRET && [env.APP_SECRET, env.MFA_ENCRYPTION_KEY, env.CRON_SECRET].includes(env.DB_CONTEXT_SECRET)) {
+    p.push("DB_CONTEXT_SECRET skal være forskellig fra APP_SECRET, MFA_ENCRYPTION_KEY og CRON_SECRET.");
+  }
+  if (env.DB_CONTEXT_SECRET === DB_CONTEXT_DEV_SECRET) p.push("DB_CONTEXT_SECRET må ikke være udviklingsnøglen.");
 
   if (env.PAYMENT_PROVIDER === "mock") p.push("PAYMENT_PROVIDER=mock er ikke tilladt i produktion (giver gratis abonnementer).");
   else {
@@ -278,6 +290,7 @@ export function describeConfig(env: Env, appEnv: AppEnv): string {
     `APP_SECRET=${set(env.APP_SECRET)}`,
     `CRON_SECRET=${set(env.CRON_SECRET)}`,
     `MFA_ENCRYPTION_KEY=${set(env.MFA_ENCRYPTION_KEY)}${env.MFA_ENCRYPTION_KEY_PREVIOUS ? " (+forrige)" : ""}`,
+    `DB_CONTEXT_SECRET=${set(env.DB_CONTEXT_SECRET)}`,
     `scheduler=${env.IN_PROCESS_SCHEDULER ? "i processen" : "ekstern cron"}`,
   ].join(" · ");
 }

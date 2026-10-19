@@ -55,6 +55,53 @@ export async function createTestUser(role: Role, data: { name?: string; email?: 
   );
 }
 
+/**
+ * Kontekst-sætningen, som appen sender (signeret, src/lib/db.ts), til rå SQL i tests – som en SQL-injektion i netop
+ * den kontekst. `forged: true` = samme værdier UDEN gyldig signatur (det en angriber kan sætte selv).
+ */
+export async function contextStatement(ctx: Principal, opts: { forged?: boolean } = {}): Promise<[string, string[]]> {
+  const [{ SET_CONTEXT_SQL }, { contextParams }] = await Promise.all([import("@/lib/db"), import("@/lib/db-context")]);
+  const params = contextParams(ctx);
+  if (opts.forged) params[4] = "";
+  return [SET_CONTEXT_SQL, params];
+}
+
+export type RawQuery = (sql: string, params?: unknown[]) => Promise<import("pg").QueryResult>;
+
+/**
+ * Rå SQL som abu_app (TEST_DATABASE_URL) i én transaktion, der rulles tilbage – som en SQL-injektion i appens
+ * forbindelse. `ctx` = appens signerede kontekst for principalen; null = ingen kontekst (angriberen sætter selv det, han
+ * vil, med set_config). Hver sætning kører i et savepoint, så en forventet fejl ikke afbryder resten.
+ */
+export async function rawAsApp<T>(ctx: Principal | null, fn: (q: RawQuery) => Promise<T>): Promise<T> {
+  const [{ default: pg }, { pgClientConfig }] = await Promise.all([import("pg"), import("@/lib/db-config")]);
+  const client = new pg.Client(pgClientConfig(process.env.TEST_DATABASE_URL ?? ""));
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    if (ctx) {
+      const [sql, params] = await contextStatement(ctx);
+      await client.query(sql, params);
+    }
+    let n = 0;
+    return await fn(async (sql, params) => {
+      const sp = `s${n++}`;
+      await client.query(`SAVEPOINT ${sp}`);
+      try {
+        const r = await client.query(sql, params);
+        await client.query(`RELEASE SAVEPOINT ${sp}`);
+        return r;
+      } catch (e) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+        throw e;
+      }
+    });
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    await client.end();
+  }
+}
+
 /** Sletter testbrugere (og deres rækker via kaskaden). */
 export async function deleteTestUsers(ids: string[]) {
   const { prisma } = await import("@/lib/db");

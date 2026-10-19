@@ -1,6 +1,7 @@
 import pg from "pg";
 import { pgClientConfig } from "./db-config";
-import { EnvConfigError, type AppEnv } from "./env";
+import { DB_CONTEXT_DEV_SECRET, deriveContextKey, signContext, type ContextKey } from "./db-context-sign";
+import { EnvConfigError, getEnv, type AppEnv } from "./env";
 
 /**
  * Opstartstjek af databaserollen (RLS fase 0, del af C-1-guarden): i produktion må appen ikke forbinde som superbruger,
@@ -31,6 +32,13 @@ export interface DbRoleFacts {
    */
   tablesWithoutRls: number;
   rlsFunctions: boolean;
+  /**
+   * Signeret kontekst (hærdning efter SECURITY-AUDIT-MFA-RLS.md): accepterer databasen appens signatur
+   * (DB_CONTEXT_SECRET ↔ rls.context_key)? Og accepterer den den offentlige udviklingsnøgle (må ikke ske i produktion)?
+   * undefined = ikke målt (fx enhedstests).
+   */
+  contextSigned?: boolean;
+  devKeyAccepted?: boolean;
 }
 
 export const DB_ROLE_FACTS_SQL = `
@@ -66,21 +74,50 @@ export function dbRoleProblems(f: DbRoleFacts): string[] {
   if (f.schemaCreate) p.push(`${who} kan oprette objekter i schema public (DDL). Kør npm run db:roles.`);
   if (f.tablesWithoutRls > 0) p.push(`${f.tablesWithoutRls} tabel(ler) mangler Row-Level Security (ENABLE + FORCE) – er migrationen 20261020090000_rls_policies kørt (som abu_owner)?`);
   if (!f.rlsFunctions) p.push(`«${f.user}» kan ikke bruge RLS-funktionerne i schema rls – kør migrationerne og npm run db:roles.`);
+  if (f.contextSigned === false) p.push("Databasen accepterer ikke appens signerede kontekst: kør npm run db:context-key (som ejeren) med samme DB_CONTEXT_SECRET som appen.");
+  if (f.devKeyAccepted) p.push("Udviklingsnøglen til den signerede kontekst er installeret i databasen: kør npm run db:context-key -- --prune med produktionens DB_CONTEXT_SECRET.");
   return p;
 }
 
 export function describeDbRole(f: DbRoleFacts): string {
-  return `[db] rolle=${f.user} · TLS=${f.ssl ? "ja" : "nej"} · superbruger=${f.superuser ? "ja" : "nej"} · BYPASSRLS=${f.bypassRls ? "ja" : "nej"} · ejer=${f.ownsUserTable || f.ownedObjects > 0 ? "ja" : "nej"} · RLS=${f.tablesWithoutRls === 0 && f.rlsFunctions ? "ja" : "NEJ"}`;
+  const signed = f.contextSigned === undefined ? "" : ` · signeret kontekst=${f.contextSigned ? "ja" : "NEJ"}${f.devKeyAccepted ? " (udviklingsnøgle accepteret)" : ""}`;
+  return `[db] rolle=${f.user} · TLS=${f.ssl ? "ja" : "nej"} · superbruger=${f.superuser ? "ja" : "nej"} · BYPASSRLS=${f.bypassRls ? "ja" : "nej"} · ejer=${f.ownsUserTable || f.ownedObjects > 0 ? "ja" : "nej"} · RLS=${f.tablesWithoutRls === 0 && f.rlsFunctions ? "ja" : "NEJ"}${signed}`;
 }
 
-/** Én forbindelse (ikke appens pool), én forespørgsel, lukkes igen. Samme TLS-opsætning som appen. */
-export async function readDbRoleFacts(url: string): Promise<DbRoleFacts> {
+/** Rollen, en signeret kontekst får i databasen (null = signaturen accepteres ikke). Én kort transaktion, rulles tilbage. */
+async function signedRole(client: pg.Client, key: ContextKey): Promise<string | null> {
+  const values = ["", "anon", "", ""] as const;
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true), set_config('app.session_id', $3, true), set_config('app.onboarding_token', $4, true), set_config('app.ctx', $5, true)",
+      [...values, signContext(values, key)],
+    );
+    const { rows } = await client.query<{ role: string | null }>("SELECT rls.app_role() AS role");
+    return rows[0]?.role ?? null;
+  } catch {
+    return null;
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+  }
+}
+
+/** Appens nøgle til den signerede kontekst (som db-context.ts): DB_CONTEXT_SECRET, ellers udviklingsnøglen. */
+function appContextKey(): ContextKey {
+  return deriveContextKey(getEnv().DB_CONTEXT_SECRET || DB_CONTEXT_DEV_SECRET);
+}
+
+/** Én forbindelse (ikke appens pool), få forespørgsler, lukkes igen. Samme TLS-opsætning som appen. */
+export async function readDbRoleFacts(url: string, key: ContextKey = appContextKey()): Promise<DbRoleFacts> {
   const client = new pg.Client(pgClientConfig(url));
   await client.connect();
   try {
     const { rows } = await client.query<DbRoleFacts>(DB_ROLE_FACTS_SQL);
     if (!rows[0]) throw new Error("rollen blev ikke fundet i pg_roles");
-    return rows[0];
+    const dev = deriveContextKey(DB_CONTEXT_DEV_SECRET);
+    const contextSigned = (await signedRole(client, key)) === "anon";
+    const devKeyAccepted = dev.kid === key.kid ? false : (await signedRole(client, dev)) === "anon";
+    return { ...rows[0], contextSigned, devKeyAccepted };
   } finally {
     await client.end().catch(() => {});
   }
