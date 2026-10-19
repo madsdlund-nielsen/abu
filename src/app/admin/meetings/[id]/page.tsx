@@ -7,11 +7,14 @@ import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { listSubstituteCandidates } from "@/lib/meeting-admin";
 import { formatDanishDateInput, formatDateTime, formatTime } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Administrer møde" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminMeeting({ params }: { params: Promise<{ id: string }> }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const meeting = await prisma.meeting.findUnique({
     where: { id },

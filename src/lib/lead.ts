@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { audit } from "./audit";
 import { prisma } from "./db";
+import { currentPrincipal, DbContextError } from "./db-context";
 import { userDirectory } from "./user-directory";
 
 /**
@@ -117,6 +118,10 @@ export function proposeBalancing(boards: readonly BalanceBoard[]): BalanceMove[]
 export async function getLeadTagId(db: Db = prisma): Promise<string> {
   const t = await db.tag.findUnique({ where: { systemKey: LEAD_TAG_KEY }, select: { id: true } });
   if (t) return t.id;
+  // Admin-tagget er kun synligt for admin/system (RLS). Ser en anden kontekst det ikke, er det ikke et manglende tag –
+  // opret det ikke (N-1: en admin-side, der renderedes uden ADMIN-principal, endte her med en RLS-fejl).
+  const role = (await currentPrincipal())?.role;
+  if (role !== "ADMIN" && role !== "system") throw new DbContextError(`Lead-tagget er kun synligt for admin/system (kontekst: ${role ?? "ingen"}).`);
   const created = await db.tag.upsert({
     where: { slug: "lead-kvalificeret" },
     update: { kind: "ADMIN", systemKey: LEAD_TAG_KEY, active: true },

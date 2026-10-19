@@ -11,10 +11,13 @@ import { loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
 import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { formatDkk } from "@/lib/pricing";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Rådgivere" };
 
 export default async function AdminAdvisors({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const advisors = await prisma.advisorProfile.findMany({ include: { user: true, tags: { include: { tag: true } } }, orderBy: { user: { name: "asc" } } });
   const bounds = await getPriceBounds();

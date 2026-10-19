@@ -16,6 +16,8 @@ export const metadata: Metadata = { title: "Rediger board" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminSubscription({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const { ok, err } = await flashFrom(searchParams);
   const sub = await prisma.subscription.findUnique({

@@ -4,6 +4,7 @@ import { CONSENT_LABEL, loadLeads, parseLeadFilter, STATUS_LABEL, type LeadConse
 import { formatPhone, toE164 } from "@/lib/phone";
 import { formatDateTime } from "@/lib/time";
 import type { SP } from "@/components/flash";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Leads" };
 
@@ -11,6 +12,8 @@ const CONSENT_BADGE: Record<LeadConsent, string> = { ja: "badge-navy", trukket: 
 const STATUS_BADGE: Record<LeadStatus, string> = { igang: "badge-outline", gennemfoert: "badge-navy", udloebet: "badge-muted" };
 
 export default async function AdminLeads({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const params = await searchParams;
   const filter = parseLeadFilter(params);
   const rows = await loadLeads(filter);

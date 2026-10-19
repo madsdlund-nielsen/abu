@@ -9,10 +9,13 @@ import { getPriceBounds } from "@/lib/advisor-price";
 import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
 import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Rediger rådgiver" };
 
 export default async function AdminAdvisor({ params }: { params: Promise<{ id: string }> }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const [profile, tags, activeSubscriptions] = await Promise.all([
     prisma.advisorProfile.findUnique({ where: { userId: id }, include: { user: true, tags: true } }),

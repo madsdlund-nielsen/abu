@@ -3,11 +3,14 @@ import Link from "next/link";
 import { applyBalancingAction } from "@/app/actions/admin-meetings";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { leadCounts, leadSpread, loadLeadOverview, proposeBalancing } from "@/lib/lead";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Ansvarlige rådgivere" };
 
 /** Fordeling af ansvarsroller, boards uden ansvarlig og et udligningsforslag, der kun anvendes efter bekræftelse. */
 export default async function LeadOverviewPage({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const sp = await searchParams;
   const showProposal = sp.forslag === "1";

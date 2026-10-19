@@ -117,7 +117,7 @@ export async function createSession(userId: string, opts: CreateSessionOptions =
     expires: expiresAt,
   });
   const onboardingToken = onboardingTokenFrom(jar);
-  setRequestPrincipal(opts.mfaPending ? anonPrincipal(id, onboardingToken) : { userId, role, sessionId: id, onboardingToken });
+  setRequestPrincipal(opts.mfaPending ? anonPrincipal(id, onboardingToken) : { userId, role, sessionId: id, onboardingToken }, { transition: true });
 }
 
 export async function destroySession() {
@@ -125,7 +125,7 @@ export async function destroySession() {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) await prisma.session.deleteMany({ where: { id: sha256(token) } });
   jar.delete(SESSION_COOKIE);
-  setRequestPrincipal(anonPrincipal(null, onboardingTokenFrom(jar)));
+  setRequestPrincipal(anonPrincipal(null, onboardingTokenFrom(jar)), { transition: true });
 }
 
 // --------------------------------------------------------------------------------------------- RLS-principal

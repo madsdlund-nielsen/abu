@@ -7,10 +7,13 @@ import type { CompanyInfo } from "@/lib/cvr/types";
 import type { TestSnapshot } from "@/lib/onboarding/snapshot";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
 import { formatDate } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Kunde" };
 
 export default async function AdminCustomer({ params }: { params: Promise<{ id: string }> }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const c = await prisma.customerProfile.findUnique({
     where: { userId: id },

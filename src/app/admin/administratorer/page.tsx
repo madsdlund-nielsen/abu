@@ -4,7 +4,7 @@ import { deactivateAdminAction, resetAdminMfaAction, revokeAdminDevicesAction, s
 import { AdminInviteForm, ResendAdminInviteButton } from "@/components/admin/admin-invite";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { listAdmins, type AdminRow } from "@/lib/admin-users";
-import { isMfaFresh, MFA_REVERIFY_WINDOW_MS, requireSession } from "@/lib/auth";
+import { isMfaFresh, MFA_REVERIFY_WINDOW_MS, requireSession, requireRole } from "@/lib/auth";
 import { getTrustedDeviceDays } from "@/lib/mfa/service";
 import { TRUSTED_DEVICE_DAYS_MAX } from "@/lib/mfa/trusted-device";
 import { formatDate, formatDateTime, formatTime } from "@/lib/time";
@@ -22,6 +22,8 @@ const REVERIFY = `/mfa/bekraeft?next=${encodeURIComponent("/admin/administratore
 
 /** Platform-administratorer: liste, invitation, ny invitation, deaktivering, nulstilling af MFA og betroede enheder. */
 export default async function AdminsPage({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { user: me, session } = await requireSession();
   const { ok, err } = await flashFrom(searchParams);
   const [admins, days] = await Promise.all([listAdmins(), getTrustedDeviceDays()]);

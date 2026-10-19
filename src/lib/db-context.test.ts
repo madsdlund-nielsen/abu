@@ -1,7 +1,18 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { contextParams, currentPrincipal, DbContextError, explicitPrincipal, runAsPrincipal, setRequestPrincipalResolver, SYSTEM_REASON_PATTERN, withSystemContext } from "./db-context";
+import { workAsyncStorage } from "next/dist/server/app-render/work-async-storage.external";
+import {
+  contextParams,
+  currentPrincipal,
+  DbContextError,
+  explicitPrincipal,
+  NEXT_WORK_STORE_PROBE,
+  runAsPrincipal,
+  setRequestPrincipalResolver,
+  SYSTEM_REASON_PATTERN,
+  withSystemContext,
+} from "./db-context";
 import { deriveContextKey, signContext } from "./db-context-sign";
 import { TRIGGERS } from "./notifications/triggers";
 
@@ -201,6 +212,28 @@ describe("Prisma-udvidelsen og adapter-vagten (uden database)", () => {
     await good.queryRaw({ sql: 'SELECT * FROM "Meeting"', args: [] });
     await good.executeRaw({ sql: "COMMIT", args: [] });
     expect(sent).toEqual([`${SET_CONTEXT_SQL_PREFIX}, $1, true)`, 'SELECT * FROM "Meeting"', "COMMIT"]);
+  });
+});
+
+describe("N-1: request-principalen (Next.js' work store) er fail-closed", () => {
+  it("Next.js' work store: modulet findes og har getStore/run, og Next er den låste major (fejler højt ved en opgradering)", async () => {
+    // Afhængigheden af en intern Next-API er bevidst (db-context.ts). Flytter eller ændrer modulet sig, fejler denne
+    // test – og db-context.ts kaster DbContextError i stedet for stille at miste huskningen pr. request.
+    expect(NEXT_WORK_STORE_PROBE.ok).toBe(true);
+    expect(typeof workAsyncStorage.getStore).toBe("function");
+    expect(typeof workAsyncStorage.run).toBe("function");
+    const pkg = JSON.parse(readFileSync(path.join(root, "node_modules/next/package.json"), "utf8")) as { version: string };
+    expect(pkg.version.split(".")[0]).toBe("16");
+    // Samme objekt som Next selv bruger (cookies-adapteren læser workAsyncStorage fra samme .external-modul)
+    const adapter = readFileSync(path.join(root, "node_modules/next/dist/server/web/spec-extension/adapters/request-cookies.js"), "utf8");
+    expect(adapter).toContain("work-async-storage.external");
+  });
+
+  it("hver admin-side kræver selv ADMIN (layout og side renderes parallelt – layoutets tjek beskytter ikke sidens forespørgsler)", () => {
+    const pages = files("src/app/admin").filter((f) => f.endsWith("/page.tsx"));
+    expect(pages.length).toBeGreaterThan(10);
+    const missing = pages.filter((f) => !/export default async function \w+\([^)]*\)?[^{]*\{\s*(\/\/[^\n]*\n\s*)*await requireRole\("ADMIN"\);/.test(readFileSync(path.join(root, f), "utf8")));
+    expect(missing).toEqual([]);
   });
 });
 

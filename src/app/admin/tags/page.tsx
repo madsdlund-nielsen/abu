@@ -2,10 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { TagsTable } from "@/components/cms/tags-table";
 import { loadCmsData } from "@/lib/onboarding/cms-data";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Tags" };
 
 export default async function AdminTags() {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { tags } = await loadCmsData({ includeAdmin: true });
   return (
     <div>

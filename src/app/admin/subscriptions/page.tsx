@@ -6,10 +6,13 @@ import { SubStatusBadge } from "@/components/ui";
 import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Abonnementer" };
 
 export default async function AdminSubscriptions({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const subs = await prisma.subscription.findMany({
     include: { customer: true, advisors: { include: { advisor: { include: { user: true } } } } },

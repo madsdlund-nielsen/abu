@@ -9,10 +9,13 @@ import { loadLeadOverview } from "@/lib/lead";
 import { meetingsBelowBoard } from "@/lib/meeting-admin";
 import { formatDateTime } from "@/lib/time";
 import { formatDkk } from "@/lib/pricing";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminHome({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const [advisors, customers, active, upcoming, pendingJobs, failedJobs, deletions, mrr, alerts, belowBoard, leadOverview, admins] = await Promise.all([
     prisma.advisorProfile.count(),
