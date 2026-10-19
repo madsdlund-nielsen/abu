@@ -180,6 +180,27 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
     await rawAsApp(as(w.admin), async (q) => expect((await q(`UPDATE "MarketingConsent" SET "smsWithdrawnAt" = now() WHERE id = $1`, [w.victimConsent.id])).rowCount).toBe(1));
   });
 
+  // ------------------------------------------------------------------------------------------------------------ M-2
+  it("M-2: en kunde kan ikke indsætte en audit-række uden aktør (som en systemhændelse) – kun med sit eget id", async () => {
+    const ins = `INSERT INTO "AuditLog" (id, "userId", action, entity, "entityId") VALUES ($1, $2, 'rem.admin.bootstrap_create', 'User', 'x')`;
+    await rawAsApp(as(w.cA), async (q) => {
+      await expect(q(ins, [uid("a"), null])).rejects.toMatchObject({ code: "42501" }); // rapportens bevis
+      await expect(q(ins, [uid("a"), w.cB.id])).rejects.toMatchObject({ code: "42501" });
+      expect((await q(ins, [uid("a"), w.cA.id])).rowCount).toBe(1);
+    });
+    await rawAsApp({ userId: null, role: "anon" }, async (q) => await expect(q(ins, [uid("a"), null])).rejects.toMatchObject({ code: "42501" }));
+    await rawAsApp({ userId: null, role: "system" }, async (q) => expect((await q(ins, [uid("a"), null])).rowCount).toBe(1));
+    // Appen: audit(null) uden for systemkonteksten skrives ikke (alarm i stedet); i systemkonteksten skrives den
+    const { audit } = await import("./audit");
+    const { prisma } = await import("./db");
+    const tag = uid("rem.null");
+    await asUser(w.cA, () => audit(null, tag, "Test", "x"));
+    await asSystem(() => audit(null, `${tag}.sys`, "Test", "x"));
+    expect(await asSystem(() => prisma.auditLog.count({ where: { action: tag } }))).toBe(0);
+    expect(await asSystem(() => prisma.auditLog.count({ where: { action: `${tag}.sys`, userId: null } }))).toBe(1);
+    await (await ownerDb()).auditLog.deleteMany({ where: { action: { startsWith: tag } } });
+  });
+
   // ------------------------------------------------------------------------------------------------- Signeret kontekst
   it("forfalsket kontekst: set_config('app.role','system') fra abu_app giver ingenting – kun appens signerede kontekst tæller", async () => {
     const count = `SELECT (SELECT count(*)::int FROM "User") AS users, (SELECT count(*)::int FROM "Subscription") AS subs, rls.app_role() AS role`;

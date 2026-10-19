@@ -150,19 +150,19 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     const { ensureLead, loadLeadOverview, reassignLeadsFrom } = await import("./lead");
     const [a, b, plain] = [await advisor("Aase", true), await advisor("Bent", true), await advisor("Carl", false)];
     const s = await board([a, b, plain]);
-    await asCustomerOf(s, () => ensureLead(s.id, "created"));
+    await asCustomerOf(s, () => ensureLead(s.id, "created", s.customerId));
     const first = (await leadOf(s.id))!;
     expect([a, b]).toContain(first);
     const second = first === a ? b : a;
     // Deaktivering og tags ændres af admin (setAdvisorActive / updateAdvisorAction)
     await asAdmin(async () => {
       await prisma.advisorProfile.update({ where: { userId: first }, data: { active: false } });
-      await reassignLeadsFrom(first, "deactivated");
+      await reassignLeadsFrom(first, "deactivated", admin.id);
     });
     expect(await leadOf(s.id)).toBe(second);
     await asAdmin(async () => {
       await prisma.advisorTag.delete({ where: { advisorId_tagId: { advisorId: second, tagId: leadTag } } });
-      await reassignLeadsFrom(second, "tag_removed");
+      await reassignLeadsFrom(second, "tag_removed", admin.id);
     });
     expect(await leadOf(s.id)).toBeNull();
     expect((await asAdmin(() => loadLeadOverview())).withoutLead.find((x) => x.subscriptionId === s.id)).toMatchObject({ hasEligible: false });
@@ -173,7 +173,7 @@ describeDb("ansvarlig rådgiver i databasen", () => {
     const { applyBalancing, ensureLead, setLeadManually } = await import("./lead");
     const [a, b, plain] = [await advisor("Ane", true), await advisor("Bjørn", true), await advisor("Ikke", false)];
     const s = await board([a, b, plain]);
-    await asCustomerOf(s, () => ensureLead(s.id, "created"));
+    await asCustomerOf(s, () => ensureLead(s.id, "created", s.customerId));
     await asAdmin(async () => {
       expect(await setLeadManually(admin.id, s.id, plain)).toEqual({ ok: false, error: expect.stringMatching(/kan ikke være ansvarlig/) });
       const other = (await leadOf(s.id)) === a ? b : a;

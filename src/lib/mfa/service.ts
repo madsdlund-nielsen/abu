@@ -289,12 +289,14 @@ export async function setTrustedDeviceDays(days: number): Promise<number> {
  */
 export async function createTrustedDevice(userId: string, meta: { userAgent: string | null; ip: string | null }, days: number, now = new Date()) {
   const token = randomToken();
-  const device = await withSystemContext("auth.trusted_device", () =>
-    prisma.trustedDevice.create({
+  // Audit i samme systemkontekst: brugeren er endnu ikke (fuldt) logget ind i denne request (M-2: aktøren er brugeren selv)
+  const device = await withSystemContext("auth.trusted_device", async () => {
+    const d = await prisma.trustedDevice.create({
       data: { userId, tokenHash: sha256(token), label: deviceLabel(meta.userAgent), ipPrefix: ipPrefix(meta.ip), createdAt: now, expiresAt: trustedDeviceExpiry(now, days) },
-    }),
-  );
-  await audit(userId, "auth.device_trusted", "TrustedDevice", device.id, `${device.label}; til ${device.expiresAt.toISOString()}`);
+    });
+    await audit(userId, "auth.device_trusted", "TrustedDevice", d.id, `${d.label}; til ${d.expiresAt.toISOString()}`);
+    return d;
+  });
   return { token, device };
 }
 
