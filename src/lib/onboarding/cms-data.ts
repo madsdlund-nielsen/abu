@@ -1,16 +1,22 @@
 import { prisma } from "../db";
+import { LEAD_TAG_KEY } from "../lead";
 import type { CmsAdvisor, CmsQuestion, CmsTag } from "./cms-types";
 
-export async function loadCmsData(): Promise<{ questions: CmsQuestion[]; tags: CmsTag[]; advisors: CmsAdvisor[] }> {
+/**
+ * Data til onboarding-CMS'et og tag-siden. Som standard kun kompetence-tags (admin-tags bruges aldrig i matching, vægte
+ * eller dækning); `includeAdmin` tager også de interne tags med (kun /admin/tags).
+ */
+export async function loadCmsData(opts: { includeAdmin?: boolean } = {}): Promise<{ questions: CmsQuestion[]; tags: CmsTag[]; advisors: CmsAdvisor[] }> {
   const [questions, tags, advisors, weightCounts] = await Promise.all([
     prisma.onboardingQuestion.findMany({
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       include: { answers: { orderBy: { sortOrder: "asc" }, include: { weights: true } } },
     }),
-    prisma.tag.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
-    prisma.advisorProfile.findMany({ where: { active: true }, include: { user: true, tags: true }, orderBy: { user: { name: "asc" } } }),
+    prisma.tag.findMany({ where: opts.includeAdmin ? {} : { kind: "COMPETENCE" }, orderBy: [{ kind: "asc" }, { sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.advisorProfile.findMany({ where: { active: true }, include: { user: true, tags: { include: { tag: { select: { systemKey: true } } } } }, orderBy: { user: { name: "asc" } } }),
     prisma.answerTagWeight.groupBy({ by: ["tagId"], _count: { _all: true } }),
   ]);
+  const competence = new Set(tags.filter((t) => t.kind === "COMPETENCE").map((t) => t.id));
   const answersByTag = new Map(weightCounts.map((w) => [w.tagId, w._count._all]));
   const advisorsByTag = new Map<string, number>();
   for (const a of advisors) for (const t of a.tags) advisorsByTag.set(t.tagId, (advisorsByTag.get(t.tagId) ?? 0) + 1);
@@ -34,9 +40,11 @@ export async function loadCmsData(): Promise<{ questions: CmsQuestion[]; tags: C
       name: t.name,
       description: t.description ?? "",
       active: t.active,
+      kind: t.kind,
+      system: t.systemKey !== null,
       advisors: advisorsByTag.get(t.id) ?? 0,
       answers: answersByTag.get(t.id) ?? 0,
     })),
-    advisors: advisors.map((a) => ({ id: a.userId, name: a.user.name, priceDkk: a.pricePerMeetingDkk, tagIds: a.tags.map((t) => t.tagId) })),
+    advisors: advisors.map((a) => ({ id: a.userId, name: a.user.name, priceDkk: a.pricePerMeetingDkk, tagIds: a.tags.map((t) => t.tagId).filter((id) => competence.has(id)), leadEligible: a.tags.some((t) => t.tag.systemKey === LEAD_TAG_KEY) })),
   };
 }

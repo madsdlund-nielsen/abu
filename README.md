@@ -14,24 +14,43 @@ betaler en fast månedspris, booker møder online og får transskription og resu
 Forudsætninger: Node 22, npm 10 og en Postgres 16 (fx via Docker).
 
 ```bash
-docker run -d --name abu-pg -e POSTGRES_PASSWORD=abu -e POSTGRES_USER=abu -e POSTGRES_DB=abu -p 5432:5432 postgres:16
+docker run -d --name abu-pg -e POSTGRES_PASSWORD="$(openssl rand -hex 32)" -e POSTGRES_DB=abu -p 5432:5432 postgres:16
+docker exec abu-pg createdb -U postgres abu_test   # valgfrit: testdatabase til DB-tests
 
 cp .env.example .env          # alle integrationer er "mock" som standard
+#  .env: sæt ABU_OWNER_PASSWORD og ABU_APP_PASSWORD (openssl rand -hex 32), indsæt dem i DATABASE_URL (abu_app) og
+#  DATABASE_URL_MIGRATE (abu_owner), og sæt DATABASE_URL_PROVISION til superbrugeren (postgres + adgangskoden ovenfor).
 npm install
-npx prisma migrate deploy     # opretter tabellerne
-npm run db:seed               # demodata
-npm run dev                   # http://localhost:3000
+npm run db:roles              # opretter rollerne abu_owner/abu_app og rettighederne (én gang pr. database; idempotent)
+npx prisma migrate deploy     # opretter tabellerne – som ejeren abu_owner (DATABASE_URL_MIGRATE)
+npm run db:context-key        # nøglen til den signerede RLS-kontekst (som abu_owner; lokalt udviklingsnøglen, se Row-Level Security)
+npm run db:seed               # demodata – også som abu_owner
+npm run dev                   # http://localhost:3000 – appen kører som abu_app (kun DML)
 ```
+
+Appen forbinder aldrig som ejer eller superbruger: se *Database og roller* under Deployment.
 
 Seed-brugere:
 
 | Rolle | Login | Adgangskode |
 |---|---|---|
-| Admin | `admin@abu.local` | `Admin12345!` |
+| Admin | `admin@abu.local` | `Admin12345!` + kode fra totrinsbekræftelse (se nedenfor) |
 | Kunde (aktivt abonnement: 3 rådgivere, hver 8. uge) | `kunde@abu.local` | `Kunde12345!` |
 | Rådgivere (8 stk., fx `mette.lindberg@abu.local`) | se `prisma/seed-data.ts` | `Raadgiver123!` |
 
-Seed opretter også danske standardtekster og -regler til notifikationer (21 skabeloner, 21 regler).
+Seed opretter også danske standardtekster og -regler til notifikationer (24 skabeloner, 24 regler), og fire rådgivere får det interne tag «Lead-kvalificeret».
+
+**Totrinsbekræftelse for seed-admin (kun lokal udvikling).** Administratorer skal altid bruge totrinsbekræftelse. Seed giver
+`admin@abu.local` MFA med en **kendt, kun-lokal TOTP-hemmelighed**, så den kan logge ind lokalt og i Playwright uden opsætning:
+
+```
+ABUDEVTOTPSECRETONLYFORLOCALDEV2
+```
+
+Tilføj den i en godkendelses-app («Indtast nøgle», tidsbaseret, 6 cifre, 30 sek.), eller beregn koden i en test (RFC 6238, SHA-1).
+Hemmeligheden er offentlig og må kun bruges til demodata; seed afvises i produktion (H-1), og en produktions-admin oprettes med
+`npm run create-admin` og opsætter sin egen hemmelighed ved første login. Seed-admin har ingen gendannelseskoder (lav dem under
+*Konto → Totrinsbekræftelse*). Rådgivere og kunden i seed har ikke MFA (valgfrit for dem).
 
 Hele flowet virker i mock-tilstand: onboarding (`/kom-i-gang`) → testbetaling (`/subscribe/mock-betaling`, ét klik) → book → åbn
 mødet → upload optagelse (som rådgiver/admin) → transskription og resumé vises på mødesiden. Mails og SMS skrives **redigeret**
@@ -41,14 +60,17 @@ slet ikke. Invitationslinket vises i stedet for admin i UI'et, når e-mail køre
 Stakken er Next.js 16 (App Router, `src/proxy.ts`), React 19 og Prisma 7 med driver-adapteren `@prisma/adapter-pg`
 (forbindelsen konfigureres i `prisma.config.ts`; Prisma læser ikke længere `.env` af sig selv – det gør `prisma.config.ts`).
 Alle versioner er låst i `package.json`; installér med `npm ci`.
+Billedbehandlingen bruger `sharp` (open source, libvips) med en fast version; `npm ci` henter den færdigbyggede binær til
+platformen (`@img/sharp-linux-x64` + libvips på `node:22-bookworm-slim` og i CI), så der skal ikke installeres systempakker.
 
 Seed er **kun til udvikling**: det afvises, når `NODE_ENV=production` eller `APP_ENV=production` (H-1).
 
 Med Docker Compose (Postgres + migration + app) lokalt:
 
 ```bash
-cp .env.example .env          # sæt APP_ENV=development i .env for at køre lokalt med mock-udbydere
-docker compose up --build
+cp .env.example .env          # sæt APP_ENV=development i .env for at køre lokalt med mock-udbydere, og
+                              # POSTGRES_PASSWORD, ABU_OWNER_PASSWORD, ABU_APP_PASSWORD (openssl rand -hex 32)
+docker compose up --build     # stopper med en fejl, hvis en af de tre adgangskoder mangler
 docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   # valgfrit: demodata (kun lokalt)
 ```
 
@@ -61,10 +83,13 @@ docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts   
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Enheds- og integrationstests (vitest). DB-tests kører kun med `TEST_DATABASE_URL` (en separat testdatabase, migreret med `prisma migrate deploy`); ellers springes de over |
-| `npm run db:migrate` | Ny migration under udvikling |
-| `npm run db:deploy` | Anvend migrationer (produktion) |
-| `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) |
-| `npm run create-admin -- --email … --name …` | Opretter første administrator og udskriver et engangslink til at vælge adgangskode |
+| `npm run db:roles` | Opretter/opdaterer databaserollerne `abu_owner`, `abu_app` og `abu_jobs` og deres rettigheder (`prisma/roles.sql`) i databasen i `DATABASE_URL_PROVISION` (superbruger); adgangskoder fra `ABU_*_PASSWORD`, sendt som SCRAM-verifikatorer. Idempotent |
+| `npm run db:context-key` | Installerer nøglen til den signerede databasekontekst (`DB_CONTEXT_SECRET`, uden for produktion udviklingsnøglen) i `rls.context_key` – som `abu_owner` (`DATABASE_URL_MIGRATE`), efter migrationerne. Idempotent; `-- --prune` fjerner gamle nøgler efter en rotation |
+| `npm run db:migrate` | Ny migration under udvikling (som `abu_owner`; Prismas skyggedatabase kræver lokalt `ALTER ROLE abu_owner CREATEDB`) |
+| `npm run db:deploy` | Anvend migrationer (produktion) – som `abu_owner` via `DATABASE_URL_MIGRATE` |
+| `npm run db:seed` | Seed-data (kun udvikling; afvises i produktion) – som `abu_owner` |
+| `npm run create-admin -- --email … --name …` | (Som `abu_owner`.) Opretter første administrator og udskriver et engangslink til at vælge adgangskode (uden flag spørger scriptet i terminalen; `--reset` nyt link, `--reset-mfa` nødprocedure) |
+| `npm run storage:check` | Tjekker objektlageret med appens konfiguration: skriver, læser og sletter et testobjekt; med S3 også privat bucket og CORS (se `docs/HETZNER-S3.md`) |
 
 ## Onboarding og CMS
 
@@ -76,9 +101,10 @@ og testsvar som snapshot) og et afventende abonnement, og kunden sendes til beta
 Eksisterende kunder ændrer board og frekvens under *Konto → Abonnement* med samme board-builder.
 
 **Matching (`src/lib/matching.ts`, ren funktion).** Hvert svar har tag-vægte (1-5) og evt. `boardSize` (2/3/4). Kundens behov = sum af vægte pr. tag.
-Rådgiverens score = sum af behov for hans tags. Boardet vælges grådigt: højeste score først; tags boardet allerede dækker nedskrives til 30 % for de
+Rådgiverens score = sum af behov for hans kompetence-tags. Boardet vælges grådigt: højeste score først; tags boardet allerede dækker nedskrives til 30 % for de
 næste valg (komplementaritet); lige score → laveste pris → alfabetisk. Størrelse: største `boardSize`, ellers tilføjes rådgivere til mindst 80 % af
-behovet er dækket (2-4; standard 3 uden behov). Kun aktive rådgivere med mindst ét tag tæller med.
+behovet er dækket (2-4; standard 3 uden behov). Kun aktive rådgivere med mindst ét kompetence-tag tæller med. Har boardet ingen rådgiver, der kan være ansvarlig, erstattes medlemmet med det
+mindste bidrag af den bedst scorende kvalificerede rådgiver.
 
 *Eksempel (seed-data):* en kunde svarer «vækste hurtigere», «skalering», «nye markeder», mangler «salg og marketing» + «teknologi», 10-49 ansatte.
 Behov: Vækst & salg 13, Marketing 7, Digitalisering 6, Ledelse 5, Internationalisering 5, Strategi 2, HR 2, Økonomistyring 1 (i alt 41).
@@ -87,7 +113,7 @@ dækningen 76 % (< 80 %), så Søren (Ledelse + HR = 7) tilføjes. Resultat: Lou
 
 **CMS (admin).** `/admin/onboarding`: spørgsmålsliste (træk i grebet eller brug tastaturet til at sortere) og redigering af spørgsmål, svar, tag-vægter
 (chips med vægt 1-5) og boardstørrelse; advarsler vises, hvor de gælder, og som sum øverst; *Forhåndsvis test* viser forslag, scores og begrundelse uden at
-gemme noget. `/admin/tags`: tags med brugstal og inline omdøbning. `/admin/advisors/[id]`: pris pr. møde, tags og aktiv. `/admin/customers/[id]`:
+gemme noget. `/admin/tags`: kompetence-tags og interne admin-tags med brugstal, typefilter og inline omdøbning. `/admin/advisors/[id]`: status og aktivering, pris pr. møde, tags (interne i en separat gruppe) og profil. `/admin/customers/[id]`:
 CVR-data og testsvar. Alle ændringer skrives til audit-loggen og gælder straks for nye onboardinger; gennemførte tests gemmer et snapshot af teksterne.
 
 **CVR-opslag (`src/lib/cvr/`).** `CVR_PROVIDER=mock|virk|cvrapi` (standard `mock`: fiktive virksomheder; CVR `34000107` er ophørt, `35000100` findes ikke).
@@ -151,16 +177,24 @@ src/
     slots.ts           Ren funktion: ledige tider for et board (testet)
     quota.ts           Kvoteperioder, aflysningsregler (testet)
     booking.ts         Booking/aflysning med revalidering i DB-transaktion (advisory locks)
-    auth.ts            Hashing (bcryptjs), DB-sessioner (SHA-256 af tilfældigt token), rate limit, invite/reset-tokens
+    db.ts, db-config.ts  Prisma-klient (pg-adapter): pool, TLS (sslmode + DATABASE_SSL_CA), timeouts og RLS-udvidelsen (kontekst pr. transaktion)
+    db-context.ts      Principalen (AsyncLocalStorage): bruger/rolle/session pr. request, withSystemContext(reason, fn) til jobs m.m.
+    user-directory.ts  Navne/roller på andre personer via rls.user_directory (ingen adgang til deres User-rækker)
+    db-guard.ts        Opstartstjek: appen må ikke køre som superbruger/ejer/BYPASSRLS, og alle tabeller skal have RLS (fase 0–3)
+    auth.ts            Hashing (bcryptjs), DB-sessioner (SHA-256 af tilfældigt token) med MFA-trin, re-verifikation, invite/reset-tokens
+    mfa/               TOTP (RFC 6238), AES-256-GCM-kryptering, gendannelseskoder, betroede enheder; sign-in.ts: login-forløbet
+    admin-users.ts     Administratorer: invitation, deaktivering (sidste-admin-værn), nulstilling af MFA
     jobs.ts, pipeline.ts  DB-baseret jobkø (FOR UPDATE SKIP LOCKED) og transskriptions-pipeline
     payments/ video/ transcription/ messaging/ storage/   Adaptere med mock-implementering (messaging: e-mail + SMS, inMobile)
+    avatar*.ts         Rådgiverfotos: validering, sharp-behandling, lagring, adgang og servering (/api/avatar)
     notifications/     Udløsere, regler, skabeloner, planlægning (ren), udsendelse, afmelding, log
     content/           Redigerbare onboarding-tekster (standarder + ContentBlock)
     meeting-join.ts, meeting-admin.ts, board-admin.ts, substitutes.ts, leads.ts   Mødevindue, admin-ændringer, leads
   proxy.ts             Letvægts-gate (kræver session-cookie, ?next= til login) + sikkerhedsheaders (CSP med nonce, HSTS,
                        Permissions-Policy); rollekontrol sker i layouts/sider
   instrumentation.ts   Fail-closed opstartstjek af konfigurationen (C-1) og planlæggeren
-prisma/                schema, migrationer, seed
+prisma/                schema, migrationer, seed, roles.sql (databaseroller og rettigheder)
+docker/postgres/initdb/  opretter rollerne ved første start af compose-Postgres
 ```
 
 **Adaptere.** Hver integration har et interface og en `mock`-implementering, valgt via miljøvariabel:
@@ -172,8 +206,97 @@ tilfældigt token, og databasen gemmer kun dets SHA-256. Cookien er `httpOnly`, 
 Rådgivere inviteres af admin og vælger selv adgangskode via et engangslink (7 dage). Login spærres pr. konto i databasen efter
 5 forkerte forsøg (15 min, derefter fordoblet, højst 24 t) uanset IP; derudover er der rate limits pr. betroet klient-IP
 (`TRUSTED_PROXY_HOPS`). Alle rate limits ligger i Postgres-tabellen `RateLimit`, så de overlever genstart og deles mellem instanser.
-Booking og «opret rådgiver» er idempotente (formular-nøgle), så dobbeltklik giver samme resultat. Rådgivere oprettes inaktive og
-aktiveres manuelt af admin (tjekliste: invitation accepteret, tags, tilgængelighed, bio, pris 500-25.000 kr.).
+Booking og «opret rådgiver» er idempotente (formular-nøgle), så dobbeltklik giver samme resultat.
+
+**Totrinsbekræftelse (MFA, `src/lib/mfa/`).** TOTP efter RFC 6238 (HMAC-SHA1, 6 cifre, 30 sek., ±1 trin) implementeret med Nodes
+`crypto` (testet mod RFC 4226/6238-vektorerne) – virker med Authy, Google Authenticator, Microsoft Authenticator og 1Password.
+- **Påkrævet for ADMIN, valgfri for rådgivere og kunder** (*Konto → Totrinsbekræftelse*). Efter adgangskoden får sessionen trinnet
+  «adgangskode godkendt, kode mangler» (`Session.mfaPending`, 15 min). Den kan kun nå `/mfa`, `/mfa/opsaet` og log ud:
+  `requireUser`/`requireRole` (og dermed alle sider, server actions og API-ruter) afviser den – ikke kun via omdirigering. En admin
+  uden MFA (ny, nulstillet eller ældre session) sendes til `/mfa/opsaet` og kan intet andet, før opsætningen er bekræftet.
+- **Opsætning:** 160 bit tilfældig hemmelighed, QR-kode tegnet lokalt som SVG med `qrcode` (låst version, ingen ekstern tjeneste, CSP
+  uændret), hemmeligheden også som tekst i grupper, otpauth-URI med issuer «Advisory Board Unlimited» og e-mailen. MFA slås først til
+  efter en gyldig kode. Derefter vises 10 gendannelseskoder én gang (kun SHA-256 gemmes) med «Download (.txt)» og «Jeg har gemt dem».
+- **Opbevaring:** hemmeligheden krypteres med AES-256-GCM (nøgle afledt med HKDF af `MFA_ENCRYPTION_KEY`, bruger-id som associated
+  data) og et nøgle-id i værdien, så nøglen kan roteres: ny nøgle i `MFA_ENCRYPTION_KEY`, den gamle i `MFA_ENCRYPTION_KEY_PREVIOUS`;
+  hemmeligheder krypteres om ved næste brug. `MFA_ENCRYPTION_KEY` kræves i produktion (C-1-guarden).
+- **Værn:** et brugt tidstrin kan ikke bruges igen (replay, atomisk), rate limit pr. bruger og pr. betroet klient-IP i Postgres-lageret,
+  og kontoen spærres efter 5 forkerte koder med samme eskalering som login (H-2), men med egen tæller, så et korrekt password ikke
+  nulstiller den.
+- **Login:** kode (auto-send ved 6 cifre, `autocomplete="one-time-code"`) eller gendannelseskode. Sessionen roteres (nyt token), når
+  koden er godkendt. Antal resterende gendannelseskoder vises under Konto, og nye kan laves med en aktuel kode.
+- **«Husk denne enhed i 30 dage»:** et tilfældigt token i cookien `abu_device` (httpOnly, Secure i produktion, SameSite=Lax); kun dets
+  SHA-256 gemmes i `TrustedDevice` med grov beskrivelse («Chrome på macOS») og omtrentlig IP (/24 eller /48). Adgangskoden kræves
+  altid; kun koden springes over. Udløbet forlænges **ikke** ved brug. Varigheden sættes i *Admin → Administratorer* (standard og højst
+  30 dage, 0 = slået fra; en lavere værdi gælder straks). Brugeren ser og fjerner sine enheder under Konto. Alle enheder tilbagekaldes
+  ved skift/nulstilling af adgangskode, nulstilling eller fravalg af MFA, deaktivering og sletning af kontoen.
+- **Følsomme admin-handlinger** kræver en kode, der højst er 15 minutter gammel i den aktuelle session (`requireFreshMfa`, ellers
+  `/mfa/bekraeft`): invitere, deaktivere og nulstille MFA for administratorer, fjerne en administrators enheder, varigheden for betroede
+  enheder, notifikationsindstillinger, sletning af konti og anvendelse af udligningsforslaget for ansvarlige rådgivere. Et login fra en
+  betroet enhed tæller ikke som frisk.
+- **Audit-log:** `auth.mfa_enabled`, `auth.mfa_disabled`, `auth.mfa_failed`, `auth.lockout`, `auth.mfa_recovery_used`,
+  `auth.mfa_recovery_regenerated`, `auth.mfa_login`, `auth.mfa_reverified`, `auth.device_trusted`, `auth.device_revoked`,
+  `auth.devices_revoked`, `auth.login_trusted_device`.
+- **GDPR:** eksporten viser, om MFA er slået til, og listen over betroede enheder (ingen hemmeligheder, hashes eller tokens);
+  sletning fjerner al MFA-data.
+
+**Administratorer (`/admin/administratorer`, også via Konto og admin-forsiden).** Liste med navn, e-mail, status
+(aktiv/inviteret/deaktiveret), MFA-status, seneste login og antal betroede enheder. Admin kan invitere en administrator (navn + e-mail:
+ADMIN uden adgangskode + invitationsmail via notifikationerne, skabelonen «Administrator inviteret» – låst og redigerbar som de andre;
+linket vises også for den inviterende, når e-mail kører i konsol-tilstand), sende en ny invitation, deaktivere (sessioner, betroede
+enheder og ubrugte links tilbagekaldes), nulstille en anden administrators MFA og fjerne en administrators betroede enheder. Man kan ikke
+deaktivere sig selv eller den sidste aktive administrator (også ved samtidige forsøg: advisory lock). En deaktiveret administrator
+genaktiveres ved at invitere e-mailen igen. Alle handlinger er kun for ADMIN på serveren, kræver frisk kode, er rate-limited og audit-logges.
+
+**Rådgivere: aktivering og profil (`src/lib/advisor-activation.ts`, `advisor-readiness.ts`).** Rådgivere oprettes inaktive og aktiveres
+manuelt af admin med en dedikeret knap («Aktivér rådgiver»/«Deaktivér rådgiver», egen server action, bekræftelse, audit-log). Aktivering
+er **blokeret**, indtil tjeklisten er opfyldt: invitation accepteret, mindst ét kompetence-tag, ugentlig tilgængelighed, bio og en pris
+inden for intervallet (standard 500-25.000 kr.). Serveren afviser også forfalskede requests med en dansk liste over det, der mangler.
+Deaktivering er altid tilladt og viser de berørte kunders boards. En aktiv rådgiver, der senere ikke er klar, deaktiveres ikke automatisk,
+men vises som «Aktiv – mangler: …». Statusbadget viser altid den gemte tilstand (AKTIV/INAKTIV). Admin kan rette rådgiverens titel, bio,
+mobilnummer og profilbillede på `/admin/advisors/[id]` med samme validering som rådgiverens egen profil (audit-logget).
+Tjeklisten viser også «Profilbillede (valgfrit)», men et foto er ikke et krav for aktivering.
+
+**Rådgiverfotos (`src/lib/avatar.ts`, `avatar-url.ts`, `avatar-serve.ts`).** Rådgiveren (`/profile`) og admin
+(`/admin/advisors/[id]`) uploader, skifter og fjerner profilbilledet (kvadratisk forhåndsvisning, «Vælg billede» /
+«Skift billede» / «Fjern billede», træk og slip). Der er ingen foto-URL længere: eksterne billeder lækkede besøgendes
+IP-adresser til tredjepart, og CSP'ens `img-src` er nu kun `'self' data: blob:`.
+- Upload går gennem `PUT /api/avatar/<id>` med filen som body – ikke en server action, som ville læse hele filen ind, før
+  koden kører (D-2). Rettigheder, `Content-Length` (> 5 MB → 413 med det samme), én upload ad gangen pr. bruger (429) og
+  den fælles grænse for tungt arbejde (503) tjekkes, **før** body'en læses; den læses som stream med loft og 30 sek. tidsgrænse.
+- Kun JPEG, PNG og WebP på højst 5 MB, genkendt ud fra filens første bytes (samme magic bytes-hjælper som optagelser,
+  `detectImageType` i `media-type.ts`). SVG (XSS), GIF, HEIC m.fl. afvises. Mindst 200 × 200 px.
+- Behandling med `sharp` (libvips, fast version): roteres efter EXIF, **alle metadata fjernes** (EXIF/GPS/XMP/ICC),
+  centreret beskæring til kvadrat, 512 × 512 WebP (kvalitet 82) + 96 × 96-miniature. Højst 25 megapixel ind
+  (`limitInputPixels`, mod dekompressionsbomber), tidsgrænse pr. billede og samme grænse for samtidigt tungt arbejde som upload af optagelser.
+- Lagres via storage-adapteren (lokalt / Hetzner Object Storage, **privat** bucket) som `avatars/<id>/<tilfældig>.webp`
+  og `…-96.webp`. Et nyt billede sletter de gamle objekter; upload, skift og fjernelse audit-logges (`advisor.photo.*`).
+- Serveres af appen: `GET /api/avatar/<id>?size=512|96&v=<version>` streamer fra lageret med `Content-Type: image/webp`,
+  `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin`, `Vary: Cookie` og
+  `Cache-Control: public, max-age=300, must-revalidate` + `ETag` (inaktive: `private`). Fotoet er persondata, så det caches
+  aldrig `immutable` (D-1): efter 5 minutter genvaliderer browsere og proxies (billigt 304), og et fjernet eller slettet
+  billede giver så 404 (`no-store`). Versionen er tidspunktet for seneste upload, så en ny upload vises med det samme.
+  Manglende billede, ukendt rådgiver og manglende adgang giver det samme 404, og seeren slås op i alle tilfælde, så
+  svartiden ikke afslører noget (D-3).
+- **Adgang (beslutning):** onboarding-kataloget (`/kom-i-gang`) vises før login, så **aktive** rådgiveres fotos er
+  offentlige – de er jo netop til at blive vist for kommende kunder. **Inaktive** rådgiveres fotos ser kun admin og
+  rådgiveren selv (`private`-cache); alle andre får 404, og siderne viser initialer i stedet.
+- Én komponent, `<AdvisorAvatar>` (`src/components/advisor-avatar.tsx`), bruges overalt: board-builder og katalog,
+  kundens dashboard, mødesiden, admin-listerne, abonnementer og mødeadministration. Små visninger bruger miniaturen.
+
+**Møder holdes altid med hele boardet** (ejerens beslutning). Booking kræver alle boardets pladser; admin kan udskifte en rådgiver i et
+møde eller tilføje en ekstra deltager, men ikke fjerne en rådgiver, så mødet får færre end boardet («udskift i stedet»). Slettes en
+rådgiver (GDPR), audit-logges de berørte møder, og admin-forsiden viser «Møder uden hele boardet».
+
+**Ansvarlig rådgiver (`src/lib/lead.ts`).** Hvert board har præcis én ansvarlig rådgiver blandt rådgivere med det interne admin-tag
+«Lead-kvalificeret» (systemtag, `Tag.kind = ADMIN`, `systemKey = "lead"`). Et board skal have mindst én kvalificeret rådgiver (matching,
+board-builder og server-validering). Ved køb tildeles den kvalificerede med færrest ansvarsroller (lige: færrest pladser, laveste pris,
+navn) under en advisory lock. Forlader den ansvarlige boardet, deaktiveres, slettes eller mister tagget, tildeles en ny automatisk; ellers
+vises boardet for admin. Admin kan vælge manuelt (`/admin/subscriptions/[id]`) og se fordelingen samt et udligningsforslag på
+`/admin/ansvarlige`, som kun anvendes efter bekræftelse. Interne admin-tags vises aldrig for kunder eller rådgivere og bruges ikke i
+matchingen. Bevidst undtagelse (D-5, ejerens UI-valg): board-builderen får et afledt `leadEligible` pr. rådgiver og viser
+«Kan være ansvarlig» – også før login i onboarding. Tagget selv (navn, slug, `systemKey`, `kind`) sendes aldrig til browseren.
+Skal besøgende ikke kunne se, *hvem* der er kvalificeret, skal boolean'en skjules for ikke-admins i `loadCatalog()`. Skift af ansvarlig sender notifikationen «Ansvarlig rådgiver ændret» (`board_lead_changed`).
 
 **Booking.** Et tidspunkt tilbydes kun, hvis *alle* rådgivere i boardet er ledige (inden for en ugentlig regel, ingen blokering,
 intet andet møde inkl. 30 min buffer). Vindue: 2 dage – 16 uger frem. Kvote: ét møde pr. periode (frekvens i uger regnet fra
@@ -190,8 +313,9 @@ optagelsesnotits er accepteret. Manuel upload går aldrig gennem en server actio
 (`DELETE_RECORDINGS_AFTER_TRANSCRIPTION`). Jobs behandles i processen og kan samles op via `GET/POST /api/cron/process-jobs`
 med `Authorization: Bearer $CRON_SECRET` (kald fra fx cron hvert minut).
 
-**GDPR.** Dataeksport (JSON med udvalgte felter – fx aldrig værtens mødelink eller udbyder-id'er) og sletningsanmodning under *Konto*; sletning
-opsiger abonnementet hos betalingsudbyderen, sletter optagelser i lageret og webhook-data med kundens oplysninger og fjerner notifikationslog,
+**GDPR.** Dataeksport (JSON med udvalgte felter – fx aldrig værtens mødelink eller udbyder-id'er; profilbilledet som metadata med lagernøgler og tidspunkt plus en note om, hvordan selve billedet hentes eller rekvireres) og sletningsanmodning under *Konto*; sletning
+opsiger abonnementet hos betalingsudbyderen, sletter optagelser og en rådgivers profilbillede (begge størrelser) i lageret (allerede
+udleverede kopier i browser-/proxy-caches udløber senest efter 5 minutter, D-1) og webhook-data med kundens oplysninger og fjerner notifikationslog,
 leads og samtykker; webhook-payloads ryddes efter 30 dage; audit-log over admin-handlinger og adgang til transskriptioner (fejl i audit-loggen
 giver en driftsalarm); samtykke ved tilmelding (vilkår, optagelse, evt. markedsføring med ordret tekst og version); afmelding via link/STOP/Konto; notifikationsloggen (standard 12 mdr.) og leads med samtykke (24 mdr.) ryddes af jobkøen; ingen tredjeparts-analytics eller eksterne fonte.
 
@@ -202,7 +326,7 @@ giver en driftsalarm); samtykke ved tilmelding (vilkår, optagelse, evt. markeds
 | Hosting (app + Postgres) | Hetzner Cloud eller Simply.com VPS | DE / DK | Docker-image + docker-compose |
 | Abonnementsbetaling | Frisbii (tidl. Reepay) | DK | Hosted checkout + webhooks, MobilePay/kort |
 | Videomøder | Whereby Embedded | NO (EØS) | REST-API til rum, cloud-optagelse til egen S3 |
-| Optagelser | Hetzner Object Storage (S3) | DE | Brug `@aws-sdk/client-s3` kun som klientbibliotek |
+| Optagelser og rådgiverfotos | Hetzner Object Storage (S3) | DE / FI | Privat bucket; `@aws-sdk/client-s3` kun som klientbibliotek. Opsætning: `docs/HETZNER-S3.md` |
 | Transskription + resumé | Mistral AI (Voxtral + chat) | FR | Adapteren gør selvhostet Whisper muligt |
 | SMS og e-mail (påmindelser, beskeder) | inMobile | DK | API v4 via `fetch`; SMTP (Simply.com/Brevo) kan bruges til e-mail i stedet |
 
@@ -219,8 +343,9 @@ Valget er drevet af, at ingen amerikanske selskaber er databehandlere. Se `docs/
 2. **Whereby:** `VIDEO_PROVIDER=whereby`, `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET`, optagelses-bucket (`WHEREBY_RECORDING_*`);
    webhook til `{APP_URL}/api/webhooks/video`.
 3. **Storage:** `STORAGE_PROVIDER=s3` med `S3_*` (Hetzner Object Storage-endpoint, fx `https://fsn1.your-objectstorage.com`).
-   Bucketten skal have en CORS-regel, der tillader `POST` fra `APP_URL` (direkte upload fra browseren). Endpointet tilføjes automatisk
-   til CSP'ens `connect-src`.
+   Trin for trin (bucket, nøgler, CORS, livscyklus, versionering, DPA): **`docs/HETZNER-S3.md`**. Bucketten skal være privat og
+   have en CORS-regel, der tillader `POST` fra `APP_URL` (direkte upload fra browseren). Endpointet tilføjes automatisk
+   til CSP'ens `connect-src`. Kontrollér med `npm run storage:check`.
 4. **Mistral:** `TRANSCRIPTION_PROVIDER=mistral`, `MISTRAL_API_KEY`.
 5. **inMobile (SMS og e-mail):** `SMS_PROVIDER=inmobile`, `EMAIL_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `SMS_SENDER`, `EMAIL_FROM`; peg inMobile-webhook til `{APP_URL}/api/webhooks/inmobile` med hemmeligheden i headeren `x-webhook-secret` (eller `?secret=…`, hvis inMobile ikke kan sende headers). Rotation: sæt den gamle i `INMOBILE_WEBHOOK_SECRET_PREVIOUS`. SMS sendes kun til lande på tilladt-listen (standard Danmark) og med lofter pr. nummer og døgn (*Admin → Notifikationer → Indstillinger*). Sæt også `APP_SECRET` (signerede afmeldingslinks). API-felterne er skrevet efter bedste viden og skal verificeres (se `docs/OPEN_ITEMS.md`). Alternativ til e-mail: `EMAIL_PROVIDER=smtp` + `SMTP_*`.
 6. **CVR:** `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` (standard i produktion), eller `virk` + `CVR_VIRK_USERNAME`/`CVR_VIRK_PASSWORD`.
@@ -241,42 +366,251 @@ og en liste over, hvad der mangler – uden at skrive hemmeligheder ud. Ved en g
    | Variabel | Krav i produktion |
    |---|---|
    | `APP_URL` | `https://…` (ikke localhost) |
-   | `DATABASE_URL` / `POSTGRES_PASSWORD` | sat eksplicit; stærk adgangskode |
+   | `POSTGRES_PASSWORD`, `ABU_OWNER_PASSWORD`, `ABU_APP_PASSWORD` | hver `openssl rand -hex 32` (compose kræver dem; se *Database og roller*) |
+   | `DATABASE_URL` | compose sætter den selv (`abu_app@postgres`). Uden compose: `abu_app`, adgangskode ≥ 24 tegn og `?sslmode=verify-full` (eller `require`) |
+   | `DATABASE_SSL_CA` | sti til databasens CA-certifikat (PEM), når den ikke er udstedt af en offentlig CA |
    | `APP_SECRET`, `CRON_SECRET` | mindst 32 tilfældige tegn hver (`openssl rand -base64 48`) |
+   | `MFA_ENCRYPTION_KEY` | mindst 32 tilfældige tegn, forskellig fra `APP_SECRET`; krypterer TOTP-hemmeligheder. Gem den sikkert – mistes den, skal alle opsætte MFA igen. Rotation: ny værdi her, den gamle i `MFA_ENCRYPTION_KEY_PREVIOUS` |
+   | `DB_CONTEXT_SECRET` | mindst 32 tilfældige tegn (`openssl rand -base64 48`), forskellig fra de andre hemmeligheder og ikke udviklingsnøglen; signerer RLS-konteksten. Samme værdi i app og `migrate` (compose-migrate installerer den med `db:context-key`). Rotation: se *Row-Level Security* |
    | `TRUSTED_PROXY_HOPS` | ≥ 1 |
    | `PAYMENT_PROVIDER=frisbii` + `FRISBII_PRIVATE_KEY`, `FRISBII_WEBHOOK_SECRET` | betaling |
    | `VIDEO_PROVIDER=whereby` + `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET` | video |
    | `TRANSCRIPTION_PROVIDER=mistral` + `MISTRAL_API_KEY` | transskription |
    | `EMAIL_PROVIDER=inmobile` eller `smtp` (+ `SMTP_HOST`), `SMS_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `EMAIL_FROM` | beskeder |
-   | `STORAGE_PROVIDER=s3` + `S3_ENDPOINT` (https), `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | lager |
+   | `STORAGE_PROVIDER=s3` + `S3_ENDPOINT` (https), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | lager (`docs/HETZNER-S3.md`) |
    | `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` med jeres kontaktadresse (eller `virk` + login) | CVR |
    | `APP_ENV` | tom (eller `production`) – sæt **aldrig** `development` i drift |
 
-4. `docker compose up -d --build` – `migrate`-servicen kører `prisma migrate deploy` (med `NODE_ENV=production`), derefter starter appen.
-5. Opret den første administrator (kør **aldrig** seed i produktion – det afvises):
-   `docker compose run --rm migrate npm run create-admin -- --email admin@firma.dk --name "Fornavn Efternavn"`.
-   Scriptet udskriver et engangslink (7 dage) i terminalen; åbn det og vælg adgangskode. Der står ingen adgangskode i koden eller loggen.
-   Nyt link til en eksisterende admin: `npm run create-admin -- --email admin@firma.dk --reset`.
+4. `docker compose up -d --build` – ved første start opretter Postgres rollerne (`docker/postgres/initdb`), `migrate`-servicen kører
+   `prisma migrate deploy` og `db:context-key` som `abu_owner` (med `NODE_ENV=production`), og derefter starter appen som `abu_app`.
+   Opstartsloggen viser `[db] rolle=abu_app · TLS=… · superbruger=nej · BYPASSRLS=nej · ejer=nej · RLS=ja · signeret kontekst=ja`
+   (appen starter ikke i produktion, hvis databasen ikke accepterer dens signatur eller accepterer udviklingsnøglen).
+5. **Opret den første administrator** (kør **aldrig** seed i produktion – det afvises). Ejerens konto:
+   `docker compose run --rm migrate npm run create-admin -- --email mads@qlim8.com --name "Mads"`
+   (uden `--email`/`--name` spørger scriptet, når det køres med en terminal, fx `docker compose run --rm -it migrate npm run create-admin`).
+   Scriptet udskriver et engangslink (7 dage) i terminalen; åbn det og vælg en adgangskode på **mindst 10 tegn** (der er ingen undtagelser
+   fra politikken, og der står ingen adgangskode i koden, seed, dokumentationen eller loggen – H-1). Derefter skal administratoren opsætte
+   totrinsbekræftelse med en godkendelses-app og gemme de 10 gendannelseskoder. Flere administratorer inviteres derefter i appen under
+   *Admin → Administratorer*.
+   Nyt link til en eksisterende admin: `npm run create-admin -- --email admin@firma.dk --reset`. Nødprocedure, hvis den eneste
+   administrator har mistet både telefon og gendannelseskoder: `npm run create-admin -- --email admin@firma.dk --reset-mfa` (nyt link,
+   MFA nulstilles, alle sessioner logges ud; kræver adgang til serveren og audit-logges).
 6. Cron (kun hvis `IN_PROCESS_SCHEDULER=false`; ellers kører jobkøen og notifikationerne hvert minut i appen): `* * * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://abu.example.dk/api/cron/process-jobs`.
 7. Backup: `pg_dump` af Postgres-volumen dagligt (fx til Hetzner Storage Box) med testet gendannelse.
 8. Overvågning: alle driftsalarmer står i loggen med præfikset `[ALERT]` (SMS-lofter, blokerede SMS-lande, fejl i audit-loggen) og under
    *Driftsalarmer* på admin-forsiden. Sæt log-overvågningen til at alarmere på `[ALERT]` og `[config] Appen starter ikke`.
 
-**Sikkerhedsheaders** sættes af `src/proxy.ts`: CSP med nonce pr. request (scripts kun med nonce, `frame-src` kun Whereby), HSTS (2 år,
+**Sikkerhedsheaders** sættes af `src/proxy.ts`: CSP med nonce pr. request (scripts kun med nonce, `frame-src` kun Whereby, `img-src 'self' data: blob:` – ingen eksterne billedværter), HSTS (2 år,
 `includeSubDomains`; overvej `preload`, når domænet er endeligt), Permissions-Policy (kamera/mikrofon/skærmdeling kun på mødesiderne),
 `X-Frame-Options`, `Referrer-Policy` og `nosniff`. Alle sider renderes dynamisk, fordi noncen skal være ny pr. request.
 
-Hvis Postgres og app kører på to servere, sæt `DATABASE_URL` direkte i `.env` og fjern `postgres`-servicen fra compose-filen.
+Hvis Postgres og app kører på to servere, sæt `DATABASE_URL` direkte i `.env` og fjern `postgres`-servicen fra compose-filen
+(se *Database og roller* nedenfor: provisionering med `npm run db:roles`, og TLS er da påkrævet).
 
-**CI** (`.github/workflows/ci.yml`): `npm ci`, `npm audit --omit=dev --audit-level=high`, lint, typetjek, tests mod en Postgres-service,
-build, et tjek af at produktionsbuildet nægter at starte med mock-konfiguration, og `docker build`. Afhængigheder opdateres ugentligt og
+### Database og roller (RLS fase 0)
+
+Appen kører **aldrig** som ejer eller superbruger (`docs/SECURITY-AUDIT-DELTA.md`, del B). Tre roller, defineret i `prisma/roles.sql`:
+
+| Rolle | Bruges af | Rettigheder |
+|---|---|---|
+| `postgres` (superbruger) | kun provisionering (`docker/postgres/initdb`, `npm run db:roles`) | alt – aldrig i appens miljø |
+| `abu_owner` | `migrate`-servicen: `prisma migrate deploy`, seed, `create-admin` (`DATABASE_URL_MIGRATE`) | ejer databasen, schema `public` og alle tabeller; ingen superbruger/CREATEROLE/BYPASSRLS |
+| `abu_app` | appen (`DATABASE_URL`) | LOGIN; kun `SELECT/INSERT/UPDATE/DELETE` på tabellerne og `USAGE` på sekvenser; ingen DDL, ingen `TRUNCATE`, ingen `CREATE` i `public`, ingen midlertidige tabeller, intet medlemskab af andre roller; `AuditLog` er append-only (kun `SELECT/INSERT`), `_prisma_migrations` er lukket |
+| `abu_jobs` | reserveret; bruges ikke (jobs kører som `abu_app` i systemkonteksten, se *Row-Level Security*) | som `abu_app`, men med længere timeouts |
+
+- **Fremtidige tabeller:** `ALTER DEFAULT PRIVILEGES FOR ROLE abu_owner` giver automatisk `abu_app` DML på nye tabeller fra migrationer;
+  migrationen `20261019100000_db_roles_phase0` lukker igen for `_prisma_migrations` og gør `AuditLog` append-only.
+- **Timeouts** sidder på rollen (og sættes også af klienten): `abu_app` har `statement_timeout = 15s`, `lock_timeout = 10s` (også
+  advisory locks) og `idle_in_transaction_session_timeout = 30s`; poolen har højst `DATABASE_POOL_MAX` (standard 10) forbindelser pr.
+  proces. Ingen af appens jobs har brug for mere; skulle én enkelt sætning få det, bruges `SET LOCAL statement_timeout = '…'` i dens
+  transaktion (tilladt for `abu_app`), eller jobbet flyttes til `abu_jobs` (5 min).
+- **Opstartstjek (C-1):** i produktion nægter appen at starte, hvis `DATABASE_URL` forbinder som superbruger, med BYPASSRLS/CREATEROLE/
+  CREATEDB, som ejer af tabellerne/databasen (også via medlemskab) eller med `CREATE` i `public` – én billig forespørgsel mod `pg_roles`
+  og ejerskabet af tabellen `"User"`. Kan databasen ikke nås, starter appen heller ikke. Rollenavnet logges, aldrig URL'en.
+  `DATABASE_URL_MIGRATE`, `DATABASE_URL_PROVISION`, `ABU_OWNER_PASSWORD` og `POSTGRES_PASSWORD` må ikke være sat i app-processen
+  (compose tømmer dem i `app`-servicen).
+- **TLS:** i produktion skal `DATABASE_URL` have `?sslmode=verify-full` (anbefalet; værtsnavn + CA, CA-fil i `DATABASE_SSL_CA`, ellers
+  systemets rodcertifikater), `verify-ca` eller `require` (krypteret uden certifikattjek – kun hvis intet andet er muligt). `prefer`/`allow`
+  afvises. **Undtagelse (dokumenteret og bevidst):** en Unix-socket (`?host=/var/run/postgresql`), loopback (`localhost`, `127.x`, `::1`)
+  og compose-databasen med værtsnavnet `postgres`, som appen når over Dockers interne bridge-netværk på samme maskine (porten publiceres
+  ikke, trafikken forlader aldrig værten). Flyttes databasen til en anden server, gælder kravet. Migrationer (Prismas egen motor) bruger
+  Prismas URL-parametre: `?sslmode=require&sslaccept=strict&sslcert=/sti/til/ca.pem` i `DATABASE_URL_MIGRATE`.
+
+**Provisionering i produktion – det skal ejeren gøre:**
+
+1. Generér tre adgangskoder: `openssl rand -hex 32` til `POSTGRES_PASSWORD`, `ABU_OWNER_PASSWORD` og `ABU_APP_PASSWORD` (kun hex/URL-sikre
+   tegn – de indsættes direkte i URL'er). Læg dem i `.env` på serveren (rettigheder 600) og i jeres password-manager – aldrig i repoet.
+2. **Med compose (ny server/tom volumen):** `docker compose up -d --build` opretter rollerne automatisk ved Postgres' første start.
+   **Eksisterende volumen** (oprettet før fase 0 med superbrugeren `abu`): sæt `POSTGRES_SUPERUSER=abu` og dens gamle adgangskode i
+   `POSTGRES_PASSWORD` i `.env`, og kør `docker compose run --rm db-roles` én gang (før `docker compose up`); `prisma/roles.sql` overdrager
+   databasen og alle eksisterende tabeller til `abu_owner`. Uden data (før lancering) er `docker compose down -v` og en ny start enklest.
+3. **Ekstern/administreret Postgres:** opret databasen, og kør med en superbruger-URL (kun i din egen terminal, aldrig i `.env` på app-serveren):
+   `DATABASE_URL_PROVISION=postgresql://postgres:…@db-vært:5432/abu?sslmode=verify-full DATABASE_SSL_CA=/sti/ca.pem ABU_OWNER_PASSWORD=… ABU_APP_PASSWORD=… npm run db:roles`.
+   Sæt derefter `DATABASE_URL=postgresql://abu_app:…@db-vært:5432/abu?sslmode=verify-full` (app) og `DATABASE_URL_MIGRATE` (kun migrate).
+4. Kontrollér opstartsloggen: `[db] rolle=abu_app · … · ejer=nej · RLS=ja · signeret kontekst=ja` (og `TLS=ja` for en ekstern database).
+   Uden compose: kør `npm run db:context-key` (som ejeren, med samme `DB_CONTEXT_SECRET` som appen) efter `prisma migrate deploy`.
+5. **Skift af adgangskode:** ny værdi i `.env`, `docker compose run --rm db-roles` (eller `npm run db:roles`), derefter `docker compose up -d`.
+
+### Row-Level Security (RLS fase 1–3)
+
+Databasen håndhæver selv, hvem der må se og ændre hvilke rækker – også hvis en forespørgsel i appen mangler et `where`, eller en
+angriber får en SQL-injektion igennem som `abu_app`. Alle tabeller i `public` (undtagen `_prisma_migrations`, som `abu_app` slet ikke
+har adgang til) har `ENABLE` + `FORCE ROW LEVEL SECURITY` og politikker, der spejler appens autorisation (migrationen
+`20261020090000_rls_policies`, hver politik har en `COMMENT ON POLICY` med begrundelsen; `\d "Tabel"` i psql eller `pg_policies` viser dem).
+
+**Sådan virker det.**
+
+1. **Principalen** (`src/lib/db-context.ts`): `{ userId, role: ADMIN|ADVISOR|CUSTOMER|anon|system, sessionId?, onboardingToken? }` i en
+   `AsyncLocalStorage`. I en request bestemmes den ét sted – `getSessionContext()` i `src/lib/auth.ts` (bruges af `getCurrentUser`/
+   `requireUser`/`requireRole`): uden cookie `anon` (med hash af onboarding-cookien), med en fuld session brugerens id og rolle, med en
+   MFA-ventende session kun `anon` + sessionens id. Login/log ud opdaterer principalen i samme request.
+2. **Prisma-udvidelsen** (`src/lib/db.ts`): hver operation kører i en transaktion, hvis første sætning er
+   `SELECT set_config('app.user_id', $1, true), set_config('app.role', $2, true), …, set_config('app.ctx', $5, true)` med bundne
+   parametre (transaktionslokalt – sikkert med pgBouncer i transaction-mode). `app.ctx` er en HMAC-signatur over de fire værdier (se
+   *Signeret kontekst* nedenfor). Interaktive `$transaction(async (tx) => …)` sætter konteksten én gang; `$transaction([…])` (array)
+   afvises; `$queryRaw`/`$executeRaw` er dækket på samme måde. En vagt i driver-adapteren afviser enhver sætning uden for en transaktion
+   og enhver transaktion, der ikke starter med kontekst-sætningen. **Mangler principalen, fejler forespørgslen** (`DbContextError`), og
+   uden `app.role` ser politikkerne ingen rækker (fail-closed).
+3. **Politikkerne** bruger hjælpefunktioner i schemaet `rls` (ejet af `abu_owner`, `REVOKE ALL FROM PUBLIC`, `EXECUTE` til
+   `abu_app`/`abu_jobs`): `rls.app_user_id()`, `app_role()`, `app_is_admin()`, `app_is_system()` m.fl. er `STABLE`, `SECURITY INVOKER` og
+   inlinebare – og giver kun en rolle, hvis signaturen i `app.ctx` er gyldig (`rls.ctx_ok()`). I politikkerne kaldes de altid som
+   `(SELECT rls.app_user_id())` (InitPlan: én gang pr. forespørgsel, ikke pr. række). Ejerskabs-opslag på tværs af tabeller (`app_customer_subscription_ids()`, `app_meeting_ids()`, `app_board_advisor_ids()` …)
+   er `SECURITY DEFINER` med `SET search_path = pg_catalog, pg_temp` (undgår rekursion mellem politikker). Ejeren `abu_owner` er undtaget
+   via `app_is_system()` (migrationer, seed, `create-admin`, definer-funktionerne).
+4. **Kapabilitets-funktioner** (definer) giver præcis det, en rolle har brug for på tværs af ejerskab – uden adgang til rækkerne:
+   `rls.user_directory(ids)` (navn/rolle på kolleger i levende boards og møder, aktive rådgivere), `rls.advisor_busy(…)` (kun start/slut
+   for boardets rådgiveres optagende møder i bookingvinduet, R-3), `rls.advisor_lead_load(…)` og `rls.lead_eligible_ids(…)` (ansvarlig
+   rådgiver), `rls.board_seat_allowed(…)` (kundens boardplads: aktiv rådgiver, aktuel pris, ansvarlig kun med lead-tag, R-1),
+   `rls.pending_upload_total`, `rls.rate_limit_hit/rate_limit_reset` (nøglen afledes i databasen af spand og emne, databasens tid; uden
+   for systemkonteksten kun for kalderens egen identitet, nulstilling kun i system – R-2) og `rls.capture_onboarding_lead` (trin 1:
+   opretter/opdaterer kun tilmeldingens eget lead – M-1). Selvbetjente ændringer af `User` og
+   `AdvisorProfile` begrænses af triggeren `rls.guard_self_update` (kun navn, telefon, adgangskode, samtykker/opt-out hhv. titel, bio,
+   foto); `id`, `email`, `role` og `createdAt` på `User` kan `abu_app` slet ikke opdatere (kolonnerettigheder).
+
+**Signeret kontekst (hærdning efter `docs/SECURITY-AUDIT-MFA-RLS.md`).** Uden signatur kunne enhver, der kører SQL som `abu_app` (fx en
+SQL-injektion), selv kalde `set_config('app.role', 'system', …)`. Nu:
+
+- Appen signerer pr. transaktion: `app.ctx = <kid>.<udstedt ms>.<nonce>.<HMAC-SHA256>` over rolle, bruger-id, session og onboarding-token
+  (`src/lib/db-context-sign.ts`). HMAC-nøglen afledes af **`DB_CONTEXT_SECRET`** (kræves i produktion; prod-guarden afviser < 32 tegn,
+  udviklingsnøglen og genbrug af en anden hemmelighed). Uden for produktion bruges en fast, offentlig udviklingsnøgle.
+- Databasen har kun HMAC-paddene i `rls.context_key` (ejet af `abu_owner`; `abu_app`/`abu_jobs` har ingen rettigheder til tabellen).
+  `rls.ctx_ok()` (SECURITY DEFINER) verificerer signaturen og udstedelsestidspunktet (±5 min af transaktionens start) og returnerer kun en
+  boolean. Uden gyldig signatur er der ingen rolle → ingen rækker (fail closed). Ejeren er stadig undtaget via `current_user`.
+- Nøglen installeres med `npm run db:context-key` (som ejeren, efter migrationerne; compose-`migrate` og CI gør det). Opstartstjekket
+  logger `signeret kontekst=ja` og nægter i produktion at starte, hvis databasen ikke accepterer appens signatur eller accepterer
+  udviklingsnøglen.
+- **Rotation:** ny værdi → `npm run db:context-key` (begge nøgler gælder nu) → genstart appen med den nye værdi →
+  `npm run db:context-key -- --prune`.
+- **Hvad det ikke dækker:** en angriber med kode-eksekvering i app-processen (eller adgang til dens miljø) kender nøglen; en SQL-injektion
+  arver stadig den signerede kontekst for den request, den kører i (kun den principals rækker), og kan genbruge den signatur i op til 5
+  minutter (kun samme principal). Signaturen er ikke bundet til transaktions-id'et (det ville koste en ekstra rundtur pr. forespørgsel).
+
+**Leads og samtykke (M-1).** Hver tilmelding har sit eget lead (`Lead.email` er ikke unik). Trin 1 opretter/opdaterer kun tilmeldingens
+eget lead – en e-mail, der allerede har et lead (en anden tilmelding, en kunde), giver et nyt, isoleret lead og præcis samme svar.
+`OnboardingSession.leadId` kan kun sættes af `rls.capture_onboarding_lead` (trigger). Samtykke kan kun indsættes for eget lead med
+`"userId"` NULL eller = egen bruger, og kun trækkes tilbage af kontoen selv, admin, systemet (signeret afmeldingslink, STOP) eller den
+tilmelding, der selv gav det, indtil det knyttes til en konto. Admin ser leads samlet pr. e-mail (antal tilmeldinger); afsendelse og
+afmelding går stadig på e-mailen. GDPR-eksporten indeholder kun leads/samtykker/tilmeldinger, der er knyttet til kontoen.
+
+**Request-principalen og admin-sider (N-1).** Next renderer layout og side parallelt, så layoutets `requireRole("ADMIN")` beskytter ikke
+sidens forespørgsler (med en udløbet session-cookie kørte siden som `anon`, og RLS afviste – det var den sporadiske `Tag`-fejl i
+sikkerhedsgennemgangen). Hver side under `src/app/admin` kalder derfor selv `requireRole("ADMIN")` først (håndhævet af
+`src/lib/db-context.test.ts`). Huskningen af principalen pr. request bruger Next' interne `workAsyncStorage`
+(`next/dist/server/app-render/work-async-storage.external`); afhængigheden er låst til next@16, en test fejler, hvis modulet eller API'et
+flytter, og i Next-serveren kastes `DbContextError` frem for et stille opslag pr. forespørgsel, hvis work store mangler. Skifter den
+opslåede principal midt i en request uden login/logud (fx fuld session → anon), kastes `DbContextError`.
+
+**Systemkonteksten.** `withSystemContext("område.formål", fn)` er den eneste vej til `app.role = 'system'`. Den er til jobs/cron/
+planlæggeren, verificerede webhooks, seed/`create-admin`, auth-internt (login på e-mail, reset-/invitationstokens, MFA for en ventende
+session, sessioner), notifikationsmotoren, systemtabeller (idempotens, CVR-cache, alarmer), token-verificeret afmelding og de dele af
+GDPR-eksport/-sletning, der matcher på e-mail. Regler:
+
+- Grundbegrundelsen er en konstant (`/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/`), så den kan grep'es: `grep -rn withSystemContext src prisma scripts`.
+- Kun **efter** autentificering/verifikation (signatur, HMAC, hemmelighed, adgangskode) og kun om det, der er brug for – læs/skriv
+  derefter i brugerens kontekst igen.
+- **Tilladelseslisten** er `ALLOW` i `src/lib/db-context.test.ts`: testen fejler, hvis en fil uden for listen (eller en ny begrundelse)
+  bruger systemkonteksten, hvis en request-handler i `src/app` uden for listen gør det, eller hvis koden bruger `$transaction([…])`,
+  `$queryRawUnsafe`/`$executeRawUnsafe` eller `runAsPrincipal` uden for auth. Ny brug kræver altså en bevidst ændring af listen i et review.
+
+**Jobs og `abu_jobs`.** Jobprocessoren (`processJobs`), cron-ruten og planlæggeren i processen kører i systemkonteksten på samme pool
+som appen. Ingen job har brug for mere end 15 s pr. sætning, så `abu_jobs` bruges ikke; skulle det blive nødvendigt, kan en anden klient
+med `DATABASE_URL_JOBS` peges på `abu_jobs` uden at ændre politikkerne (de afhænger af `app.role`, ikke af rollen).
+
+**Tjekliste: ny tabel.**
+
+1. Migration (som `abu_owner`): `CREATE TABLE` – rettigheder kommer af sig selv (`ALTER DEFAULT PRIVILEGES` giver `abu_app`/`abu_jobs`
+   DML). Skal tabellen være append-only eller have kolonnebegrænsninger, så `REVOKE`/`GRANT (kolonner)` i samme migration og i
+   `prisma/roles.sql` (afsnit 8, genanvendes ved `npm run db:roles`).
+2. `ALTER TABLE "X" ENABLE ROW LEVEL SECURITY; ALTER TABLE "X" FORCE ROW LEVEL SECURITY;` – migrationen afbrydes ellers ikke, men
+   `src/lib/rls.test.ts` og opstartstjekket (`db-guard.ts`, `RLS=ja` i loggen) fejler for en tabel uden.
+3. Politikker pr. kommando (`FOR SELECT/INSERT/UPDATE/DELETE`), altid med `(SELECT rls.app_is_system()) OR (SELECT rls.app_is_admin()) OR …`
+   efter appens regler, og en `COMMENT ON POLICY` med begrundelsen. Kontekstfunktionerne skrives **altid** som `(SELECT rls.app_…())`
+   (InitPlan; ellers verificeres signaturen pr. række – `src/lib/rls-remediation.test.ts` fejler for et kald uden). WITH CHECK skal binde
+   kolonner med en bruger (`"userId"`, `"createdById"` …) til `(SELECT rls.app_user_id())`, ikke kun ejerskabet af rækken. Husk:
+   `INSERT … RETURNING` (Prismas `create`) kræver også SELECT-politik på den nye række; slå kun op i andre RLS-tabeller via en
+   `SECURITY DEFINER`-hjælper (ellers rekursion). En ny definer-funktion skal have `SET search_path = pg_catalog, pg_temp`, tjekke konteksten
+   selv og returnere så lidt som muligt; giv den IKKE en høj `COST` (så slår JIT til).
+4. Tests i `src/lib/rls.test.ts`: positive og negative tilfælde pr. rolle (også rå SQL som `abu_app` med appens signerede kontekst,
+   `rawAsApp`/`contextStatement` i `src/test/db.ts`) og intet uden kontekst.
+5. Kode, der skal læse tabellen uden en bruger (job, webhook), kører i `withSystemContext` med en ny begrundelse i `ALLOW`.
+
+**Admin-SQL sikkert.** En håndrullet `set_config('app.role','system')` som `abu_app` giver nu ingenting (ingen signatur). Til
+driftsforespørgsler: `psql` med `DATABASE_URL_MIGRATE` (ejeren `abu_owner` er undtaget via `app_is_system()`), helst i en transaktion
+med `BEGIN; … ROLLBACK;`, til den er verificeret. Vil du se, hvad en bestemt bruger ser (fejlsøgning), skal konteksten signeres med
+`DB_CONTEXT_SECRET` – lokalt fx `npx tsx -e 'import { contextParams } from "./src/lib/db-context"; console.log(contextParams({ userId: "<id>", role: "CUSTOMER" }))'`
+og de fem værdier i `SELECT set_config('app.user_id', …, true), …, set_config('app.ctx', …, true)` som `abu_app` i en transaktion (gyldig i
+5 minutter). Gør det ikke med produktionens hemmelighed i en delt shell-historik. Datarettelser hører hjemme i en migration (kører som ejeren).
+
+**Ydelse.** Hver operation uden for en transaktion koster tre ekstra korte sætninger (BEGIN, `set_config`, COMMIT): målt ca. 1–1,3 ms pr.
+Prisma-kald lokalt og 0–22 ms pr. side (medianen; se `docs/SECURITY-AUDIT-DELTA.md`, «RLS Phases 1–3»). Den signerede kontekst (målt
+lokalt med pgbench, samme transaktionsform som appen, gammelt mod nyt skema): selve kontekst-sætningen +0,004 ms; politiktunge
+forespørgsler +0,3–0,4 ms (én verifikation, ca. 40–60 µs, pr. kontekstkald, der påstår en rolle); forespørgsler over mange rækker hurtigere
+end før (fx rådgiverkataloget 1,6 → 0,6 ms), fordi kontekstfunktionerne nu er InitPlans. Pr. side +3–8 ms (bookingsiden +30 ms). Politikkernes ejerskabs-opslag er
+hashede subplaner over indeks (`MeetingParticipant(userId, meetingId)`, `SubscriptionAdvisor(advisorId)`, `Subscription(customerId)`,
+`Recording(uploadedById)`).
+
+**CI** (`.github/workflows/ci.yml`): `npm ci`, `npm audit --omit=dev --audit-level=high`, lint, typetjek, `npm run db:roles` (tilfældige
+adgangskoder og `DB_CONTEXT_SECRET` pr. kørsel), migrationer og `db:context-key` som `abu_owner`, alle tests som `abu_app` mod en Postgres-service (så rolleopdelingen testes),
+build, et tjek af at produktionsbuildet nægter at starte med mock-konfiguration, og `docker build`. CI starter ikke på PR'er, der kun
+ændrer `docs/**` eller `*.md` (`paths-ignore`). Gør derfor **ikke** CI-jobbene til påkrævede status-checks i branch protection – en
+ren docs-PR ville så vente for evigt på et check, der aldrig kommer (D-6); `deploy.yml` kører CI før hver deploy alligevel. Afhængigheder opdateres ugentligt og
 grupperet af Renovate (`renovate.json`) med review.
 
 ## Test
 
 ```bash
 npm test                                                     # enhedstests; DB-tests springes over
-TEST_DATABASE_URL=postgresql://abu:abu@localhost:5432/abu_test npm test   # også DB-tests (testdatabasen migreres først)
+# DB-tests: testdatabasen provisioneres og migreres som ejeren, og testene kører som app-rollen (som i CI)
+DATABASE_URL_PROVISION=postgresql://postgres:…@localhost:5432/abu_test npm run db:roles
+DATABASE_URL_MIGRATE=postgresql://abu_owner:…@localhost:5432/abu_test npx prisma migrate deploy
+# Nøglen til den signerede kontekst installeres automatisk af testenes global-setup (via TEST_DATABASE_URL_OWNER); ellers:
+DATABASE_URL_MIGRATE=postgresql://abu_owner:…@localhost:5432/abu_test npm run db:context-key
+TEST_DATABASE_URL=postgresql://abu_app:…@localhost:5432/abu_test \
+TEST_DATABASE_URL_OWNER=postgresql://abu_owner:…@localhost:5432/abu_test npm test
 npm run lint && npm run typecheck && npm run build
 npm audit --omit=dev --audit-level=high
 ```
+
+`src/lib/db-privileges.test.ts` beviser rolleopdelingen mod databasen: `abu_app` kan ikke `CREATE/ALTER/DROP/TRUNCATE`, oprette indeks,
+funktioner, schemaer eller midlertidige tabeller, `SET ROLE abu_owner`, læse `pg_authid` eller migrationshistorikken, eller ændre/slette i
+`AuditLog`; almindelig CRUD virker; timeouts sidder på rollen; og opstartstjekket afviser en forbindelse som `abu_owner` i produktion.
+`TEST_DATABASE_URL_OWNER` bruges ellers kun til oprydning, som appens rolle bevidst ikke må (audit-loggen).
+
+RLS-tests: `src/lib/rls.test.ts` kører som `abu_app` med Prisma og rå SQL og fejler, hvis en tabel i `public` mangler `ENABLE`/`FORCE ROW
+LEVEL SECURITY` eller politikker (tilladt undtagelse: `_prisma_migrations`). Den viser bl.a., at en kunde ikke kan læse en anden kundes
+abonnement, møder eller transskription (heller ikke med rå SQL eller ved at forfalske audit-rækker), at en rådgiver ikke ser møder, hen ikke
+deltager i, at anon kun ser aktive rådgiverprofiler og kompetence-tags, at admin-tags er usynlige for andre end admin, at en MFA-ventende
+session kun ser sig selv, at intet virker uden kontekst, og at jobkøen virker i systemkonteksten. `src/lib/rls-remediation.test.ts` gentager
+beviserne fra `docs/SECURITY-AUDIT-MFA-RLS.md` (M-1, M-2, R-1–R-4, forfalsket systemkontekst) som `abu_app` og viser, at de nu fejler. `src/lib/db-context.test.ts` håndhæver
+tilladelseslisten for systemkonteksten (se ovenfor). Testdata oprettes med `asSystem`, og koden under test kører med `asUser`/`asAnon` eller
+en rigtig session (`src/test/db.ts`).
+
+MFA-tests: TOTP mod RFC 4226/6238-vektorerne, vindue og replay (`src/lib/mfa/totp.test.ts`), kryptering, manipulation og rotation
+(`crypto.test.ts`), gendannelseskoder, betroede enheder (30 dage, ingen forlængelse, tilbagekaldelse) og lockout (`service.test.ts`,
+`trusted-device.test.ts`), sessionstrin, re-verifikation og at en MFA-ventende session ikke kan køre admin-handlinger – server actions
+kaldt direkte med en rigtig session (`src/app/actions/mfa-session.test.ts`), samt invitation og sidste-admin-værn (`src/lib/admin-users.test.ts`).
+
+**End-to-end (Playwright, scripts uden for repoet).** Seed-admin logger ind med koden fra udviklingshemmeligheden ovenfor; nye
+administratorer (fx fra `create-admin`) opsætter MFA på `/mfa/opsaet`, og testen læser hemmeligheden fra `[data-testid=mfa-secret]` og
+beregner koderne selv (RFC 6238). Husk, at et tidstrin kun kan bruges én gang (replay-værn): vent til næste 30-sekunders trin mellem to
+logins med samme hemmelighed.

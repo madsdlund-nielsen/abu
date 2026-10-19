@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDb, uid } from "../../test/db";
+import { asSystem, describeDb, uid } from "../../test/db";
 import { isSmsDestinationAllowed, parseSmsCountries, smsCapReached, smsCountryCode } from "./sms-policy";
 
 describe("SMS-politik (M-5)", () => {
@@ -30,7 +30,8 @@ describe("SMS-politik (M-5)", () => {
 });
 
 describeDb("SMS-loft mod databasen (M-5)", () => {
-  it("blokerer udland, stopper ved loftet pr. nummer og opretter en alarm", async () => {
+  // Notifikationsmotoren kører i systemkontekst (også smsBlockReason selv)
+  it("blokerer udland, stopper ved loftet pr. nummer og opretter en alarm", () => asSystem(async () => {
     const { prisma } = await import("../db");
     const { smsBlockReason } = await import("./service");
     const settings = { smsCountries: ["45"], smsPerNumberCap: 2, smsDailyCap: 100000 };
@@ -44,5 +45,5 @@ describeDb("SMS-loft mod databasen (M-5)", () => {
     const alert = await prisma.appSetting.findUnique({ where: { key: "alert:sms_cap_number" } });
     expect(alert).not.toBeNull();
     await prisma.notificationLog.deleteMany({ where: { id: { in: ids } } });
-  });
+  }));
 });

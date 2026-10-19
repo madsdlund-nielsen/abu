@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
+import { withSystemContext } from "../db-context";
 import { getEnv } from "../env";
 import { rateLimit } from "../rate-limit";
 import { TZ } from "../time";
@@ -44,11 +45,13 @@ export const BUDGET_EXHAUSTED: CvrLookupResult = { kind: "error", message: "Dage
 /**
  * Opslag med fælles cache i databasen (24 t; "ikke fundet" 6 t) og et globalt dagsbudget for eksterne kald (M-4). Er
  * budgettet brugt, svares der som ved opbrugt kvote, så kunden kan fortsætte med manuel indtastning.
+ * RLS: CvrLookupCache er en systemtabel (offentlige registerdata, men fælles for alle) – cachen læses og skrives i
+ * systemkontekst, også når opslaget kommer fra onboarding før login.
  */
 export async function lookupCvr(input: string, now = new Date()): Promise<CvrLookupResult> {
   const cvr = normalizeCvr(input);
   if (!isValidCvr(cvr)) return { kind: "error", message: "Ugyldigt CVR-nummer." };
-  const hit = await prisma.cvrLookupCache.findUnique({ where: { cvr } });
+  const hit = await withSystemContext("cvr.cache", () => prisma.cvrLookupCache.findUnique({ where: { cvr } }));
   if (hit && hit.expiresAt > now) return hit.result as unknown as CvrLookupResult;
 
   const p = getCvrProvider();
@@ -60,7 +63,7 @@ export async function lookupCvr(input: string, now = new Date()): Promise<CvrLoo
   const ttl = cacheTtlMs(result);
   if (ttl) {
     const data = { result: result as unknown as Prisma.InputJsonValue, expiresAt: new Date(now.getTime() + ttl) };
-    await prisma.cvrLookupCache.upsert({ where: { cvr }, update: data, create: { cvr, ...data } });
+    await withSystemContext("cvr.cache", () => prisma.cvrLookupCache.upsert({ where: { cvr }, update: data, create: { cvr, ...data }, select: { cvr: true } }));
   }
   return result;
 }

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { loginUrlFor } from "@/lib/consent";
 import { appEnv, getEnv } from "@/lib/env";
 import { makeNonce, securityHeaders } from "@/lib/security-headers";
+import { directUploadOrigin } from "@/lib/storage/origin";
 
 const PROTECTED = [
   "/dashboard",
@@ -10,6 +11,7 @@ const PROTECTED = [
   "/meetings",
   "/account",
   "/samtykke",
+  "/mfa",
   "/availability",
   "/profile",
   "/admin",
@@ -44,7 +46,7 @@ export function proxy(req: NextRequest) {
     nonce,
     pathname,
     videoProvider: env.VIDEO_PROVIDER,
-    uploadOrigin: env.STORAGE_PROVIDER === "s3" ? originOf(env.S3_ENDPOINT) : null,
+    uploadOrigin: env.STORAGE_PROVIDER === "s3" ? directUploadOrigin({ endpoint: env.S3_ENDPOINT, bucket: env.S3_BUCKET, forcePathStyle: env.S3_FORCE_PATH_STYLE }) : null,
     appOrigin: originOf(env.APP_URL),
     production: appEnv() === "production",
     dev: process.env.NODE_ENV === "development",

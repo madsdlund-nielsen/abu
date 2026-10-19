@@ -6,7 +6,8 @@ import { AutoRefresh, JoinCountdown } from "@/components/join-countdown";
 import { RecordingUpload } from "@/components/recording-upload";
 import { UPLOAD_TTL_SECONDS } from "@/lib/recording-upload";
 import { RoomEmbed } from "@/components/room-embed";
-import { MeetingStatusBadge } from "@/components/ui";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
+import { LeadLabel, MeetingStatusBadge } from "@/components/ui";
 import Link from "next/link";
 import { canAccessMeeting } from "@/lib/access";
 import { hasRecordingConsent } from "@/lib/consent";
@@ -14,7 +15,9 @@ import { joinEarlyMinutes, joinOpensAt, meetingJoinState } from "@/lib/meeting-j
 import { recordingUploadDecision } from "@/lib/meeting-status";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
+import { visibleAvatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
+import { userDirectory } from "@/lib/user-directory";
 import { LATE_CANCEL_HOURS } from "@/lib/quota";
 import { formatDateTime, formatTime } from "@/lib/time";
 import { MOCK_ROOM_PREFIX } from "@/lib/video/mock";
@@ -28,19 +31,38 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   const user = await requireUser();
   const { id } = await params;
   const { ok, err } = await flashFrom(searchParams);
-  const meeting = await prisma.meeting.findUnique({
+  const row = await prisma.meeting.findUnique({
     where: { id },
     include: {
-      participants: { include: { user: true } },
-      subscription: { include: { customer: { include: { user: true } } } },
+      participants: true,
+      subscription: { include: { customer: true, advisors: { where: { isLead: true }, select: { advisorId: true } } } },
       recordings: { orderBy: { createdAt: "desc" } },
       transcript: true,
     },
   });
-  if (!meeting || !canAccessMeeting(user, meeting.participants.map((p) => p.userId))) notFound();
+  if (!row || !canAccessMeeting(user, row.participants.map((p) => p.userId))) notFound();
+  // RLS: navn/rolle på deltagere, kunde og ansvarlig fra kataloget (ikke deres User-rækker); fotos fra rådgiverprofilerne
+  const ids = row.participants.map((p) => p.userId);
+  const [people, profiles] = await Promise.all([
+    userDirectory([...ids, row.subscription.customerId, ...row.subscription.advisors.map((a) => a.advisorId)]),
+    prisma.advisorProfile.findMany({ where: { userId: { in: ids } }, select: { userId: true, active: true, photoKey: true, photoUpdatedAt: true } }),
+  ]);
+  const person = (userId: string) => ({ name: people.get(userId)?.name ?? "", role: people.get(userId)?.role ?? null });
+  const meeting = {
+    ...row,
+    participants: row.participants.map((p) => ({ ...p, user: { ...person(p.userId), advisorProfile: profiles.find((x) => x.userId === p.userId) ?? null } })),
+    subscription: {
+      ...row.subscription,
+      customer: { ...row.subscription.customer, user: person(row.subscription.customerId) },
+      advisors: row.subscription.advisors.map((a) => ({ ...a, advisor: { user: person(a.advisorId) } })),
+    },
+  };
 
   const uploadDecision = recordingUploadDecision(meeting, new Date());
   const isStaff = user.role === "ADMIN" || user.role === "ADVISOR";
+  const leadRow = meeting.subscription.advisors[0];
+  const leadId = leadRow?.advisorId ?? null;
+  const leadName = leadRow?.advisor.user.name ?? null;
   const canCancel =
     meeting.status === "BOOKED" &&
     meeting.startsAt > new Date() &&
@@ -79,8 +101,26 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         <h2>Deltagere</h2>
         <ul className="mt-3 space-y-1 text-sm">
           <li><span className="text-muted">Kunde:</span> {meeting.subscription.customer.user.name}, {meeting.subscription.customer.companyName}</li>
-          <li><span className="text-muted">Rådgivere:</span> {advisors.map((a) => a.user.name).join(", ")}</li>
+          <li>
+            <span className="text-muted">Rådgivere (hele boardet):</span>
+            <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-2" data-testid="meeting-advisors">
+              {advisors.map((a) => (
+                <li key={a.userId} className="flex items-center gap-2">
+                  <AdvisorAvatar advisorId={a.userId} name={a.user.name} photo={a.user.advisorProfile ? visibleAvatarVersion({ id: a.userId, ...a.user.advisorProfile }, user) : null} size="sm" />
+                  <span>{a.user.name}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
+          <li data-testid="meeting-lead">
+            {leadId === user.id ? (
+              <span className="font-semibold text-navy">Du er ansvarlig rådgiver for dette board.</span>
+            ) : (
+              <LeadLabel prefix name={leadName} />
+            )}
+          </li>
         </ul>
+        <p className="mt-2 text-xs text-muted">Møderne holdes altid med hele boardet. Kan en rådgiver ikke deltage, finder vi en afløser.</p>
       </section>
 
       {user.role === "ADMIN" && (

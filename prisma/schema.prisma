@@ -73,8 +73,29 @@ model User {
   failedLoginCount  Int       @default(0)
   lastFailedLoginAt DateTime?
   lockedUntil       DateTime?
+  /// Seneste fuldt gennemførte login (efter evt. totrinsbekræftelse). Vises i Admin → Administratorer.
+  lastLoginAt       DateTime?
+  /// Deaktiveret (administratorer): kan ikke logge ind; sessioner og betroede enheder er tilbagekaldt.
+  deactivatedAt     DateTime?
+
+  /// Totrinsbekræftelse (TOTP, RFC 6238). Påkrævet for ADMIN, valgfri for andre. Hemmeligheden er krypteret
+  /// (AES-256-GCM, `src/lib/mfa/crypto.ts`) og aldrig i klartekst i databasen.
+  mfaEnabledAt        DateTime?
+  mfaSecretEnc        String?
+  /// Id for nøglen, hemmeligheden er krypteret med (rotation: MFA_ENCRYPTION_KEY / MFA_ENCRYPTION_KEY_PREVIOUS).
+  mfaKeyId            String?
+  /// Opsætning i gang: ny hemmelighed, der først aktiveres, når brugeren har bekræftet med en gyldig kode.
+  mfaPendingSecretEnc String?
+  mfaPendingCreatedAt DateTime?
+  /// Seneste brugte TOTP-tidstrin (afviser genbrug af en kode, replay).
+  mfaLastUsedStep     Int?
+  /// Fejlede koder i træk (egen tæller, så et korrekt password ikke nulstiller den). Spærring deles med login (lockedUntil).
+  mfaFailedCount      Int       @default(0)
+  mfaLastFailedAt     DateTime?
 
   sessions        Session[]
+  trustedDevices  TrustedDevice[]
+  recoveryCodes   MfaRecoveryCode[]
   passwordTokens  PasswordToken[]
   advisorProfile  AdvisorProfile?
   customerProfile CustomerProfile?
@@ -90,9 +111,47 @@ model Session {
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  /// true = adgangskoden er godkendt, men totrinsbekræftelsen (kode eller opsætning) mangler. Sådan en session giver
+  /// kun adgang til /mfa-siderne og log ud; den udløber efter 15 minutter og erstattes af en ny ved bekræftelse.
+  mfaPending    Boolean   @default(false)
+  /// Seneste bekræftelse med kode i denne session (følsomme admin-handlinger kræver højst 15 minutter siden).
+  mfaVerifiedAt DateTime?
+  /// Login uden kode, fordi enheden er betroet («Husk denne enhed»).
+  trustedDeviceId String?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+/// Betroet enhed («Husk denne enhed i 30 dage»): cookien `abu_device` holder et tilfældigt token, her gemmes kun dets
+/// SHA-256. Udløbet forlænges ikke ved brug. Adgangskoden kræves altid; kun koden springes over.
+model TrustedDevice {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  /// Grov beskrivelse ud fra user-agent, fx «Chrome på macOS»
+  label      String
+  /// Omtrentlig IP (IPv4 /24, IPv6 /48), fx «203.0.113.0/24»
+  ipPrefix   String?
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Engangs-gendannelseskoder til totrinsbekræftelse. Kun SHA-256 gemmes; koderne vises én gang.
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
 }
 
 model PasswordToken {
@@ -111,7 +170,11 @@ model AdvisorProfile {
   userId    String   @id
   title     String   @default("")
   bio       String   @default("")
-  photoUrl  String   @default("")
+  /// Profilbillede i lageret (`avatars/<userId>/<tilfældig>.webp` + `-96.webp`). Null = initialer. Bucketten er privat;
+  /// billedet serveres af `/api/avatar/<userId>`.
+  photoKey       String?
+  /// Tidspunkt for seneste upload – bruges som version i billed-URL'en (?v=…), så den kan caches som immutable.
+  photoUpdatedAt DateTime?
   /// Rådgivere aktiveres manuelt af admin, når de er klar (QA #13). Indtil da kan kunder ikke vælge dem.
   active    Boolean  @default(false)
   /// Pris pr. møde i hele kroner, ekskl. moms. Sættes af admin. Fastfryses på abonnementet ved køb.
@@ -124,7 +187,14 @@ model AdvisorProfile {
   tags               AdvisorTag[]
 }
 
-/// Kompetence-tag. Bruges til at matche kundens behov (onboarding-testen) med rådgivere.
+/// COMPETENCE: kompetence-tag (matching, katalog, kunder ser det). ADMIN: internt tag, kun synligt for admin.
+enum TagKind {
+  COMPETENCE
+  ADMIN
+}
+
+/// Tag på rådgivere. Kompetence-tags matcher kundens behov (onboarding-testen); admin-tags er interne mærkater
+/// (fx «Lead-kvalificeret») og vises aldrig for kunder eller rådgivere og bruges ikke i matching.
 model Tag {
   id          String   @id @default(cuid())
   slug        String   @unique
@@ -132,6 +202,9 @@ model Tag {
   description String?
   sortOrder   Int      @default(0)
   active      Boolean  @default(true)
+  kind        TagKind  @default(COMPETENCE)
+  /// Systemtag med fast nøgle (fx "lead"). Kan ikke slettes eller deaktiveres; navnet kan ændres.
+  systemKey   String?  @unique
 
   advisors AdvisorTag[]
   weights  AnswerTagWeight[]
@@ -215,7 +288,8 @@ model OnboardingSession {
 /// trækkes tilbage eller opbevaringsperioden (LEAD_RETENTION_MONTHS) er gået.
 model Lead {
   id             String    @id @default(cuid())
-  email          String    @unique
+  /// Ikke unik (M-1): hver tilmelding har sit eget lead; admin samler dem pr. e-mail (src/lib/leads-admin.ts).
+  email          String
   name           String
   phone          String?
   /// Højeste trin nået (1-6)
@@ -230,6 +304,7 @@ model Lead {
   sessions OnboardingSession[]
   consents MarketingConsent[]
 
+  @@index([email])
   @@index([lastActivityAt])
 }
 
@@ -337,10 +412,15 @@ model SubscriptionAdvisor {
   advisorId      String
   /// Rådgiverens pris pr. møde (ekskl. moms) fastfrosset på købstidspunktet / ved planskift.
   pricePerMeetingDkk Int @default(1750)
+  /// Ansvarlig rådgiver (lead) for boardet. Højst én pr. abonnement (delvist unikt indeks i migrationen
+  /// `WHERE "isLead"`); præcis én for PENDING/ACTIVE/PAST_DUE, og kun en rådgiver med lead-tagget (src/lib/lead.ts).
+  isLead         Boolean        @default(false)
   subscription   Subscription   @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   advisor        AdvisorProfile @relation(fields: [advisorId], references: [userId], onDelete: Cascade)
 
   @@id([subscriptionId, advisorId])
+  /// RLS: «boards, jeg sidder i» (rls.app_advisor_subscription_ids)
+  @@index([advisorId])
 }
 
 model Meeting {
@@ -375,7 +455,8 @@ model MeetingParticipant {
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([meetingId, userId])
-  @@index([userId])
+  /// RLS: «mine møder» (politikkerne på Meeting/MeetingParticipant) som index-only scan
+  @@index([userId, meetingId])
 }
 
 model Recording {
@@ -393,6 +474,8 @@ model Recording {
   meeting    Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@index([meetingId])
+  /// RLS: egne uploads (politikken og loftet pr. bruger)
+  @@index([uploadedById])
 }
 
 model Transcript {

@@ -3,10 +3,13 @@ import { Flash, flashFrom, type SP } from "@/components/flash";
 import { MeetingTable } from "@/components/meeting-list";
 import { Empty } from "@/components/ui";
 import { prisma } from "@/lib/db";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Alle møder" };
 
 export default async function AdminMeetings({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const meetings = await prisma.meeting.findMany({
     include: { subscription: { include: { customer: true } }, participants: { include: { user: true } } },

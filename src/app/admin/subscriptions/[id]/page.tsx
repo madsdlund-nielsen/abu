@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { adminChangeBoardAction } from "@/app/actions/admin-meetings";
+import { adminChangeBoardAction, setLeadAction } from "@/app/actions/admin-meetings";
 import { BoardBuilder } from "@/components/board-builder";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { SubStatusBadge } from "@/components/ui";
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { loadCatalog } from "@/lib/onboarding/catalog";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
@@ -15,6 +16,8 @@ export const metadata: Metadata = { title: "Rediger board" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminSubscription({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const { ok, err } = await flashFrom(searchParams);
   const sub = await prisma.subscription.findUnique({
@@ -26,8 +29,10 @@ export default async function AdminSubscription({ params, searchParams }: { para
     },
   });
   if (!sub) notFound();
-  const [catalog, needs] = await Promise.all([loadCatalog({ includeIds: sub.advisors.map((a) => a.advisorId) }), getCustomerNeeds(sub.customerId)]);
+  const [catalog, needs] = await Promise.all([loadCatalog({ includeIds: sub.advisors.map((a) => a.advisorId), viewer: await requireRole("ADMIN") }), getCustomerNeeds(sub.customerId)]);
   const editable = sub.status !== "CANCELLED";
+  const lead = sub.advisors.find((a) => a.isLead) ?? null;
+  const eligibleMembers = sub.advisors.filter((a) => catalog.advisors.find((c) => c.id === a.advisorId)?.leadEligible);
 
   return (
     <div className="space-y-space-4">
@@ -43,6 +48,36 @@ export default async function AdminSubscription({ params, searchParams }: { para
       </div>
       <Flash ok={ok} err={err} />
 
+      <section className="card" aria-labelledby="lead-h" data-testid="lead-panel">
+        <span className="eyebrow">Ansvarlig rådgiver</span>
+        <h2 id="lead-h" className="text-xl font-light">{lead ? lead.advisor.user.name : "Ingen ansvarlig rådgiver"}</h2>
+        <span className="rule-gold mt-3" aria-hidden="true" />
+        {!lead && editable && (
+          <p role="alert" className="callout callout-error mt-space-3 text-sm" data-testid="no-lead-warning">
+            {eligibleMembers.length
+              ? "Boardet har ingen ansvarlig rådgiver. Vælg en herunder."
+              : "Ingen i boardet kan være ansvarlig rådgiver. Tilføj en rådgiver med tagget «Lead-kvalificeret» i boardet herunder."}
+          </p>
+        )}
+        <p className="mt-space-3 text-sm text-muted">
+          Tildeles automatisk (den kvalificerede rådgiver med færrest ansvarsroller) og skiftes automatisk, hvis den ansvarlige forlader boardet eller mister tagget. Se fordelingen under <Link href="/admin/ansvarlige">Ansvarlige</Link>.
+        </p>
+        {editable && eligibleMembers.length > 0 && (
+          <form action={setLeadAction} className="mt-space-3 flex flex-wrap items-end gap-3" data-confirm="Skift ansvarlig rådgiver? Kunden og de to rådgivere får besked.">
+            <input type="hidden" name="subscriptionId" value={sub.id} />
+            <div>
+              <label className="label" htmlFor="lead-select">Vælg ansvarlig (kun kvalificerede i boardet)</label>
+              <select id="lead-select" name="advisorId" className="input !w-auto" defaultValue={lead?.advisorId ?? eligibleMembers[0].advisorId}>
+                {eligibleMembers.map((a) => (
+                  <option key={a.advisorId} value={a.advisorId}>{a.advisor.user.name}</option>
+                ))}
+              </select>
+            </div>
+            <button className="btn-secondary" type="submit">Gem ansvarlig</button>
+          </form>
+        )}
+      </section>
+
       {!editable ? (
         <p className="callout text-sm">Abonnementet er opsagt og kan ikke ændres.</p>
       ) : (
@@ -55,6 +90,7 @@ export default async function AdminSubscription({ params, searchParams }: { para
           backHref="/admin/subscriptions"
           initialAdvisorIds={sub.advisors.map((a) => a.advisorId)}
           initialWeeks={sub.frequencyWeeks}
+          currentLeadId={lead?.advisorId ?? null}
           intro="Udskift, tilføj eller fjern rådgivere (2-4). Nye rådgivere får deres aktuelle pris, de der bliver, beholder deres fastfrosne pris."
         >
           <input type="hidden" name="subscriptionId" value={sub.id} />

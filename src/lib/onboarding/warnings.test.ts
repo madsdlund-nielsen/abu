@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CmsAdvisor, CmsQuestion, CmsTag } from "./cms-types";
 import { collectWarnings } from "./warnings";
 
-const tag = (id: string, active = true): CmsTag => ({ id, slug: id, name: id.toUpperCase(), description: "", active, advisors: 0, answers: 0 });
+const tag = (id: string, active = true): CmsTag => ({ id, slug: id, name: id.toUpperCase(), description: "", active, kind: "COMPETENCE", system: false, advisors: 0, answers: 0 });
 const q = (id: string, answers: CmsQuestion["answers"], active = true): CmsQuestion => ({ id, text: id, helpText: "", type: "SINGLE", active, answers });
 const ans = (id: string, tagIds: string[], boardSize: number | null = null) => ({ id, text: id, boardSize, weights: tagIds.map((tagId) => ({ tagId, weight: 3 })) });
 const adv = (tagIds: string[]): CmsAdvisor => ({ id: "a", name: "A", priceDkk: 1750, tagIds });

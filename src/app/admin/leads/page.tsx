@@ -4,6 +4,7 @@ import { CONSENT_LABEL, loadLeads, parseLeadFilter, STATUS_LABEL, type LeadConse
 import { formatPhone, toE164 } from "@/lib/phone";
 import { formatDateTime } from "@/lib/time";
 import type { SP } from "@/components/flash";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Leads" };
 
@@ -11,6 +12,8 @@ const CONSENT_BADGE: Record<LeadConsent, string> = { ja: "badge-navy", trukket: 
 const STATUS_BADGE: Record<LeadStatus, string> = { igang: "badge-outline", gennemfoert: "badge-navy", udloebet: "badge-muted" };
 
 export default async function AdminLeads({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const params = await searchParams;
   const filter = parseLeadFilter(params);
   const rows = await loadLeads(filter);
@@ -26,7 +29,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: SP })
       <h1>Leads</h1>
       <p className="mb-space-4 mt-space-3 max-w-3xl text-muted">
         Alle, der har udfyldt trin 1 i onboardingen, også dem der aldrig gjorde tilmeldingen færdig. Du kan kun kontakte leads med aktivt samtykke.
-        Leads uden samtykke slettes automatisk, når tilmeldingen udløber.
+        Leads uden samtykke slettes automatisk, når tilmeldingen udløber. Har samme e-mail flere tilmeldinger, vises de som ét lead.
       </p>
 
       <form method="get" className="mb-space-3 grid gap-3 border border-grey-bg bg-white p-space-3 sm:grid-cols-[1fr_12rem_12rem_auto] sm:items-end" role="search" aria-label="Filtrér leads">
@@ -75,6 +78,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: SP })
                   <td>
                     <p className="font-semibold text-navy">{r.name}</p>
                     <p className="text-xs text-muted break-all">{r.email}{r.phone && toE164(r.phone) ? ` · ${formatPhone(toE164(r.phone)!)}` : ""}</p>
+                    {r.attempts > 1 && <p className="text-xs text-muted" data-testid="lead-attempts">{r.attempts} tilmeldinger med denne e-mail</p>}
                   </td>
                   <td className="whitespace-nowrap">
                     <span className="tabular-nums">{r.step}/6</span>

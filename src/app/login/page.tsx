@@ -5,7 +5,7 @@ import { Flash, flashFrom, type SP } from "@/components/flash";
 import { Band } from "@/components/band";
 import { PageShell } from "@/components/site-header";
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
+import { getSessionContext, mfaPathFor } from "@/lib/auth";
 import { safeNextPath } from "@/lib/consent";
 
 export const metadata: Metadata = { title: "Log ind" };
@@ -13,8 +13,10 @@ export const metadata: Metadata = { title: "Log ind" };
 export default async function LoginPage({ searchParams }: { searchParams: SP }) {
   const { ok, err, one, params } = await flashFrom(searchParams);
   const next = safeNextPath(one(params.next));
-  const user = await getCurrentUser();
-  if (user) redirect(next ?? (user.role === "ADMIN" ? "/admin" : "/dashboard"));
+  const ctx = await getSessionContext();
+  if (ctx?.stage === "full") redirect(next ?? (ctx.user.role === "ADMIN" ? "/admin" : "/dashboard"));
+  // Adgangskoden er godkendt, men koden mangler: fortsæt dér (eller log ud fra MFA-siden)
+  if (ctx) redirect(mfaPathFor(ctx.stage as "mfa_verify" | "mfa_setup", next));
   return (
     <PageShell variant="bare">
       <Band tone="grey">

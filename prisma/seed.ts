@@ -1,10 +1,17 @@
-/* Seed: admin, tags, 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
+/* Seed: admin, tags (inkl. det interne «Lead-kvalificeret» på 4 rådgivere), 8 rådgivere, onboarding-test og 1 demokunde med aktivt abonnement (3 rådgivere, hver 8. uge). */
+import "../scripts/owner-db-env"; // FØRST: kør som ejeren (DATABASE_URL_MIGRATE), før Prisma-klienten indlæses
 import bcrypt from "bcryptjs";
 import { seedRefusal } from "../src/lib/admin-bootstrap";
 import { prisma } from "../src/lib/db";
+import { withSystemContext } from "../src/lib/db-context";
 import { monthlyPriceForBoard } from "../src/lib/pricing";
 import { ensureNotificationDefaults } from "../src/lib/notifications/service";
-import { ADVISORS, DEMO_BOARD_EMAILS, QUESTIONS, TAGS } from "./seed-data";
+import { assignLeadTx, getLeadTagId } from "../src/lib/lead";
+import { sealSecret } from "../src/lib/mfa/service";
+import { ADVISORS, DEMO_BOARD_EMAILS, LEAD_ADVISOR_EMAILS, QUESTIONS, TAGS } from "./seed-data";
+
+/** KUN lokal udvikling: TOTP-hemmelighed for admin@abu.local (base32, 160 bit). Står i README. Aldrig i produktion. */
+const DEV_ADMIN_TOTP_SECRET = "ABUDEVTOTPSECRETONLYFORLOCALDEV2";
 
 async function main() {
   // H-1: demodata med kendte adgangskoder må aldrig ende i produktion
@@ -20,11 +27,18 @@ async function main() {
   const kundeHash = await bcrypt.hash("Kunde12345!", 12);
   const advisorHash = await bcrypt.hash("Raadgiver123!", 12);
 
-  await prisma.user.upsert({
+  const admin = await prisma.user.upsert({
     where: { email: "admin@abu.local" },
     update: {},
     create: { email: "admin@abu.local", name: "Admin", role: "ADMIN", passwordHash: adminHash, ...consent },
   });
+  // Totrinsbekræftelse er påkrævet for administratorer. Demo-admin får en KENDT, kun-lokal TOTP-hemmelighed (README),
+  // så den kan logge ind lokalt og i Playwright. Seed afvises i produktion (H-1), og hemmeligheden er krypteret med
+  // udviklingsnøglen (eller MFA_ENCRYPTION_KEY, hvis den er sat lokalt).
+  if (!admin.mfaEnabledAt) {
+    const sealed = sealSecret(admin.id, DEV_ADMIN_TOTP_SECRET);
+    await prisma.user.update({ where: { id: admin.id }, data: { mfaEnabledAt: new Date(), mfaSecretEnc: sealed.enc, mfaKeyId: sealed.keyId } });
+  }
 
   const tagIds = new Map<string, string>();
   for (const [i, t] of TAGS.entries()) {
@@ -35,6 +49,9 @@ async function main() {
     });
     tagIds.set(t.slug, tag.id);
   }
+
+  // Systemtagget «Lead-kvalificeret» (internt; oprettes af migrationen, ellers her)
+  const leadTagId = await getLeadTagId();
 
   const advisorIds = new Map<string, string>();
   for (const [i, a] of ADVISORS.entries()) {
@@ -53,7 +70,10 @@ async function main() {
     });
     advisorIds.set(a.email, user.id);
     await prisma.advisorTag.createMany({
-      data: a.tags.map((slug) => ({ advisorId: user.id, tagId: tagIds.get(slug)! })),
+      data: [
+        ...a.tags.map((slug) => ({ advisorId: user.id, tagId: tagIds.get(slug)! })),
+        ...(LEAD_ADVISOR_EMAILS.includes(a.email) ? [{ advisorId: user.id, tagId: leadTagId }] : []),
+      ],
       skipDuplicates: true,
     });
     const existing = await prisma.availabilityRule.count({ where: { advisorId: user.id } });
@@ -110,10 +130,11 @@ async function main() {
 
   const hasSub = await prisma.subscription.count({ where: { customerId: customer.id } });
   if (!hasSub) {
-    await prisma.subscription.create({
+    const sub = await prisma.subscription.create({
       data: {
         customerId: customer.id,
-        advisorCount: 3,
+        // Møder holdes altid med hele boardet: advisorCount = antal rådgivere i boardet
+        advisorCount: DEMO_BOARD_EMAILS.length,
         frequencyWeeks: 8,
         monthlyPriceDkk: monthlyPriceForBoard(
           DEMO_BOARD_EMAILS.map((e) => ADVISORS.find((a) => a.email === e)!.price),
@@ -131,6 +152,8 @@ async function main() {
         },
       },
     });
+    // Ansvarlig rådgiver med samme tildelingsregel som ved køb
+    await prisma.$transaction((tx) => assignLeadTx(tx, sub.id));
   }
 
   // Danske standardtekster og -regler til notifikationer (e-mail og SMS)
@@ -138,12 +161,13 @@ async function main() {
   console.log(`Notifikationer: ${n.templates} skabeloner og ${n.rules} regler oprettet.`);
 
   console.log("Seed færdig.");
-  console.log("  Admin:   admin@abu.local / Admin12345!");
+  console.log("  Admin:   admin@abu.local / Admin12345! + TOTP-kode fra den lokale udviklingshemmelighed (README)");
   console.log("  Kunde:   kunde@abu.local / Kunde12345!");
   console.log("  Rådgiver (alle): <fornavn.efternavn>@abu.local / Raadgiver123!");
 }
 
-main()
+// RLS: seed kører som ejeren og i systemkontekst (alle tabeller har FORCE ROW LEVEL SECURITY)
+withSystemContext("seed.demo_data", main)
   .catch((e) => {
     console.error(e);
     process.exitCode = 1;

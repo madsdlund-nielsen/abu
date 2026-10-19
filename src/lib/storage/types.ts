@@ -13,6 +13,8 @@ export interface PutStreamOptions {
   /** Kaldes med de første bytes (fx 64), før resten skrives. false = afvis (magic bytes). */
   acceptHead?: (head: Buffer) => boolean;
   headBytes?: number;
+  /** MIME-type på objektet (S3: Content-Type). Uden = application/octet-stream. */
+  contentType?: string;
 }
 
 /** Presigned POST direkte fra browseren til objektlageret (serveren er ikke i datastrømmen). */
@@ -31,6 +33,8 @@ export interface StorageProvider {
   readHead(key: string, n: number): Promise<Buffer>;
   /** Filen som en Blob, der læses fra disk ved brug (til transskription uden at buffere i RAM). */
   openBlob(key: string, mime: string): Promise<{ blob: Blob; cleanup: () => Promise<void> }>;
+  /** Objektet som stream (fx billeder til /api/avatar), eller null hvis det ikke findes. Bufres ikke i RAM. */
+  openStream(key: string): Promise<{ body: Readable; size: number } | null>;
   delete(key: string): Promise<void>;
   /** Kun S3: presigned POST med størrelsesgrænse håndhævet af lageret. */
   createDirectUpload?(key: string, opts: { maxBytes: number; expiresSeconds: number }): Promise<DirectUpload>;

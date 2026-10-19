@@ -1,6 +1,11 @@
 import type { Prisma } from "@prisma/client";
+import { raiseAlert } from "./alerts";
 import { audit } from "./audit";
+import { avatarObjectKeys } from "./avatar-url";
 import { prisma } from "./db";
+import { withSystemContext } from "./db-context";
+import { ensureLead, LIVE_STATUSES } from "./lead";
+import { revokeTrustedDevices } from "./mfa/service";
 import { deleteNotificationDataFor } from "./notifications/service";
 import { deleteOnboardingSessionsForEmail } from "./onboarding/session";
 import { getPayments } from "./payments";
@@ -21,9 +26,11 @@ export type ErasureResult =
  * GDPR-sletning (M-3). Rækkefølge:
  *  1. Aktive abonnementer opsiges hos betalingsudbyderen (lykkes det ikke, slettes intet – ellers kunne der blive ved med
  *     at blive trukket penge).
- *  2. Optagelser for kundens møder slettes fra lageret (rækkerne forsvinder med kaskaden, objekterne gør ikke).
+ *  2. Optagelser for kundens møder og en rådgivers profilbillede (512 + 96 px) slettes fra lageret (rækkerne forsvinder
+ *     med kaskaden, objekterne gør ikke).
  *  3. Webhook-payloads med kundens data (betaling og video) slettes.
- *  4. Onboarding, notifikationslog, leads og samtykker for e-mailen, og til sidst brugeren (kaskade).
+ *  4. Onboarding, notifikationslog, leads og samtykker for e-mailen, al MFA-data (betroede enheder, gendannelseskoder;
+ *     hemmeligheden ligger på brugeren) og til sidst brugeren (kaskade).
  * Audit-loggen beholdes (userId sættes til null).
  */
 export async function eraseUser(userId: string, actorId: string, deps: ErasureDeps = { payments: getPayments(), storage: getStorage() }): Promise<ErasureResult> {
@@ -61,6 +68,18 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
     }
   }
 
+  // 2b) Rådgiverens profilbillede (begge størrelser)
+  const profile = user.role === "ADVISOR" ? await prisma.advisorProfile.findUnique({ where: { userId }, select: { photoKey: true } }) : null;
+  for (const key of avatarObjectKeys(profile?.photoKey)) {
+    try {
+      await deps.storage.delete(key);
+      objects++;
+    } catch (e) {
+      console.error("[erasure] profilbillede kunne ikke slettes", e instanceof Error ? e.message : e);
+      return { ok: false, error: "Profilbilledet kunne ikke slettes fra lageret. Prøv igen." };
+    }
+  }
+
   // 3) Webhook-payloads (betaling: abonnement/kunde; video: mødets rum)
   const subIds = subs.flatMap((s) => [s.id, s.providerSubscriptionId]).filter((x): x is string => Boolean(x));
   const customerIds = [userId, ...subs.map((s) => s.providerCustomerId)].filter((x): x is string => Boolean(x));
@@ -70,16 +89,49 @@ export async function eraseUser(userId: string, actorId: string, deps: ErasureDe
     ...customerIds.map((v) => ({ payload: { path: ["customer"], equals: v } })),
     ...meetingRefs.map((v) => ({ externalId: { startsWith: `video:${v}:` } })),
   ];
-  const webhookEvents = or.length ? (await prisma.webhookEvent.deleteMany({ where: { OR: or } })).count : 0;
+  // RLS: WebhookEvent er en systemtabel (kun webhooks og oprydning) – GDPR-sletningen af kundens payloads kører derfor i
+  // systemkontekst (admin har allerede godkendt sletningen med frisk kode, processDeletionAction)
+  const webhookEvents = or.length ? await withSystemContext("gdpr.erasure", async () => (await prisma.webhookEvent.deleteMany({ where: { OR: or } })).count) : 0;
+
+  // 3b) En rådgiver forsvinder fra boards og kommende møder med kaskaden. Møder holdes altid med hele boardet, så det
+  //     må ikke ske i stilhed: hvert berørt møde audit-logges, og admin får en driftsalarm + advarselslisten på forsiden.
+  if (user.role === "ADVISOR") await flagAdvisorErasure(userId, actorId);
 
   // 4) Øvrige data om personen og selve kontoen
-  await audit(actorId, "user.delete", "User", userId, `Opsagt: ${cancelled}, optagelser: ${objects}, webhooks: ${webhookEvents}`);
+  await audit(actorId, "user.delete", "User", userId, `Opsagt: ${cancelled}, lagerobjekter: ${objects}, webhooks: ${webhookEvents}`);
   await deleteOnboardingSessionsForEmail(user.email);
   await deleteNotificationDataFor(user);
   await prisma.marketingConsent.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
   await prisma.lead.deleteMany({ where: { email: { equals: user.email, mode: "insensitive" } } });
+  // Var en rådgiver ansvarlig for boards, tildeles nye ansvarlige efter sletningen (pladsen forsvinder med kaskaden)
+  const ledSubs = user.role === "ADVISOR"
+    ? await prisma.subscriptionAdvisor.findMany({ where: { advisorId: userId, isLead: true, subscription: { status: { in: [...LIVE_STATUSES] } } }, select: { subscriptionId: true } })
+    : [];
+  // Totrinsbekræftelse: betroede enheder, gendannelseskoder og sessioner (forsvinder også med kaskaden, men eksplicit her)
+  await revokeTrustedDevices(userId, "account_deleted", actorId);
+  await withSystemContext("gdpr.erasure", () => prisma.mfaRecoveryCode.deleteMany({ where: { userId } })); // kun auth-internt/system (RLS)
+  await prisma.session.deleteMany({ where: { userId } });
   await prisma.user.delete({ where: { id: userId } });
+  for (const s of ledSubs) await ensureLead(s.subscriptionId, "deleted", actorId);
   return { ok: true, cancelled, objects, webhookEvents };
+}
+
+/**
+ * Kommende møder og boards, som en slettet rådgiver sad i (ejerens beslutning: møder holdes altid med hele boardet).
+ * Alarmen nævner ikke navnet – den overlever sletningen.
+ */
+async function flagAdvisorErasure(advisorId: string, actorId: string): Promise<void> {
+  const [meetings, boards] = await Promise.all([
+    prisma.meeting.findMany({ where: { status: "BOOKED", endsAt: { gt: new Date() }, participants: { some: { userId: advisorId } } }, select: { id: true } }),
+    prisma.subscriptionAdvisor.count({ where: { advisorId, subscription: { status: { in: ["ACTIVE", "PAST_DUE", "PENDING"] } } } }),
+  ]);
+  for (const m of meetings) await audit(actorId, "meeting.advisor_erased", "Meeting", m.id, "Rådgiveren er slettet (GDPR); mødet mangler nu en rådgiver fra boardet.");
+  if (meetings.length || boards) {
+    await raiseAlert(
+      "advisor_erased",
+      `En rådgiver er slettet (GDPR). ${meetings.length} kommende ${meetings.length === 1 ? "møde mangler" : "møder mangler"} nu en rådgiver, og ${boards} ${boards === 1 ? "board" : "boards"} har en tom plads. Udskift rådgiveren under Møder og Abonnementer.`,
+    );
+  }
 }
 
 export const WEBHOOK_PAYLOAD_RETENTION_DAYS = 30;
@@ -87,7 +139,8 @@ const WEBHOOK_ROW_RETENTION_DAYS = 400;
 
 /**
  * Webhook-payloads indeholder kundedata (e-mail, CVR, telefon). Efter 30 dage fjernes payloaden; rækken (id) bevares som
- * idempotens-nøgle, til den slettes efter 400 dage.
+ * idempotens-nøgle, til den slettes efter 400 dage. Kører fra jobkøen (systemkontekst; den rå UPDATE er underlagt RLS
+ * som alt andet).
  */
 export async function cleanupWebhookPayloads(now = new Date()): Promise<{ redacted: number; deleted: number }> {
   const day = 86_400_000;

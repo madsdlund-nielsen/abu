@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withSystemContext } from "@/lib/db-context";
 import { getPayments } from "@/lib/payments";
 import { paymentEventSchema, processFrisbiiEvent } from "@/lib/payments/webhook";
 import { readLimitedText } from "@/lib/webhooks/signature";
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
   }
   const evt = paymentEventSchema.safeParse(json);
   if (!evt.success) return NextResponse.json({ error: "Ukendt format" }, { status: 400 });
-  const result = await processFrisbiiEvent(evt.data);
+  // RLS: først efter verificeret signatur – webhooken har ingen bruger og rører kundens abonnement (systemkontekst)
+  const result = await withSystemContext("webhooks.payments", () => processFrisbiiEvent(evt.data));
   return NextResponse.json({ result });
 }

@@ -55,3 +55,11 @@ Ca. 3 minutters gennemgang af den nuværende app, optaget i Chromium mod et prod
 ## Sådan er det optaget
 
 Scenerne er optaget med Playwright (Chromium, 1440 × 900) mod en frisk database (`abu_shots2`) og samlet med ffmpeg. Mødet i scene 6 flyttes til nutid og derefter til fortiden med SQL, så mødevinduets to tilstande kan vises; transskription og resumé er mock-udbyderens. Scripts holdes uden for repoet.
+
+## Efter totrinsbekræftelse (19.10.2026)
+
+Demoen er optaget før totrinsbekræftelse blev påkrævet for administratorer. Optages den igen, logger seed-admin (`admin@abu.local`)
+ind med adgangskoden og derefter en kode beregnet ud fra den kun-lokale TOTP-hemmelighed i README (RFC 6238, SHA-1, 6 cifre, 30 sek.).
+Et tidstrin kan kun bruges én gang, så vent til næste 30-sekunders trin mellem to logins. Nye administratorer opsætter MFA på
+`/mfa/opsaet` (scriptet læser hemmeligheden fra `[data-testid=mfa-secret]`). Følsomme admin-handlinger (fx sletning af en kunde og
+udligning af ansvarlige) kræver en kode, der højst er 15 minutter gammel.

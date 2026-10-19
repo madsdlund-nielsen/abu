@@ -2,31 +2,41 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MeetingAdminPanel } from "@/components/admin/meeting-admin-panel";
-import { MeetingStatusBadge } from "@/components/ui";
+import { LeadLabel, MeetingStatusBadge } from "@/components/ui";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { listSubstituteCandidates } from "@/lib/meeting-admin";
 import { formatDanishDateInput, formatDateTime, formatTime } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Administrer møde" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminMeeting({ params }: { params: Promise<{ id: string }> }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const meeting = await prisma.meeting.findUnique({
     where: { id },
-    include: { participants: { include: { user: { include: { advisorProfile: true } } } }, subscription: { include: { customer: { include: { user: true } } } } },
+    include: { participants: { include: { user: { include: { advisorProfile: true } } } }, subscription: { include: { customer: { include: { user: true } }, advisors: { where: { isLead: true }, include: { advisor: { include: { user: { select: { name: true } } } } } } } } },
   });
   if (!meeting) notFound();
   const now = new Date();
   const editable = meeting.status === "BOOKED" && meeting.endsAt > now;
   const [candidates, tags, history] = await Promise.all([
     editable ? listSubstituteCandidates(id) : Promise.resolve([]),
-    prisma.tag.findMany({ select: { id: true, name: true } }),
+    prisma.tag.findMany({ where: { kind: "COMPETENCE" }, select: { id: true, name: true } }),
     prisma.auditLog.findMany({ where: { entity: "Meeting", entityId: id }, orderBy: { createdAt: "desc" }, include: { user: { select: { name: true } } }, take: 30 }),
   ]);
   const advisors = meeting.participants
     .filter((p) => p.user.role === "ADVISOR")
-    .map((p) => ({ id: p.userId, name: p.user.name, title: p.user.advisorProfile?.title ?? "", priceDkk: p.pricePerMeetingDkk }));
+    .map((p) => ({
+      id: p.userId,
+      name: p.user.name,
+      title: p.user.advisorProfile?.title ?? "",
+      priceDkk: p.pricePerMeetingDkk,
+      photo: p.user.advisorProfile?.photoKey ? avatarVersion(p.user.advisorProfile.photoUpdatedAt) : null,
+    }));
 
   return (
     <div className="space-y-space-4">
@@ -40,6 +50,7 @@ export default async function AdminMeeting({ params }: { params: Promise<{ id: s
           <Link href={`/meetings/${meeting.id}`}>Se mødesiden</Link>
           <Link href={`/admin/subscriptions/${meeting.subscriptionId}`}>Kundens faste board</Link>
         </p>
+        <p className="mt-2"><LeadLabel prefix name={meeting.subscription.advisors[0]?.advisor.user.name ?? "Ingen"} /></p>
       </div>
 
       {!editable && <p className="callout text-sm">Mødet er {meeting.status === "CANCELLED" ? "aflyst" : "afholdt"} og kan ikke ændres.</p>}

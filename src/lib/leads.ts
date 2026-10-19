@@ -19,14 +19,17 @@ export interface ConsentProof {
   userAgent?: string | null;
 }
 
-/** Opretter/opdaterer leadet for en e-mail og registrerer eller trækker samtykket tilbage efter afkrydsningen. */
+/**
+ * Opretter/opdaterer TILMELDINGENS eget lead og registrerer eller trækker samtykket tilbage efter afkrydsningen.
+ * RLS (M-1): kræver en igangværende tilmelding (onboarding-cookien). `rls.capture_onboarding_lead` opretter et nyt lead
+ * for tilmeldingen eller opdaterer kun dens eget – et eksisterende lead for samme e-mail (en anden tilmelding, en kunde)
+ * røres aldrig, og svaret er det samme (intet orakel). Samtykket skrives derefter af anon selv – politikkerne tillader
+ * det kun for eget lead, og tilbagetrækning kun af det samtykke, denne tilmelding selv har givet.
+ */
 export async function upsertLead(opts: { name: string; email: string; consent: boolean; proof: ConsentProof }): Promise<string> {
   const email = opts.email.trim().toLowerCase();
-  const lead = await prisma.lead.upsert({
-    where: { email },
-    update: { name: opts.name, lastActivityAt: new Date() },
-    create: { email, name: opts.name },
-  });
+  const [captured] = await prisma.$queryRaw<{ id: string }[]>`SELECT rls.capture_onboarding_lead(${email}, ${opts.name}) AS id`;
+  const lead = await prisma.lead.findUniqueOrThrow({ where: { id: captured.id }, select: { id: true, phone: true } });
   const active = await prisma.marketingConsent.findFirst({
     where: { leadId: lead.id, OR: [{ emailConsent: true, emailWithdrawnAt: null }, { smsConsent: true, smsWithdrawnAt: null }] },
   });
@@ -46,9 +49,10 @@ export async function upsertLead(opts: { name: string; email: string; consent: b
       },
     });
   } else if (!opts.consent && active) {
+    // Kun samtykker, som denne tilmelding selv har givet (ikke knyttet til en konto) – RLS håndhæver det samme
     const now = new Date();
     await prisma.marketingConsent.updateMany({
-      where: { leadId: lead.id },
+      where: { leadId: lead.id, userId: null },
       data: { emailWithdrawnAt: now, smsWithdrawnAt: now },
     });
   }

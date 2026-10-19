@@ -1,36 +1,79 @@
 # Lokal/produktions-opsætning: Postgres + migrationer + app.
-#   cp .env.example .env   (justér efter behov)
+#   cp .env.example .env   (sæt POSTGRES_PASSWORD, ABU_OWNER_PASSWORD og ABU_APP_PASSWORD: openssl rand -hex 32)
 #   docker compose up --build
 #   docker compose run --rm migrate npm run create-admin -- --email admin@firma.dk --name "Navn"   # første admin
 #   docker compose run --rm -e APP_ENV=development migrate npx tsx prisma/seed.ts                  # KUN lokalt: demodata
+#   docker compose run --rm db-roles                                                               # roller igen (ny adgangskode)
+#
+# Databaseroller (RLS fase 0, prisma/roles.sql): superbrugeren `postgres` bruges kun til provisionering,
+# `abu_owner` ejer skemaet og bruges kun af migrate-servicen (migrationer, seed, create-admin), og appen kører som
+# `abu_app` (kun SELECT/INSERT/UPDATE/DELETE). Rollerne oprettes af docker/postgres/initdb ved Postgres' FØRSTE start.
+# Der er ingen standardadgangskoder: compose stopper, hvis de ikke er sat.
+#
+# TLS: appen taler med `postgres` over Dockers interne bridge-netværk på samme maskine (porten publiceres ikke), så
+# DATABASE_URL er undtaget fra TLS-kravet. Ligger databasen på en anden server, skal URL'en have ?sslmode=verify-full.
 services:
   postgres:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: abu
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-abu}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Sæt POSTGRES_PASSWORD i .env (superbruger, kun provisionering; openssl rand -hex 32)}
       POSTGRES_DB: abu
+      # Læses af docker/postgres/initdb/10-abu-roles.sh ved første start
+      ABU_OWNER_PASSWORD: ${ABU_OWNER_PASSWORD:?Sæt ABU_OWNER_PASSWORD i .env (openssl rand -hex 32)}
+      ABU_APP_PASSWORD: ${ABU_APP_PASSWORD:?Sæt ABU_APP_PASSWORD i .env (openssl rand -hex 32)}
+      ABU_JOBS_PASSWORD: ${ABU_JOBS_PASSWORD:-}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./prisma/roles.sql:/abu/roles.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U abu -d abu"]
+      # Over TCP: init-scripts kører mod en midlertidig server, der kun lytter på socket, så "sund" = rollerne findes
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d abu"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Kør prisma/roles.sql igen mod en kørende database: docker compose run --rm db-roles
+  db-roles:
+    image: postgres:16
+    profiles: ["tools"]
+    entrypoint: ["bash", "/docker-entrypoint-initdb.d/10-abu-roles.sh"]
+    environment:
+      PGHOST: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Sæt POSTGRES_PASSWORD i .env}
+      # En volumen fra før RLS fase 0 har superbrugeren «abu»: POSTGRES_SUPERUSER=abu (og dens adgangskode i POSTGRES_PASSWORD)
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_DB: abu
+      ABU_OWNER_PASSWORD: ${ABU_OWNER_PASSWORD:?Sæt ABU_OWNER_PASSWORD i .env}
+      ABU_APP_PASSWORD: ${ABU_APP_PASSWORD:?Sæt ABU_APP_PASSWORD i .env}
+      ABU_JOBS_PASSWORD: ${ABU_JOBS_PASSWORD:-}
+    volumes:
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./prisma/roles.sql:/abu/roles.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   migrate:
     build:
       context: .
       target: build
-    command: npx prisma migrate deploy
+    # Migrationer og derefter nøglen til den signerede RLS-kontekst (DB_CONTEXT_SECRET fra .env – samme som appens)
+    command: sh -c "npx prisma migrate deploy && npx tsx scripts/db-context-key.ts"
     env_file:
       - path: .env
         required: false
     environment:
       # Seed (demodata med kendte adgangskoder) afvises, når NODE_ENV=production. Lokalt: -e APP_ENV=development.
       NODE_ENV: production
-      DATABASE_URL: postgresql://abu:${POSTGRES_PASSWORD:-abu}@postgres:5432/abu
+      # Ejeren: migrationer, seed og create-admin (prisma.config.ts, scripts/owner-db-env.ts)
+      DATABASE_URL_MIGRATE: postgresql://abu_owner:${ABU_OWNER_PASSWORD:?Sæt ABU_OWNER_PASSWORD i .env}@postgres:5432/abu
+      # Superbrugeren hører ikke hjemme her
+      POSTGRES_PASSWORD: ""
+      DATABASE_URL_PROVISION: ""
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,8 +88,14 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgresql://abu:${POSTGRES_PASSWORD:-abu}@postgres:5432/abu
+      DATABASE_URL: postgresql://abu_app:${ABU_APP_PASSWORD:?Sæt ABU_APP_PASSWORD i .env}@postgres:5432/abu
       UPLOAD_DIR: /data/uploads
+      # Ejer- og superbrugeradgang må ikke være i app-processen (opstartstjekket afviser dem i produktion)
+      POSTGRES_PASSWORD: ""
+      ABU_OWNER_PASSWORD: ""
+      ABU_JOBS_PASSWORD: ""
+      DATABASE_URL_MIGRATE: ""
+      DATABASE_URL_PROVISION: ""
     ports:
       - "3000:3000"
     volumes:

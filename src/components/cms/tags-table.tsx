@@ -9,6 +9,8 @@ export function TagsTable({ initialTags }: { initialTags: CmsTag[] }) {
   const [tags, setTags] = useState(initialTags);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
+  const [kind, setKind] = useState<CmsTag["kind"]>("COMPETENCE");
+  const [show, setShow] = useState<"all" | CmsTag["kind"]>("all");
   const [confirm, setConfirm] = useState<CmsTag | null>(null);
   const saver = useSaver();
 
@@ -22,9 +24,9 @@ export function TagsTable({ initialTags }: { initialTags: CmsTag[] }) {
   const create = async () => {
     const n = name.trim();
     if (n.length < 2) return;
-    const r = await saver.run(() => createTagAction({ name: n, description: desc.trim() }));
+    const r = await saver.run(() => createTagAction({ name: n, description: desc.trim(), kind }));
     if (r && r.ok && "id" in r) {
-      setTags((ts) => [...ts, { id: (r as { id: string }).id, slug: n.toLowerCase(), name: n, description: desc.trim(), active: true, advisors: 0, answers: 0 }]);
+      setTags((ts) => [...ts, { id: (r as { id: string }).id, slug: n.toLowerCase(), name: n, description: desc.trim(), active: true, kind, system: false, advisors: 0, answers: 0 }]);
       setName("");
       setDesc("");
     }
@@ -51,9 +53,24 @@ export function TagsTable({ initialTags }: { initialTags: CmsTag[] }) {
             <label className="label" htmlFor="new-tag-desc">Beskrivelse (valgfri)</label>
             <input id="new-tag-desc" className="input" value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={200} />
           </div>
+          <div>
+            <label className="label" htmlFor="new-tag-kind">Type</label>
+            <select id="new-tag-kind" className="input" value={kind} onChange={(e) => setKind(e.target.value as CmsTag["kind"])}>
+              <option value="COMPETENCE">Kompetence (synlig for kunder)</option>
+              <option value="ADMIN">Internt (kun admin)</option>
+            </select>
+          </div>
           <button className="btn" type="submit" disabled={name.trim().length < 2}>Opret tag</button>
         </form>
         <SaveIndicator saver={saver} />
+      </div>
+
+      <div className="mb-space-3 flex flex-wrap items-center gap-2" role="group" aria-label="Vis tags">
+        {([["all", "Alle"], ["COMPETENCE", "Kompetence"], ["ADMIN", "Interne"]] as const).map(([v, l]) => (
+          <button key={v} type="button" aria-pressed={show === v} onClick={() => setShow(v)} className={`badge cursor-pointer ${show === v ? "badge-navy" : "badge-outline"}`}>
+            {l} ({v === "all" ? tags.length : tags.filter((t) => t.kind === v).length})
+          </button>
+        ))}
       </div>
 
       {tags.length === 0 ? (
@@ -65,13 +82,14 @@ export function TagsTable({ initialTags }: { initialTags: CmsTag[] }) {
               <tr>
                 <th>Navn</th>
                 <th>Beskrivelse</th>
+                <th>Type</th>
                 <th className="!text-right">Rådgivere</th>
                 <th className="!text-right">Svar</th>
                 <th>Aktiv</th>
               </tr>
             </thead>
             <tbody>
-              {tags.map((t) => (
+              {tags.filter((t) => show === "all" || t.kind === show).map((t) => (
                 <TagRow key={t.id} tag={t} onPatch={(p) => patch(t.id, p)} onToggle={(v) => toggle(t, v)} />
               ))}
             </tbody>
@@ -104,7 +122,7 @@ function TagRow({ tag, onPatch, onToggle }: { tag: CmsTag; onPatch: (p: { name?:
   const [desc, setDesc] = useState(tag.description);
   const unused = tag.advisors === 0;
   return (
-    <tr className={tag.active ? "" : "bg-grey-bg/60"} data-testid="tag-row">
+    <tr className={tag.active ? "" : "bg-grey-bg/60"} data-testid="tag-row" data-kind={tag.kind}>
       <td className="min-w-[11rem]">
         <input
           className="input !py-1.5 text-sm font-semibold"
@@ -127,15 +145,19 @@ function TagRow({ tag, onPatch, onToggle }: { tag: CmsTag; onPatch: (p: { name?:
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         />
       </td>
+      <td>
+        <span className={`badge ${tag.kind === "ADMIN" ? "badge-gold" : "badge-outline"}`}>{tag.kind === "ADMIN" ? "Internt" : "Kompetence"}</span>
+        {tag.system && <span className="mt-1 block text-xs text-muted">Systemtag</span>}
+      </td>
       <td className="text-right tabular-nums">
         {tag.advisors}
-        {tag.active && unused && tag.answers > 0 && <span className="badge badge-gold ml-2" title="Behov med dette tag kan aldrig dækkes">Ingen dækning</span>}
+        {tag.kind === "COMPETENCE" && tag.active && unused && tag.answers > 0 && <span className="badge badge-gold ml-2" title="Behov med dette tag kan aldrig dækkes">Ingen dækning</span>}
       </td>
-      <td className="text-right tabular-nums">{tag.answers}</td>
+      <td className="text-right tabular-nums">{tag.kind === "ADMIN" ? "–" : tag.answers}</td>
       <td>
         <div className="flex items-center gap-2">
-          <Switch checked={tag.active} onChange={onToggle} label={`${tag.name} er aktivt`} />
-          <span className="text-xs text-muted">{tag.active ? "Aktiv" : "Inaktiv"}</span>
+          <Switch checked={tag.active} onChange={onToggle} label={`${tag.name} er aktivt`} disabled={tag.system} />
+          <span className="text-xs text-muted">{tag.system ? "Altid aktiv" : tag.active ? "Aktiv" : "Inaktiv"}</span>
         </div>
       </td>
     </tr>

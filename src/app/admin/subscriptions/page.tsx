@@ -1,13 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Flash, flashFrom, type SP } from "@/components/flash";
-import { Initials, SubStatusBadge } from "@/components/ui";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
+import { SubStatusBadge } from "@/components/ui";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Abonnementer" };
 
 export default async function AdminSubscriptions({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const subs = await prisma.subscription.findMany({
     include: { customer: true, advisors: { include: { advisor: { include: { user: true } } } } },
@@ -34,9 +39,10 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             </div>
             <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm" aria-label="Board">
               {s.advisors.map((a) => (
-                <li key={a.advisorId} className="flex items-center gap-2"><span className="scale-75"><Initials name={a.advisor.user.name} /></span>{a.advisor.user.name}</li>
+                <li key={a.advisorId} className="flex items-center gap-2"><AdvisorAvatar advisorId={a.advisorId} name={a.advisor.user.name} photo={a.advisor.photoKey ? avatarVersion(a.advisor.photoUpdatedAt) : null} size="sm" />{a.advisor.user.name}{a.isLead && <span className="badge badge-gold" data-testid="lead-badge">Ansvarlig</span>}</li>
               ))}
             </ul>
+            {s.status !== "CANCELLED" && !s.advisors.some((a) => a.isLead) && <p className="mt-2 text-sm font-semibold text-danger">Ingen ansvarlig rådgiver</p>}
             <div className="mt-4">
               <Link className="btn-secondary btn-sm" href={`/admin/subscriptions/${s.id}`}>Rediger board</Link>
             </div>

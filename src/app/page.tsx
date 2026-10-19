@@ -5,7 +5,7 @@ import { PageShell } from "@/components/site-header";
 
 const STEPS: [string, string, string][] = [
   ["01", "Fortæl om jer", "Svar på nogle få spørgsmål, så foreslår vi et board af rådgivere, der supplerer hinanden. Justér det, til det passer."],
-  ["02", "Book mødet", "Se tidspunkter, hvor alle jeres rådgivere er ledige, og book med få klik."],
+  ["02", "Book mødet", "Se tidspunkter, hvor hele jeres board er ledigt, og book med få klik. I mødes altid med hele boardet."],
   ["03", "Få overblik", "Mødet afholdes online, transskriberes og opsummeres automatisk, så I kan handle på det."],
 ];
 

@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
-import { createPasswordToken, requireRole } from "@/lib/auth";
+import { createPasswordToken, requireFreshMfa, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { sendInviteEmail, inviteUrl } from "@/lib/emails";
-import { getPriceBounds, savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
-import { boardsWithAdvisor, loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
+import { savePriceBounds, validatePriceBounds } from "@/lib/advisor-price";
+import { setAdvisorActive } from "@/lib/advisor-activation";
+import { parseAdvisorProfile } from "@/lib/advisor-profile";
+import { formValues, type FormState } from "@/lib/form-state";
 import { getEnv } from "@/lib/env";
 import { setHolidayBlocked } from "@/lib/holidays";
 import { IdempotencyInFlightError, withIdempotency } from "@/lib/idempotency";
@@ -89,25 +91,53 @@ export async function resendInviteAction(_prev: InviteState, formData: FormData)
   return { ok: sent ? `Ny invitation sendt til ${user.email}.` : "Mailen kunne ikke sendes – brug linket.", inviteLink: await displayLinkIfNeeded(user.id, sent) };
 }
 
-export async function toggleAdvisorActiveAction(formData: FormData) {
+export interface ActivationState {
+  ok?: string;
+  error?: string;
+  /** Tidsstempel for svaret, så samme besked to gange stadig vises/annonceres */
+  at?: number;
+}
+
+/**
+ * Aktivér/deaktivér med en dedikeret knap, der gemmer straks (QA #13). `active` er den ønskede tilstand. Aktivering
+ * afvises på serveren, indtil tjeklisten er opfyldt (se `setAdvisorActive`); deaktivering er altid tilladt.
+ */
+export async function setAdvisorActiveAction(_prev: ActivationState, formData: FormData): Promise<ActivationState> {
   const admin = await requireRole("ADMIN");
-  const id = String(formData.get("userId"));
-  const profile = await prisma.advisorProfile.findUnique({ where: { userId: id }, include: { user: true } });
-  if (!profile) redirectWith("/admin/advisors", "err", "Rådgiveren findes ikke.");
-  const activate = !profile.active;
-  await prisma.advisorProfile.update({ where: { userId: id }, data: { active: activate } });
-  await audit(admin.id, activate ? "advisor.activate" : "advisor.deactivate", "User", id);
+  const id = String(formData.get("userId") ?? "");
+  const want = String(formData.get("active") ?? "");
+  if (want !== "true" && want !== "false") return { error: "Ugyldig handling.", at: Date.now() };
+  const r = await setAdvisorActive(admin.id, id, want === "true");
   revalidatePath("/admin/advisors");
-  if (activate) {
-    const missing = missingReadiness((await loadReadiness([id], await getPriceBounds())).get(id) ?? []);
-    redirectWith("/admin/advisors", "ok", `${profile.user.name} er aktiveret og kan nu vælges af kunder.${missing.length ? ` Bemærk: mangler ${missing.join(", ")}.` : ""}`);
-  }
-  const boards = await boardsWithAdvisor(id);
-  redirectWith(
-    "/admin/advisors",
-    "ok",
-    `${profile.user.name} er deaktiveret.${boards.length ? ` Berørte kunder (vælg en ny rådgiver under Abonnementer): ${[...new Set(boards.map((b) => b.companyName))].join(", ")}.` : ""}`,
-  );
+  revalidatePath(`/admin/advisors/${id}`);
+  return r.ok ? { ok: r.message, at: Date.now() } : { error: r.error, at: Date.now() };
+}
+
+/**
+ * Admin retter rådgiverens profil (titel, bio, mobilnummer) med samme validering som rådgiverens egen formular.
+ * Profilbilledet uploades/fjernes for sig (`advisor-photo.ts`). Rådgiveren kan stadig selv rette felterne under Min
+ * profil. Audit-logges med de ændrede feltnavne.
+ */
+export async function updateAdvisorProfileByAdminAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requireRole("ADMIN");
+  const values = formValues(formData);
+  const id = String(formData.get("userId") ?? "");
+  const user = await prisma.user.findFirst({ where: { id, role: "ADVISOR" }, include: { advisorProfile: true } });
+  if (!user?.advisorProfile) return { error: "Rådgiveren findes ikke.", values };
+  const parsed = parseAdvisorProfile(values);
+  if (!parsed.ok) return { error: parsed.error, values };
+  const d = parsed.data;
+  const before = { title: user.advisorProfile.title, bio: user.advisorProfile.bio, phone: user.phone };
+  const changed = (Object.keys(before) as (keyof typeof before)[]).filter((k) => before[k] !== d[k]);
+  if (changed.length === 0) return { ok: "Ingen ændringer at gemme.", values };
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id }, data: { phone: d.phone } });
+    await tx.advisorProfile.update({ where: { userId: id }, data: { title: d.title, bio: d.bio } });
+  });
+  await audit(admin.id, "advisor.profile.update", "User", id, `Felter: ${changed.join(",")}`);
+  revalidatePath("/admin/advisors");
+  revalidatePath(`/admin/advisors/${id}`);
+  return { ok: `Profilen er gemt. ${user.name} kan se og rette ændringerne under Min profil.`, values: { ...values, phone: d.phone ?? "" } };
 }
 
 export async function processJobsAction() {
@@ -118,7 +148,8 @@ export async function processJobsAction() {
 }
 
 export async function processDeletionAction(formData: FormData) {
-  const admin = await requireRole("ADMIN");
+  // Følsom handling: kræver en kode fra appen inden for de seneste 15 minutter
+  const { user: admin } = await requireFreshMfa("/admin/customers");
   const id = String(formData.get("userId"));
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.role === "ADMIN") redirectWith("/admin/customers", "err", "Kan ikke slette denne bruger.");

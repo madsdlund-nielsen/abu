@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
+import { freshMfaProblem, requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { validateSmsSender } from "@/lib/messaging/sms";
 import type { ActionResult } from "@/lib/onboarding/cms-types";
@@ -262,7 +262,9 @@ export async function saveSettingsAction(input: {
   smsPerNumberCap: number;
   smsDailyCap: number;
 }): R {
-  const admin = await requireRole("ADMIN");
+  // Følsom indstilling: kræver en kode fra appen inden for de seneste 15 minutter
+  const { user: admin, problem } = await freshMfaProblem();
+  if (problem) return err(problem);
   const p = z
     .object({
       quietEnabled: z.boolean(),

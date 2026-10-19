@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 import { prisma } from "../db";
+import { updateRequestPrincipal, withSystemContext } from "../db-context";
 import { cookieSecure } from "../env";
 import { randomToken, sha256 } from "../tokens";
 import type { CompanyInfo } from "../cvr/types";
@@ -86,14 +87,21 @@ export async function getOnboardingSession(): Promise<OnboardingState | null> {
   return toState(row);
 }
 
-/** Opretter en ny session og sætter cookien. Kun fra server actions / route handlers. */
+/**
+ * Opretter en ny session og sætter cookien. Kun fra server actions / route handlers. RLS: tilmeldingen er knyttet til
+ * cookiens hash (`app.onboarding_token`), så den nye hash sættes i konteksten, før rækken oprettes.
+ */
 export async function createOnboardingSession(init: { step: number; data: SessionData; leadId?: string | null }): Promise<OnboardingState> {
   await cleanupExpiredOnboarding();
   const token = randomToken();
+  const tokenHash = sha256(token);
   const expiresAt = new Date(Date.now() + ONBOARDING_DAYS * 86_400_000);
+  const jar = await cookies();
+  jar.set(ONBOARDING_COOKIE, token, { httpOnly: true, secure: cookieSecure(), sameSite: "lax", path: "/", expires: expiresAt });
+  await updateRequestPrincipal({ onboardingToken: tokenHash });
   const row = await prisma.onboardingSession.create({
     data: {
-      tokenHash: sha256(token),
+      tokenHash,
       step: init.step,
       data: init.data as unknown as Prisma.InputJsonValue,
       expiresAt,
@@ -101,8 +109,6 @@ export async function createOnboardingSession(init: { step: number; data: Sessio
     },
     include: { lead: { include: { consents: true } } },
   });
-  const jar = await cookies();
-  jar.set(ONBOARDING_COOKIE, token, { httpOnly: true, secure: cookieSecure(), sameSite: "lax", path: "/", expires: expiresAt });
   return toState(row);
 }
 
@@ -133,16 +139,23 @@ export async function deleteOnboardingSession(id: string) {
   await prisma.onboardingSession.deleteMany({ where: { id } });
   const jar = await cookies();
   jar.delete(ONBOARDING_COOKIE);
+  await updateRequestPrincipal({ onboardingToken: null });
 }
 
-/** GDPR: sletter udløbne sessioner. Kaldes fra jobkøen og ved oprettelse af nye sessioner. */
+/**
+ * GDPR: sletter udløbne sessioner. Kaldes fra jobkøen og ved oprettelse af nye sessioner (også før login) – RLS:
+ * oprydningen går på tværs af tilmeldinger og kører i systemkontekst.
+ */
 export async function cleanupExpiredOnboarding(): Promise<number> {
-  const r = await prisma.onboardingSession.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-  return r.count;
+  return withSystemContext("onboarding.cleanup_expired", async () => (await prisma.onboardingSession.deleteMany({ where: { expiresAt: { lt: new Date() } } })).count);
 }
 
-/** Sletter alle sessioner, der hører til en e-mailadresse (GDPR-sletning / efter gennemført tilmelding). */
+/**
+ * Sletter alle sessioner, der hører til en e-mailadresse (GDPR-sletning / efter gennemført tilmelding). RLS: matcher på
+ * e-mail i andre tilmeldinger end ens egen – systemkontekst.
+ */
 export async function deleteOnboardingSessionsForEmail(email: string): Promise<number> {
-  const r = await prisma.onboardingSession.deleteMany({ where: { data: { path: ["contact", "email"], equals: email } } });
-  return r.count;
+  return withSystemContext("onboarding.delete_for_email", async () =>
+    (await prisma.onboardingSession.deleteMany({ where: { data: { path: ["contact", "email"], equals: email } } })).count,
+  );
 }

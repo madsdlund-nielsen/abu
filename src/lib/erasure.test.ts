@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { asSystem, asUser, createTestUser, deleteTestUsers, describeDb, uid } from "../test/db";
 
 describe("sletning (M-3)", () => {
   it("modulet eksporterer sletning og oprydning", async () => {
@@ -9,7 +9,18 @@ describe("sletning (M-3)", () => {
 });
 
 describeDb("sletning mod databasen (M-3)", () => {
+  // Sletningen udføres af en administrator (processDeletionAction, frisk kode); WebhookEvent m.m. i systemkontekst
+  let admin: { id: string; role: "ADMIN" };
+  beforeAll(async () => {
+    admin = { id: (await createTestUser("ADMIN")).id, role: "ADMIN" };
+  });
+  afterAll(() => deleteTestUsers([admin.id]));
+  const asAdmin = <T>(fn: () => Promise<T>) => asUser(admin, fn);
+
   async function seedCustomer() {
+    return asSystem(() => seedCustomerAsSystem());
+  }
+  async function seedCustomerAsSystem() {
     const { prisma } = await import("./db");
     const email = `${uid("slet")}@test.dk`;
     const u = await prisma.user.create({
@@ -37,28 +48,71 @@ describeDb("sletning mod databasen (M-3)", () => {
     const { eraseUser } = await import("./erasure");
     const cancelSubscription = vi.fn().mockResolvedValue(undefined);
     const del = vi.fn().mockResolvedValue(undefined);
-    const r = await eraseUser(u.id, u.id, { payments: { cancelSubscription }, storage: { delete: del } });
+    const r = await asAdmin(() => eraseUser(u.id, admin.id, { payments: { cancelSubscription }, storage: { delete: del } }));
     expect(r).toMatchObject({ ok: true, cancelled: 1, objects: 1, webhookEvents: 2 });
     expect(cancelSubscription).toHaveBeenCalledWith(`fsub-${u.id}`);
     expect(del).toHaveBeenCalledWith(`recordings/x/${u.id}`);
-    expect(await prisma.user.findUnique({ where: { id: u.id } })).toBeNull();
-    expect(await prisma.lead.findUnique({ where: { email } })).toBeNull();
-    const left = await prisma.webhookEvent.findMany({ where: { OR: [{ payload: { path: ["subscription"], equals: `fsub-${u.id}` } }, { externalId: { startsWith: `video:wb-${u.id}` } }] } });
-    expect(left).toHaveLength(0);
-    expect(await prisma.webhookEvent.count({ where: { payload: { path: ["subscription"], equals: "en-anden" } } })).toBeGreaterThan(0);
+    await asSystem(async () => {
+      expect(await prisma.user.findUnique({ where: { id: u.id } })).toBeNull();
+      expect(await prisma.lead.findFirst({ where: { email } })).toBeNull();
+      const left = await prisma.webhookEvent.findMany({ where: { OR: [{ payload: { path: ["subscription"], equals: `fsub-${u.id}` } }, { externalId: { startsWith: `video:wb-${u.id}` } }] } });
+      expect(left).toHaveLength(0);
+      expect(await prisma.webhookEvent.count({ where: { payload: { path: ["subscription"], equals: "en-anden" } } })).toBeGreaterThan(0);
+      // Sletningen er audit-logget med administratoren som aktør
+      expect(await prisma.auditLog.count({ where: { action: "user.delete", entityId: u.id, userId: admin.id } })).toBe(1);
+    });
   });
 
   it("sletter intet, hvis opsigelsen hos udbyderen fejler", async () => {
     const { prisma, u } = await seedCustomer();
     const { eraseUser } = await import("./erasure");
-    const r = await eraseUser(u.id, u.id, { payments: { cancelSubscription: vi.fn().mockRejectedValue(new Error("503")) }, storage: { delete: vi.fn() } });
+    const r = await asAdmin(() => eraseUser(u.id, admin.id, { payments: { cancelSubscription: vi.fn().mockRejectedValue(new Error("503")) }, storage: { delete: vi.fn() } }));
     expect(r.ok).toBe(false);
-    expect(await prisma.user.findUnique({ where: { id: u.id } })).not.toBeNull();
-    await prisma.webhookEvent.deleteMany({ where: { payload: { path: ["subscription"], equals: `fsub-${u.id}` } } });
-    await prisma.user.delete({ where: { id: u.id } });
+    await asSystem(async () => {
+      expect(await prisma.user.findUnique({ where: { id: u.id } })).not.toBeNull();
+      await prisma.webhookEvent.deleteMany({ where: { payload: { path: ["subscription"], equals: `fsub-${u.id}` } } });
+      await prisma.user.delete({ where: { id: u.id } });
+    });
   });
 
-  it("fjerner webhook-payloads efter 30 dage, men beholder id'et (idempotens)", async () => {
+  it("sletning af en rådgiver sletter profilbilledet (512 og 96 px) i lageret", async () => {
+    const { prisma } = await import("./db");
+    const { eraseUser } = await import("./erasure");
+    const u = await asSystem(async () => {
+      const u = await prisma.user.create({
+        data: { email: `${uid("slet-adv")}@test.dk`, name: "Rådgiver Slet", role: "ADVISOR", advisorProfile: { create: { photoKey: "avatars/x/abc.webp", photoUpdatedAt: new Date() } } },
+      });
+      await prisma.advisorProfile.update({ where: { userId: u.id }, data: { photoKey: `avatars/${u.id}/abc.webp` } });
+      return u;
+    });
+    const del = vi.fn().mockResolvedValue(undefined);
+    const r = await asAdmin(() => eraseUser(u.id, admin.id, { payments: { cancelSubscription: vi.fn() }, storage: { delete: del } }));
+    expect(r).toMatchObject({ ok: true, objects: 2 });
+    expect(del.mock.calls.map((c) => c[0]).sort()).toEqual([`avatars/${u.id}/abc-96.webp`, `avatars/${u.id}/abc.webp`]);
+    await asSystem(async () => {
+      expect(await prisma.user.findUnique({ where: { id: u.id } })).toBeNull();
+      expect(await prisma.advisorProfile.findUnique({ where: { userId: u.id } })).toBeNull();
+    });
+  });
+
+  it("sletter ikke rådgiveren, hvis profilbilledet ikke kan slettes i lageret", async () => {
+    const { prisma } = await import("./db");
+    const { eraseUser } = await import("./erasure");
+    const u = await asSystem(async () => {
+      const u = await prisma.user.create({ data: { email: `${uid("slet-adv")}@test.dk`, name: "R", role: "ADVISOR", advisorProfile: { create: {} } } });
+      await prisma.advisorProfile.update({ where: { userId: u.id }, data: { photoKey: `avatars/${u.id}/abc.webp`, photoUpdatedAt: new Date() } });
+      return u;
+    });
+    const r = await asAdmin(() => eraseUser(u.id, admin.id, { payments: { cancelSubscription: vi.fn() }, storage: { delete: vi.fn().mockRejectedValue(new Error("503")) } }));
+    expect(r).toEqual({ ok: false, error: "Profilbilledet kunne ikke slettes fra lageret. Prøv igen." });
+    await asSystem(async () => {
+      expect(await prisma.user.findUnique({ where: { id: u.id } })).not.toBeNull();
+      await prisma.user.delete({ where: { id: u.id } });
+    });
+  });
+
+  // Jobkøen kører i systemkontekst («jobs.process»)
+  it("fjerner webhook-payloads efter 30 dage, men beholder id'et (idempotens)", () => asSystem(async () => {
     const { prisma } = await import("./db");
     const { cleanupWebhookPayloads } = await import("./erasure");
     const old = uid("gammel");
@@ -69,5 +123,5 @@ describeDb("sletning mod databasen (M-3)", () => {
     expect((await prisma.webhookEvent.findUniqueOrThrow({ where: { externalId: old } })).payload).toEqual({ fjernet: true });
     expect((await prisma.webhookEvent.findUniqueOrThrow({ where: { externalId: fresh } })).payload).toEqual({ email: "kunde@firma.dk" });
     await prisma.webhookEvent.deleteMany({ where: { externalId: { in: [old, fresh] } } });
-  });
+  }));
 });

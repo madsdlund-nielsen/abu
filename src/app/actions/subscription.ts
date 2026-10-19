@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { cancelMeeting } from "@/lib/booking";
+import { ensureLead, leadEligibleIds } from "@/lib/lead";
 import { prisma } from "@/lib/db";
 import { startCheckout } from "@/lib/checkout";
 import { resolveBoard } from "@/lib/onboarding/board";
@@ -50,25 +51,30 @@ export async function changePlanAction(formData: FormData) {
   if (!sub || (sub.status !== "ACTIVE" && sub.status !== "PAST_DUE")) {
     redirectWith(back, "err", "Du har intet aktivt abonnement at ændre.");
   }
+  // Den ansvarlige beholdes kun, hvis vedkommende stadig kan være ansvarlig (lead-tagget) – RLS håndhæver det samme (R-1)
+  const prevLeadId = sub.advisors.find((a) => a.isLead)?.advisorId;
+  const prevLead = prevLeadId && (await leadEligibleIds([prevLeadId])).has(prevLeadId) ? prevLeadId : undefined;
   try {
     await getPayments().changePlan(sub.providerSubscriptionId ?? sub.id, planHandle(board.weeks), board.monthlyPriceDkk);
   } catch (e) {
     console.error("[subscription] skift af plan fejlede", e);
     redirectWith(back, "err", "Planen kunne ikke ændres hos betalingsudbyderen. Prøv igen senere.");
   }
-  await prisma.$transaction([
-    prisma.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } }),
-    prisma.subscription.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } });
+    await tx.subscription.update({
       where: { id: sub.id },
       data: {
         advisorCount: board.advisors.length,
         frequencyWeeks: board.weeks,
         monthlyPriceDkk: board.monthlyPriceDkk,
-        advisors: { create: board.advisors.map((a) => ({ advisorId: a.id, pricePerMeetingDkk: a.pricePerMeetingDkk })) },
+        advisors: { create: board.advisors.map((a) => ({ advisorId: a.id, pricePerMeetingDkk: a.pricePerMeetingDkk, isLead: a.id === prevLead })) },
       },
-    }),
-  ]);
+    });
+  });
   await audit(user.id, "subscription.change_plan", "Subscription", sub.id);
+  // Den ansvarlige beholder rollen, hvis vedkommende stadig er i boardet; ellers tildeles en ny automatisk
+  await ensureLead(sub.id, "board_changed", user.id);
   const before = new Set(sub.advisors.map((a) => a.advisorId));
   const after = new Set(board.advisors.map((a) => a.id));
   const addedIds = [...after].filter((id) => !before.has(id));

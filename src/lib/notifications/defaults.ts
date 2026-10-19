@@ -201,6 +201,38 @@ Se dit overblik:
 ${SIGN}`,
   },
   {
+    key: "board_lead_changed_customer_email",
+    channel: "EMAIL",
+    name: "Ansvarlig rådgiver ændret – kunde (e-mail)",
+    subject: "Ny ansvarlig rådgiver for jeres board",
+    body: `Hej {{fornavn}}
+
+{{ændring}}
+
+Den ansvarlige rådgiver er jeres faste kontakt i boardet. Møderne holdes fortsat med hele boardet: {{rådgivere}}
+
+Se dit abonnement:
+{{kontolink}}
+
+${SIGN}`,
+  },
+  {
+    key: "board_lead_changed_advisor_email",
+    channel: "EMAIL",
+    name: "Ansvarlig rådgiver ændret – rådgiver (e-mail)",
+    subject: "Ansvarlig rådgiver hos {{virksomhed}}",
+    body: `Hej {{fornavn}}
+
+{{ændring}}
+
+Kunde: {{virksomhed}}
+
+Se dit overblik:
+{{kontolink}}
+
+${SIGN}`,
+  },
+  {
     key: "payment_failed_email",
     channel: "EMAIL",
     name: "Betaling mislykkedes (e-mail)",
@@ -271,6 +303,22 @@ Du er oprettet som rådgiver hos Advisory Board Unlimited. Vælg en adgangskode 
 ${SIGN}`,
   },
   {
+    key: "admin_invited_email",
+    channel: "EMAIL",
+    name: "Invitation til administrator (e-mail)",
+    subject: "Du er inviteret som administrator af Advisory Board Unlimited",
+    body: `Hej {{fornavn}}
+
+Du er inviteret som administrator af Advisory Board Unlimited. Vælg en adgangskode via linket (gyldigt i 7 dage, kan bruges én gang):
+{{invitationslink}}
+
+Ved første login skal du opsætte totrinsbekræftelse med en godkendelses-app, fx Authy, Google Authenticator eller 1Password. Hav telefonen klar.
+
+Har du ikke ventet denne invitation, kan du se bort fra e-mailen.
+
+${SIGN}`,
+  },
+  {
     key: "password_reset_email",
     channel: "EMAIL",
     name: "Nulstil adgangskode (e-mail)",
@@ -316,12 +364,15 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { trigger: "transcript_ready", offsetMinutes: 0, channel: "EMAIL", templateKey: "transcript_ready_email", audience: "BOTH" },
   { trigger: "board_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_changed_customer_email", audience: "CUSTOMER" },
   { trigger: "board_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_changed_advisor_email", audience: "ADVISORS" },
+  { trigger: "board_lead_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_lead_changed_customer_email", audience: "CUSTOMER" },
+  { trigger: "board_lead_changed", offsetMinutes: 0, channel: "EMAIL", templateKey: "board_lead_changed_advisor_email", audience: "ADVISORS" },
   { trigger: "payment_failed", offsetMinutes: 0, channel: "EMAIL", templateKey: "payment_failed_email", audience: "CUSTOMER" },
   { trigger: "payment_failed", offsetMinutes: 4320, channel: "EMAIL", templateKey: "payment_failed_reminder_email", audience: "CUSTOMER" },
   { trigger: "onboarding_abandoned", offsetMinutes: 60, channel: "EMAIL", templateKey: "onboarding_abandoned_1_email", audience: "SUBJECT" },
   { trigger: "onboarding_abandoned", offsetMinutes: 1440, channel: "EMAIL", templateKey: "onboarding_abandoned_2_email", audience: "SUBJECT" },
   { trigger: "onboarding_abandoned", offsetMinutes: 4320, channel: "SMS", templateKey: "onboarding_abandoned_sms", audience: "SUBJECT", quietHours: true },
   { trigger: "advisor_invited", offsetMinutes: 0, channel: "EMAIL", templateKey: "advisor_invited_email", audience: "SUBJECT" },
+  { trigger: "admin_invited", offsetMinutes: 0, channel: "EMAIL", templateKey: "admin_invited_email", audience: "SUBJECT" },
   { trigger: "password_reset", offsetMinutes: 0, channel: "EMAIL", templateKey: "password_reset_email", audience: "SUBJECT" },
   { trigger: "account_exists", offsetMinutes: 0, channel: "EMAIL", templateKey: "account_exists_email", audience: "SUBJECT" },
 ];

@@ -1,7 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { withSystemContext } from "./db-context";
 import { completePastMeetings } from "./meeting-status";
 import { cleanupExpiredOnboarding } from "./onboarding/session";
+import { cleanupTrustedDevices } from "./mfa/service";
+
+async function cleanupAuth(now = new Date()) {
+  await cleanupTrustedDevices(now);
+  await prisma.session.deleteMany({ where: { expiresAt: { lt: now } } });
+}
 
 type Handler = (payload: Record<string, unknown>) => Promise<void>;
 const handlers = new Map<string, Handler>();
@@ -13,8 +20,12 @@ export function registerJobHandler(type: string, handler: Handler) {
 const MAX_ATTEMPTS = 3;
 const STALE_LOCK_MS = 15 * 60_000;
 
+/**
+ * Lægger et job i køen. RLS: Job er en systemtabel – kaldes fra requests (fx optagelse uploadet) og webhooks, så
+ * rækken skrives altid i systemkontekst. Selve jobbet kører senere i processJobs (også systemkontekst).
+ */
 export async function enqueueJob(type: string, payload: Record<string, unknown>) {
-  const job = await prisma.job.create({ data: { type, payload: payload as Prisma.InputJsonValue } });
+  const job = await withSystemContext("jobs.enqueue", () => prisma.job.create({ data: { type, payload: payload as Prisma.InputJsonValue } }));
   // Kør i baggrunden i samme proces; cron-ruten samler op hvis processen dør.
   setTimeout(() => {
     processJobs(1).catch((e) => console.error("[jobs] fejl", e));
@@ -39,13 +50,23 @@ async function claimNext() {
   return prisma.job.findUnique({ where: { id: rows[0].id } });
 }
 
+/**
+ * Jobprocessoren (scheduler hvert minut, cron-ruten og admins «Kør baggrundsjob»). RLS: altid systemkontekst – jobbene
+ * går på tværs af kunder (påmindelser, oprydning, transskription).
+ */
 export async function processJobs(limit = 5): Promise<number> {
+  return withSystemContext("jobs.process", () => processJobsAsSystem(limit));
+}
+
+async function processJobsAsSystem(limit: number): Promise<number> {
   await import("./pipeline"); // registrerer handlers
   const { runNotificationTick } = await import("./notifications/jobs"); // registrerer handlers
   // Idempotent oprydning: BOOKED møder, der er slut, bliver COMPLETED.
   await completePastMeetings().catch((e) => console.error("[jobs] completePastMeetings fejlede", e));
   // GDPR: udløbne onboarding-sessioner slettes.
   await cleanupExpiredOnboarding().catch((e) => console.error("[jobs] oprydning af onboarding fejlede", e));
+  // Udløbne betroede enheder og sessioner slettes.
+  await cleanupAuth().catch((e) => console.error("[jobs] oprydning af sessioner/enheder fejlede", e));
   // Notifikationer: ufærdige tilmeldinger, forfaldne beskeder og daglig oprydning af loggen.
   await runNotificationTick().catch((e) => console.error("[jobs] notifikationer fejlede", e));
   let done = 0;

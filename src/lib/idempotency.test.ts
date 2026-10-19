@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeDb, uid } from "../test/db";
+import { asUser, describeDb, uid } from "../test/db";
 import { idempotencyId, isValidIdempotencyKey } from "./idempotency";
 
 describe("idempotens-nøgler (QA #1)", () => {
@@ -28,15 +28,17 @@ describeDb("withIdempotency mod databasen (QA #1)", () => {
       await new Promise((r) => setTimeout(r, 200));
       return { ok: true, meetingId: `m${n}` };
     });
-    const [a, b, c] = await Promise.all([1, 2, 3].map(() => withIdempotency({ userId: user, scope: "booking", key }, fn)));
+    // Som i bookAction: kunden kalder; nøglerne skrives i systemkontekst, handlingen kører som kunden
+    const [a, b, c] = await asUser({ id: user, role: "CUSTOMER" }, () => Promise.all([1, 2, 3].map(() => withIdempotency({ userId: user, scope: "booking", key }, fn))));
     expect(fn).toHaveBeenCalledTimes(1);
     expect([a.result, b.result, c.result]).toEqual([{ ok: true, meetingId: "m1" }, { ok: true, meetingId: "m1" }, { ok: true, meetingId: "m1" }]);
     expect([a, b, c].filter((x) => x.replayed)).toHaveLength(2);
     // Senere gentagelse (fx genindsendt formular) får også det første resultat
-    expect((await withIdempotency({ userId: user, scope: "booking", key }, fn)).result).toEqual({ ok: true, meetingId: "m1" });
+    expect((await asUser({ id: user, role: "CUSTOMER" }, () => withIdempotency({ userId: user, scope: "booking", key }, fn))).result).toEqual({ ok: true, meetingId: "m1" });
     expect(fn).toHaveBeenCalledTimes(1);
     // Anden bruger med samme nøgle er uafhængig
-    await withIdempotency({ userId: uid("u"), scope: "booking", key }, fn);
+    const other = uid("u");
+    await asUser({ id: other, role: "CUSTOMER" }, () => withIdempotency({ userId: other, scope: "booking", key }, fn));
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
@@ -44,7 +46,7 @@ describeDb("withIdempotency mod databasen (QA #1)", () => {
     const { withIdempotency } = await import("./idempotency");
     const key = crypto.randomUUID();
     const user = uid("u");
-    await expect(withIdempotency({ userId: user, scope: "x", key }, async () => { throw new Error("netværk"); })).rejects.toThrow("netværk");
-    expect((await withIdempotency({ userId: user, scope: "x", key }, async () => ({ ok: true }))).result).toEqual({ ok: true });
+    await expect(asUser({ id: user, role: "CUSTOMER" }, () => withIdempotency({ userId: user, scope: "x", key }, async () => { throw new Error("netværk"); }))).rejects.toThrow("netværk");
+    expect((await asUser({ id: user, role: "CUSTOMER" }, () => withIdempotency({ userId: user, scope: "x", key }, async () => ({ ok: true })))).result).toEqual({ ok: true });
   });
 });

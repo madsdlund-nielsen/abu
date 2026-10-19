@@ -174,4 +174,7 @@ export const QUESTIONS: SeedQuestion[] = [
 ];
 
 /** Demokundens board (de første tre rådgivere). */
+/** Rådgivere med det interne tag «Lead-kvalificeret» (kan være ansvarlig rådgiver for et board). */
+export const LEAD_ADVISOR_EMAILS = ["mette.lindberg@abu.local", "camilla.nielsen@abu.local", "soeren.bjerregaard@abu.local", "louise.hansen@abu.local"];
+
 export const DEMO_BOARD_EMAILS = ["mette.lindberg@abu.local", "jesper.andersen@abu.local", "camilla.nielsen@abu.local"];

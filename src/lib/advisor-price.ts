@@ -41,9 +41,9 @@ export async function getPriceBounds(): Promise<PriceBounds> {
 }
 
 export async function savePriceBounds(b: PriceBounds): Promise<void> {
-  await prisma.$transaction(
-    (Object.keys(KEYS) as (keyof PriceBounds)[]).map((k) =>
-      prisma.appSetting.upsert({ where: { key: KEYS[k] }, update: { value: String(b[k]) }, create: { key: KEYS[k], value: String(b[k]) } }),
-    ),
-  );
+  await prisma.$transaction(async (tx) => {
+    for (const k of Object.keys(KEYS) as (keyof PriceBounds)[]) {
+      await tx.appSetting.upsert({ where: { key: KEYS[k] }, update: { value: String(b[k]) }, create: { key: KEYS[k], value: String(b[k]) } });
+    }
+  });
 }

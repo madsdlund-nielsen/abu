@@ -2,10 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { OnboardingCms } from "@/components/cms/onboarding-cms";
 import { loadCmsData } from "@/lib/onboarding/cms-data";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Onboarding-test" };
 
 export default async function AdminOnboarding() {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { questions, tags, advisors } = await loadCmsData();
   return (
     <div>

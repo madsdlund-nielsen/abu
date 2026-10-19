@@ -3,8 +3,9 @@ const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
   serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg", "bcryptjs"],
-  // Optagelser uploades direkte til lageret / som stream (H-5); server actions behøver kun små bodies
-  experimental: { serverActions: { bodySizeLimit: "10mb" } },
+  // Filer går aldrig gennem server actions: optagelser uploades direkte til lageret / som stream (H-5) og rådgiverfotos via
+  // PUT /api/avatar/<id> (D-2). Server actions får kun formulardata, så loftet (der læses før auth) holdes på 1 MB.
+  experimental: { serverActions: { bodySizeLimit: "1mb" } },
   async headers() {
     return [
       {

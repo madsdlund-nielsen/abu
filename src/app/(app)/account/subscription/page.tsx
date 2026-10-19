@@ -3,7 +3,7 @@ import Link from "next/link";
 import { cancelSubscriptionAction, changePlanAction } from "@/app/actions/subscription";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { BoardBuilder } from "@/components/board-builder";
-import { SubStatusBadge } from "@/components/ui";
+import { LeadLabel, SubStatusBadge } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { loadCatalog } from "@/lib/onboarding/catalog";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
@@ -43,6 +43,10 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
               <dt className="text-muted">Dit board</dt>
               <dd>{sub.advisors.map((a) => `${a.advisor.user.name} (${formatDkk(a.pricePerMeetingDkk)} pr. møde)`).join(", ")}</dd>
             </div>
+            <div className="sm:col-span-2" data-testid="customer-lead">
+              <dt className="text-muted">Ansvarlig rådgiver</dt>
+              <dd><LeadLabel name={sub.advisors.find((a) => a.isLead)?.advisor.user.name} /></dd>
+            </div>
           </dl>
           {sub.status === "PAST_DUE" && (
             <p className="callout callout-error mt-3 text-sm">
@@ -69,6 +73,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
               submitLabel="Gem ændringer"
               initialAdvisorIds={sub.advisors.map((a) => a.advisorId)}
               initialWeeks={sub.frequencyWeeks}
+              currentLeadId={sub.advisors.find((a) => a.isLead)?.advisorId ?? null}
             />
           </section>
           <section className="card">

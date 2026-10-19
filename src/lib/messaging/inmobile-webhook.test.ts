@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDb } from "../../test/db";
+import { asSystem, describeDb } from "../../test/db";
 import { authorizeInmobileWebhook } from "./inmobile-webhook";
 
 const url = (q = "") => `https://abu.example.com/api/webhooks/inmobile${q}`;
@@ -22,10 +22,13 @@ describeDb("inMobile STOP kun fra kendte numre (M-7)", () => {
     const { prisma } = await import("../db");
     const { isKnownSmsNumber } = await import("./inmobile-webhook");
     const n = `+459${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}`;
-    expect(await isKnownSmsNumber(n)).toBe(false);
-    const id = `t-${Date.now()}`;
-    await prisma.notificationLog.create({ data: { id, trigger: "test", channel: "SMS", recipientAddress: n, entityType: "test", entityId: id, dedupe: id, scheduledFor: new Date(), templateKey: "t" } });
-    expect(await isKnownSmsNumber(n)).toBe(true);
-    await prisma.notificationLog.delete({ where: { id } });
+    // Webhooken kører i systemkontekst (route.ts), efter at hemmeligheden er godkendt
+    await asSystem(async () => {
+      expect(await isKnownSmsNumber(n)).toBe(false);
+      const id = `t-${Date.now()}`;
+      await prisma.notificationLog.create({ data: { id, trigger: "test", channel: "SMS", recipientAddress: n, entityType: "test", entityId: id, dedupe: id, scheduledFor: new Date(), templateKey: "t" } });
+      expect(await isKnownSmsNumber(n)).toBe(true);
+      await prisma.notificationLog.delete({ where: { id } });
+    });
   });
 });

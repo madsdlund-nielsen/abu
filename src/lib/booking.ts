@@ -8,34 +8,44 @@ import { getVideo } from "./video";
 import { getBlockedDates } from "./holidays";
 import { localDateKey } from "./time";
 import { audit } from "./audit";
-import { ADVISOR_BLOCKING_STATUSES } from "./meeting-status";
 import { cancellationFreesQuota } from "./quota";
 
 export class BookingError extends Error {}
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
+/**
+ * Regler, fravær og optagne tider for rådgiverne i perioden. RLS: en kunde ser kun regler/fravær for rådgiverne i sit
+ * eget board, og rådgivernes øvrige møder (med andre kunder) kun som start/slut via `rls.advisor_busy` – uden mødeid'er,
+ * status, kunder eller indhold, kun møder der optager kalenderen (ADVISOR_BLOCKING_STATUSES) og kun i bookingvinduet
+ * (R-3). Admin ser alle.
+ */
 export async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Date, excludeMeetingId?: string): Promise<AdvisorAvailability[]> {
   const margin = 24 * 3_600_000;
-  const [rules, blocks, meetings] = await Promise.all([
+  const busyFrom = new Date(from.getTime() - margin);
+  const busyTo = new Date(to.getTime() + margin);
+  const [rules, blocks, busy] = await Promise.all([
     tx.availabilityRule.findMany({ where: { advisorId: { in: advisorIds } } }),
     tx.availabilityBlock.findMany({
       where: { advisorId: { in: advisorIds }, endsAt: { gt: from }, startsAt: { lt: to } },
     }),
-    tx.meetingParticipant.findMany({
-      where: {
-        userId: { in: advisorIds },
-        meeting: { ...(excludeMeetingId ? { id: { not: excludeMeetingId } } : {}), status: { in: ADVISOR_BLOCKING_STATUSES }, endsAt: { gt: new Date(from.getTime() - margin) }, startsAt: { lt: new Date(to.getTime() + margin) } },
-      },
-      select: { userId: true, meeting: { select: { startsAt: true, endsAt: true } } },
-    }),
+    advisorIds.length
+      ? tx.$queryRaw<{ advisor_id: string; starts_at: Date; ends_at: Date }[]>`
+          SELECT advisor_id, starts_at, ends_at
+            FROM rls.advisor_busy(${advisorIds}::text[], ${busyFrom}::timestamp(3), ${busyTo}::timestamp(3), ${excludeMeetingId ?? null}::text)`
+      : Promise.resolve([]),
   ]);
   return advisorIds.map((id) => ({
     id,
     rules: rules.filter((r) => r.advisorId === id),
     blocks: blocks.filter((b) => b.advisorId === id),
-    meetings: meetings.filter((m) => m.userId === id).map((m) => m.meeting),
+    meetings: busy.filter((m) => m.advisor_id === id).map((m) => ({ startsAt: m.starts_at, endsAt: m.ends_at })),
   }));
+}
+
+/** Møder planlægges altid for hele boardet (ejerens beslutning): alle `advisorCount` pladser skal være besat. */
+export function hasWholeBoard(sub: { advisorCount: number; advisors: unknown[] }): boolean {
+  return sub.advisors.length >= sub.advisorCount && sub.advisors.length > 0;
 }
 
 async function loadSubscription(tx: Tx, subscriptionId: string) {
@@ -53,7 +63,8 @@ export async function getBookableSlots(subscriptionId: string, now = new Date())
   const sub = await loadSubscription(prisma, subscriptionId);
   if (!sub || sub.status !== "ACTIVE" || !sub.startedAt) return [];
   const advisorIds = sub.advisors.map((a) => a.advisorId);
-  if (sub.advisors.some((a) => !a.advisor.active)) return [];
+  // Møder holdes altid med hele boardet: mangler en rådgiver (inaktiv eller slettet), kan der ikke bookes
+  if (sub.advisors.some((a) => !a.advisor.active) || !hasWholeBoard(sub)) return [];
   const duration = getEnv().MEETING_DURATION_MINUTES;
   const { earliest, latest } = bookingWindow({ now });
   const [availability, blockedDates] = await Promise.all([loadAvailability(prisma, advisorIds, earliest, latest), getBlockedDates(earliest, latest)]);
@@ -85,6 +96,7 @@ export async function bookMeeting(opts: { subscriptionId: string; startsAt: Date
       const advisorIds = sub.advisors.map((a) => a.advisorId).sort();
       if (advisorIds.length === 0) throw new BookingError("Der er ingen rådgivere på abonnementet.");
       if (sub.advisors.some((a) => !a.advisor.active)) throw new BookingError("En af rådgiverne er ikke længere aktiv.");
+      if (!hasWholeBoard(sub)) throw new BookingError("Boardet mangler en rådgiver. Møder holdes altid med hele boardet – kontakt os, så sætter vi det sammen igen.");
 
       // Lås abonnement og rådgivere i fast rækkefølge (undgår deadlocks)
       for (const key of [`sub:${sub.id}`, ...advisorIds.map((id) => `adv:${id}`)]) {

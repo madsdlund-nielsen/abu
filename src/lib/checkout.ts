@@ -1,4 +1,6 @@
+import { audit } from "./audit";
 import { prisma } from "./db";
+import { assignLeadTx } from "./lead";
 import { getEnv } from "./env";
 import type { ResolvedBoard } from "./onboarding/board";
 import { getPayments } from "./payments";
@@ -13,16 +15,25 @@ export async function startCheckout(opts: { userId: string; board: ResolvedBoard
   const profile = await prisma.customerProfile.findUniqueOrThrow({ where: { userId }, include: { user: true } });
   await prisma.subscription.deleteMany({ where: { customerId: userId, status: "PENDING" } });
   const payments = getPayments();
-  const sub = await prisma.subscription.create({
-    data: {
-      customerId: userId,
-      advisorCount: board.advisors.length,
-      frequencyWeeks: board.weeks,
-      monthlyPriceDkk: board.monthlyPriceDkk,
-      provider: payments.name,
-      advisors: { create: board.advisors.map((a) => ({ advisorId: a.id, pricePerMeetingDkk: a.pricePerMeetingDkk })) },
+  // Oprettes som PENDING med en ansvarlig rådgiver (den kvalificerede med færrest ansvarsroller), i samme transaktion
+  const sub = await prisma.$transaction(
+    async (tx) => {
+      const created = await tx.subscription.create({
+        data: {
+          customerId: userId,
+          advisorCount: board.advisors.length,
+          frequencyWeeks: board.weeks,
+          monthlyPriceDkk: board.monthlyPriceDkk,
+          provider: payments.name,
+          advisors: { create: board.advisors.map((a) => ({ advisorId: a.id, pricePerMeetingDkk: a.pricePerMeetingDkk })) },
+        },
+      });
+      await assignLeadTx(tx, created.id);
+      return created;
     },
-  });
+    { timeout: 15_000 },
+  );
+  await audit(userId, "subscription.lead.auto", "Subscription", sub.id, "Ansvarlig rådgiver tildelt (nyt abonnement)");
   const base = getEnv().APP_URL.replace(/\/$/, "");
   try {
     const checkout = await payments.createCheckout({

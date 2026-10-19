@@ -56,3 +56,21 @@ export async function recordFailedLogin(userId: string, now = new Date()): Promi
 export async function resetLoginFailures(userId: string): Promise<void> {
   await prisma.user.update({ where: { id: userId }, data: { failedLoginCount: 0, lastFailedLoginAt: null, lockedUntil: null } });
 }
+
+/**
+ * Forkert kode til totrinsbekræftelse: samme eskalerende spærring som login (5 → 15 min, 10 → 30 min …), men med en
+ * egen tæller, så et korrekt password ikke nulstiller den. Spærringen skrives i `lockedUntil` og gælder derfor også
+ * login. Tælleren nulstilles kun af en korrekt kode.
+ */
+export async function recordFailedMfa(userId: string, now = new Date()): Promise<{ lockedNow: boolean; lockedUntil: Date | null }> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+    const u = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { mfaFailedCount: true, mfaLastFailedAt: true, lockedUntil: true } });
+    const next = afterFailedLogin({ failedLoginCount: u.mfaFailedCount, lastFailedLoginAt: u.mfaLastFailedAt, lockedUntil: u.lockedUntil }, now);
+    await tx.user.update({
+      where: { id: userId },
+      data: { mfaFailedCount: next.failedLoginCount, mfaLastFailedAt: next.lastFailedLoginAt, lockedUntil: next.lockedUntil },
+    });
+    return { lockedNow: next.lockedNow, lockedUntil: next.lockedUntil };
+  });
+}

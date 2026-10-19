@@ -15,6 +15,11 @@ export interface S3Config {
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /**
+   * Path-style (`https://fsn1.your-objectstorage.com/<bucket>/<nøgle>`) i stedet for virtual-hosted
+   * (`https://<bucket>.fsn1.your-objectstorage.com/<nøgle>`). Hetzner understøtter begge; standard er path-style.
+   */
+  forcePathStyle?: boolean;
 }
 
 const MAX_SERVER_PUT_BYTES = 10 * 1024 * 1024;
@@ -27,7 +32,7 @@ export class S3Storage implements StorageProvider {
     this.client = new S3Client({
       endpoint: cfg.endpoint,
       region: cfg.region,
-      forcePathStyle: true,
+      forcePathStyle: cfg.forcePathStyle ?? true,
       credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
     });
   }
@@ -43,7 +48,7 @@ export class S3Storage implements StorageProvider {
       chunks.push(c);
       bytes += c.length;
     }
-    await this.client.send(new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key, Body: Buffer.concat(chunks) }));
+    await this.client.send(new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key, Body: Buffer.concat(chunks), ContentType: opts.contentType }));
     return { bytes };
   }
 
@@ -88,6 +93,18 @@ export class S3Storage implements StorageProvider {
       return { blob: await openAsBlob(file, { type: mime }), cleanup };
     } catch (e) {
       await cleanup();
+      throw e;
+    }
+  }
+
+  async openStream(key: string) {
+    try {
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.cfg.bucket, Key: key }));
+      if (!res.Body) return null;
+      return { body: res.Body as Readable, size: Number(res.ContentLength ?? 0) };
+    } catch (e) {
+      const status = (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (status === 404) return null;
       throw e;
     }
   }

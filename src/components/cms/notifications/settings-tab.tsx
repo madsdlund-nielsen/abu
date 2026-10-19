@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { loadDefaultsAction, saveSettingsAction } from "@/app/actions/notifications";
+import { REVERIFY_MESSAGE } from "@/lib/auth-constants";
 import type { CmsProviders, CmsSettings } from "@/lib/notifications/cms-types";
 import { validateSmsSender } from "@/lib/messaging/sender";
 import { SMS_COUNTRIES } from "@/lib/notifications/sms-policy";
@@ -132,7 +133,17 @@ export function SettingsTab({
             <p className="mt-1 text-xs text-muted">Regnet fra seneste aktivitet. Leads uden samtykke slettes, når tilmeldingen udløber.</p>
           </div>
         </div>
-        {error && <p className="callout callout-error mt-space-3 text-sm" role="alert">{error}</p>}
+        {error && (
+          <p className="callout callout-error mt-space-3 text-sm" role="alert">
+            {error}
+            {error === REVERIFY_MESSAGE && (
+              <>
+                {" "}
+                <a href={`/mfa/bekraeft?next=${encodeURIComponent("/admin/notifikationer?fane=indstillinger")}`} className="font-semibold">Bekræft med kode</a>
+              </>
+            )}
+          </p>
+        )}
       </section>
 
       <section className="border border-grey-bg bg-white p-space-3 sm:p-space-4" aria-labelledby="prov-h">

@@ -3,11 +3,14 @@ import Link from "next/link";
 import { OnboardingTextsCms } from "@/components/cms/onboarding-texts-cms";
 import { prisma } from "@/lib/db";
 import { resolveTexts } from "@/lib/content/onboarding-texts";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Onboarding-tekster" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminOnboardingTexts() {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const rows = await prisma.contentBlock.findMany();
   const values = resolveTexts(Object.fromEntries(rows.map((r) => [r.key, r.value])));
   const versions = Object.fromEntries(rows.map((r) => [r.key, r.version]));

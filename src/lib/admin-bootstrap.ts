@@ -9,29 +9,65 @@ export interface CreateAdminArgs {
   name: string;
   /** Eksisterende admin: udsted et nyt engangslink (fx glemt adgangskode, ingen mail sat op endnu). */
   reset: boolean;
+  /**
+   * Nødprocedure: nulstil også administratorens totrinsbekræftelse (mistet telefon og gendannelseskoder, og ingen anden
+   * administrator kan gøre det). Kræver adgang til serveren. Vedkommende opsætter MFA igen ved næste login.
+   */
+  resetMfa: boolean;
 }
 
-export const CREATE_ADMIN_USAGE = 'Brug: npm run create-admin -- --email admin@firma.dk --name "Fornavn Efternavn" [--reset]';
+export const CREATE_ADMIN_USAGE = 'Brug: npm run create-admin -- --email admin@firma.dk --name "Fornavn Efternavn" [--reset] [--reset-mfa]\n(Uden --email/--name spørger scriptet, når det køres i en terminal.)';
 
-/** Parser `--email x --name y [--reset]` (også `--email=x`). Ren funktion. */
-export function parseCreateAdminArgs(argv: string[]): CreateAdminArgs | { error: string } {
+type Parsed = { email?: string; name?: string; reset: boolean; resetMfa: boolean };
+
+function parseFlags(argv: string[]): Parsed | { error: string } {
   const out: Record<string, string | boolean> = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith("--")) return { error: `Ukendt argument: ${a}` };
     const [k, inline] = a.slice(2).split(/=(.*)/s, 2);
     if (k === "reset") out.reset = true;
+    else if (k === "reset-mfa") out.resetMfa = true;
     else if (k === "email" || k === "name") {
       const v = inline ?? argv[++i];
       if (v === undefined || v.startsWith("--")) return { error: `--${k} mangler en værdi.` };
       out[k] = v;
     } else return { error: `Ukendt flag: --${k}` };
   }
-  const email = String(out.email ?? "").trim().toLowerCase();
-  const name = String(out.name ?? "").trim();
+  return {
+    email: typeof out.email === "string" ? out.email : undefined,
+    name: typeof out.name === "string" ? out.name : undefined,
+    reset: out.reset === true || out.resetMfa === true,
+    resetMfa: out.resetMfa === true,
+  };
+}
+
+function validate(p: Parsed): CreateAdminArgs | { error: string } {
+  const email = String(p.email ?? "").trim().toLowerCase();
+  const name = String(p.name ?? "").trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Angiv en gyldig --email." };
-  if (!out.reset && name.length < 2) return { error: "Angiv --name (mindst 2 tegn)." };
-  return { email, name, reset: out.reset === true };
+  if (!p.reset && name.length < 2) return { error: "Angiv --name (mindst 2 tegn)." };
+  return { email, name, reset: p.reset, resetMfa: p.resetMfa };
+}
+
+/** Parser `--email x --name y [--reset] [--reset-mfa]` (også `--email=x`). Ren funktion. */
+export function parseCreateAdminArgs(argv: string[]): CreateAdminArgs | { error: string } {
+  const p = parseFlags(argv);
+  return "error" in p ? p : validate(p);
+}
+
+/**
+ * Som parseCreateAdminArgs, men spørger efter manglende e-mail og navn (interaktivt i en terminal). `ask` er null, når
+ * der ikke er en terminal (fx i CI/Docker uden -it): så kræves flagene.
+ */
+export async function resolveCreateAdminArgs(argv: string[], ask: ((question: string) => Promise<string>) | null): Promise<CreateAdminArgs | { error: string }> {
+  const p = parseFlags(argv);
+  if ("error" in p) return p;
+  if (ask) {
+    if (!p.email) p.email = await ask("E-mail til administratoren: ");
+    if (!p.name && !p.reset) p.name = await ask("Navn: ");
+  }
+  return validate(p);
 }
 
 /** Seed (demodata med kendte adgangskoder) må aldrig køre i produktion. Returnerer en årsag eller null. */
@@ -58,7 +94,21 @@ export async function createAdminInvite(
   if (existing && existing.passwordHash && !args.reset) {
     return { ok: false, error: `${args.email} er allerede administrator. Brug --reset for at udstede et nyt link.` };
   }
-  const user = existing ?? (await db.user.create({ data: { email: args.email, name: args.name, role: "ADMIN" } }));
+  let user = existing ?? (await db.user.create({ data: { email: args.email, name: args.name, role: "ADMIN" } }));
+  // En deaktiveret administrator genaktiveres (nødprocedure via serveren)
+  if (user.deactivatedAt) user = await db.user.update({ where: { id: user.id }, data: { deactivatedAt: null } });
+  if (args.resetMfa) {
+    await db.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { mfaEnabledAt: null, mfaSecretEnc: null, mfaKeyId: null, mfaPendingSecretEnc: null, mfaPendingCreatedAt: null, mfaLastUsedStep: null, mfaFailedCount: 0, mfaLastFailedAt: null },
+      });
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId: user.id } });
+      await tx.trustedDevice.deleteMany({ where: { userId: user.id } });
+      await tx.session.deleteMany({ where: { userId: user.id } });
+    });
+    await db.auditLog.create({ data: { userId: null, action: "admin.bootstrap_mfa_reset", entity: "User", entityId: user.id } });
+  }
   const purpose = user.passwordHash ? "RESET" : "INVITE";
   // Gamle, ubrugte links holder op med at virke
   await db.passwordToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: now } });

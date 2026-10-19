@@ -3,6 +3,7 @@ import { setHolidayBlockedAction } from "@/app/actions/admin";
 import { Flash, flashFrom, type SP } from "@/components/flash";
 import { danishHolidays, getHolidayOverrides, isHolidayBlocked } from "@/lib/holidays";
 import { formatDate, localDateKey, TZ } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Helligdage" };
 
@@ -10,6 +11,8 @@ const weekday = (key: string) => new Intl.DateTimeFormat("da-DK", { weekday: "lo
 
 /** Helligdage og lukkedage, der spærrer for booking (plan #24). Beregnes automatisk; admin kan slå enkelte datoer til/fra. */
 export default async function HolidaysPage({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const today = localDateKey(new Date());
   const year = Number(today.slice(0, 4));

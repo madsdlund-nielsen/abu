@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addAdvisorAction, cancelOnBehalfAction, removeAdvisorAction, replaceAdvisorAction, rescheduleMeetingAction } from "@/app/actions/admin-meetings";
 import { DateTimeField } from "@/components/date-time-field";
 import { ConfirmDialog, SaveIndicator, useSaver } from "@/components/cms/primitives";
-import { Initials } from "@/components/ui";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
 import { formatDkk } from "@/lib/pricing";
 import type { RankedCandidate } from "@/lib/substitutes";
 
@@ -14,6 +14,8 @@ export interface PanelAdvisor {
   name: string;
   title: string;
   priceDkk: number | null;
+  /** Version af profilbilledet */
+  photo: string | null;
 }
 
 export interface PanelProps {
@@ -43,6 +45,8 @@ export function MeetingAdminPanel(props: PanelProps) {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const below = advisors.length < boardSize;
+  // Møder holdes altid med hele boardet: «Fjern» kun for ekstra deltagere ud over boardet, ellers «Udskift»
+  const canRemove = advisors.length > boardSize;
 
   async function exec(call: () => Promise<{ ok: true; message: string } | { ok: false; error: string }>) {
     setResult(null);
@@ -74,15 +78,19 @@ export function MeetingAdminPanel(props: PanelProps) {
         <span className="eyebrow">Deltagere</span>
         <h2 id="deltagere-h" className="text-xl font-light">Rådgivere i mødet</h2>
         <span className="rule-gold mt-3" aria-hidden="true" />
+        <p className="mt-space-3 text-sm text-muted" data-testid="whole-board-note">
+          Mødet holdes altid med hele boardet ({boardSize} {boardSize === 1 ? "rådgiver" : "rådgivere"}). Skal en rådgiver ikke deltage, så udskift vedkommende.
+          {canRemove && " Ekstra deltagere ud over boardet kan fjernes."}
+        </p>
         {below && (
-          <p className="callout mt-space-3 text-sm" role="note" data-testid="below-board">
-            Der er {advisors.length} {advisors.length === 1 ? "rådgiver" : "rådgivere"} i mødet, men kundens board har {boardSize}. Kunden betaler for hele boardet.
+          <p className="callout callout-error mt-space-3 text-sm" role="note" data-testid="below-board">
+            Mødet har kun {advisors.length} af boardets {boardSize} rådgivere. Tilføj en rådgiver, så mødet holdes med hele boardet.
           </p>
         )}
         <ul className="mt-space-3 divide-y divide-grey-bg" data-testid="participants">
           {advisors.map((a) => (
             <li key={a.id} className="flex flex-wrap items-center gap-3 py-3" data-advisor={a.name}>
-              <Initials name={a.name} />
+              <AdvisorAvatar advisorId={a.id} name={a.name} photo={a.photo} />
               <div className="min-w-0 flex-1">
                 <p className="font-semibold text-navy">{a.name}</p>
                 <p className="text-sm text-muted">{a.title}{a.priceDkk !== null && ` · honorar-grundlag ${formatDkk(a.priceDkk)}`}</p>
@@ -90,7 +98,9 @@ export function MeetingAdminPanel(props: PanelProps) {
               {editable && (
                 <div className="flex gap-2">
                   <button type="button" className="btn-secondary btn-sm" onClick={() => setPicker({ kind: "replace", target: a })} aria-label={`Udskift ${a.name}`}>Udskift</button>
-                  <button type="button" className="btn-danger btn-sm" onClick={() => setRemoving(a)} disabled={advisors.length <= 1} title={advisors.length <= 1 ? "Et møde skal have mindst én rådgiver" : undefined} aria-label={`Fjern ${a.name}`}>Fjern</button>
+                  {canRemove && (
+                    <button type="button" className="btn-danger btn-sm" onClick={() => setRemoving(a)} aria-label={`Fjern ${a.name}`}>Fjern</button>
+                  )}
                 </div>
               )}
             </li>
@@ -98,7 +108,7 @@ export function MeetingAdminPanel(props: PanelProps) {
         </ul>
         {editable && (
           <div className="mt-space-3">
-            <button type="button" className="btn-secondary" onClick={() => setPicker({ kind: "add" })}>Tilføj ekstra deltager</button>
+            <button type="button" className="btn-secondary" onClick={() => setPicker({ kind: "add" })}>{below ? "Tilføj rådgiver" : "Tilføj ekstra deltager"}</button>
           </div>
         )}
         <p className="mt-space-3 text-xs text-muted">Kundens pris er uændret, fordi abonnementet dækker mødet. Honoraret følger de faktiske deltagere.</p>
@@ -152,8 +162,8 @@ export function MeetingAdminPanel(props: PanelProps) {
 
       <ConfirmDialog
         open={removing !== null}
-        title={`Fjern ${removing?.name ?? ""} fra mødet?`}
-        confirmLabel="Fjern rådgiver"
+        title={`Fjern ekstra deltager ${removing?.name ?? ""}?`}
+        confirmLabel="Fjern ekstra deltager"
         onCancel={() => setRemoving(null)}
         onConfirm={async () => {
           const r = removing;
@@ -161,7 +171,7 @@ export function MeetingAdminPanel(props: PanelProps) {
           if (r) await exec(() => removeAdvisorAction(meetingId, r.id, note));
         }}
       >
-        <p>{removing?.name} får besked om, at vedkommende er udgået af mødet. {advisors.length - 1 < boardSize && `Mødet får så ${advisors.length - 1} ${advisors.length - 1 === 1 ? "rådgiver" : "rådgivere"}, og det er færre end kundens board (${boardSize}).`}</p>
+        <p>{removing?.name} er en ekstra deltager ud over boardet og får besked om, at vedkommende er udgået af mødet. Mødet holdes fortsat med hele boardet ({advisors.length - 1} {advisors.length - 1 === 1 ? "rådgiver" : "rådgivere"}).</p>
         <NoteField note={note} setNote={setNote} />
       </ConfirmDialog>
 
@@ -283,7 +293,7 @@ function CandidateDialog({
               {rows.length === 0 && <li className="p-space-4 text-center text-muted">Ingen rådgivere at vælge.</li>}
               {rows.map((c, i) => (
                 <li key={c.id} className={`flex gap-3 p-space-3 sm:px-space-4 ${c.available ? "" : "bg-grey-bg/60"}`} data-candidate={c.name} data-available={c.available}>
-                  <Initials name={c.name} />
+                  <AdvisorAvatar advisorId={c.id} name={c.name} photo={c.photo} />
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold leading-snug text-navy">
                       {c.name}

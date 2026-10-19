@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BuilderAdvisor, BuilderTag } from "@/lib/onboarding/catalog";
 import { advisorScore, boardCoverage } from "@/lib/matching";
 import { FREQUENCY_WEEKS, MAX_BOARD_SIZE, MIN_BOARD_SIZE, formatDkk, frequencyLabel, monthlyPriceForBoard, vatBreakdown } from "@/lib/pricing";
-import { Initials } from "./ui";
+import { AdvisorAvatar } from "./advisor-avatar";
 
 type Mode = { kind: "replace"; targetId: string } | { kind: "add" };
 
@@ -47,9 +47,23 @@ export interface BoardBuilderProps {
   texts?: Partial<BoardTexts>;
   /** Ekstra felter i formularen under rådgiverkortene (fx admin-valg) */
   children?: React.ReactNode;
+  /** Eksisterende board: nuværende ansvarlig rådgiver (vises, så længe vedkommende er i boardet) */
+  currentLeadId?: string | null;
 }
 
-export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initialWeeks, action, submitLabel, backHref, intro, texts, children }: BoardBuilderProps) {
+/** Lille markør på rådgivere, der kan være ansvarlig rådgiver (guldstreg + tekst, ingen farve alene). */
+export function LeadEligibleMarker() {
+  return (
+    <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-navy" data-testid="lead-eligible">
+      <span aria-hidden="true" className="inline-block h-0.5 w-4 bg-gold" />
+      Kan være ansvarlig
+    </p>
+  );
+}
+
+export const NO_LEAD_ELIGIBLE_MESSAGE = "Boardet skal have mindst én rådgiver, der kan være ansvarlig rådgiver.";
+
+export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initialWeeks, action, submitLabel, backHref, intro, texts, children, currentLeadId }: BoardBuilderProps) {
   const tx: BoardTexts = { ...DEFAULT_TEXTS, ...texts };
   const byId = useMemo(() => new Map(advisors.map((a) => [a.id, a])), [advisors]);
   const tagName = useMemo(() => new Map(tags.map((t) => [t.id, t.name])), [tags]);
@@ -78,7 +92,9 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
   );
   const hasNeeds = Object.values(needs).some((n) => n > 0);
   const validSize = board.length >= MIN_BOARD_SIZE && board.length <= MAX_BOARD_SIZE;
-  const ready = validSize && weeks !== null;
+  const hasLeadEligible = board.some((a) => a.leadEligible);
+  const ready = validSize && weeks !== null && hasLeadEligible;
+  const currentLead = currentLeadId ? board.find((a) => a.id === currentLeadId && a.leadEligible) : undefined;
   const perMeeting = board.reduce((a, b) => a + b.priceDkk, 0);
   const monthly = validSize && weeks ? monthlyPriceForBoard(board.map((a) => a.priceDkk), weeks) : null;
   const vat = monthly !== null ? vatBreakdown(monthly) : null;
@@ -98,9 +114,11 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
 
   const hint = !validSize
     ? `Vælg ${MIN_BOARD_SIZE}-${MAX_BOARD_SIZE} rådgivere (nu ${board.length}).`
-    : weeks === null
-      ? "Vælg hvor ofte I vil mødes."
-      : null;
+    : !hasLeadEligible
+      ? NO_LEAD_ELIGIBLE_MESSAGE
+      : weeks === null
+        ? "Vælg hvor ofte I vil mødes."
+        : null;
 
   return (
     <form action={action} className="relative pb-24 lg:pb-0">
@@ -118,12 +136,14 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
               return (
                 <li key={a.id} className="flex flex-col border border-grey-bg bg-white p-space-3 shadow-panel" data-testid="board-card" data-advisor={a.name}>
                   <div className="flex items-start gap-3">
-                    <Initials name={a.name} url={a.photoUrl} />
+                    <AdvisorAvatar advisorId={a.id} name={a.name} photo={a.photo} />
                     <div className="min-w-0">
                       <p className="font-semibold leading-snug text-navy">{a.name}{a.inactive && <span className="badge badge-muted ml-2 align-middle">Inaktiv</span>}</p>
                       <p className="text-sm leading-snug text-muted">{a.title}</p>
                     </div>
                   </div>
+                  {a.leadEligible && <LeadEligibleMarker />}
+                  {currentLead?.id === a.id && <p className="mt-1 text-xs text-muted" data-testid="current-lead">Ansvarlig rådgiver for boardet nu</p>}
                   <p className="mt-3 line-clamp-3 text-sm text-muted">{a.bio}</p>
                   <ul className="mt-3 flex flex-wrap gap-1" aria-label="Kompetencer">
                     {a.tags.map((t) => (
@@ -167,6 +187,11 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
               </li>
             )}
           </ul>
+          {validSize && !hasLeadEligible && (
+            <p role="alert" className="callout callout-error mt-space-4 text-sm" data-testid="no-lead-eligible">
+              {NO_LEAD_ELIGIBLE_MESSAGE} Udskift en rådgiver med en, der er markeret «Kan være ansvarlig».
+            </p>
+          )}
           {children}
         </div>
 
@@ -203,7 +228,7 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
           </div>
           {!ready && (
             <p id="mobile-not-ready" className="px-4 pb-3 text-xs text-muted lg:hidden">
-              {weeks === null ? "Vælg hvor ofte I vil mødes for at fortsætte." : "Vælg 2-4 rådgivere for at fortsætte."}
+              {!validSize ? "Vælg 2-4 rådgivere for at fortsætte." : !hasLeadEligible ? NO_LEAD_ELIGIBLE_MESSAGE : "Vælg hvor ofte I vil mødes for at fortsætte."}
             </p>
           )}
 
@@ -221,6 +246,18 @@ export function BoardBuilder({ advisors, tags, needs, initialAdvisorIds, initial
               <legend className="label">{tx.frequency}</legend>
               {frequencyButtons()}
             </fieldset>
+
+            <div className="mt-space-4" data-testid="lead-summary">
+              <p className="label !mb-1">Ansvarlig rådgiver</p>
+              {!hasLeadEligible ? (
+                <p className="text-sm font-semibold text-danger">Ingen i boardet kan være ansvarlig</p>
+              ) : currentLead ? (
+                <p className="text-sm text-navy"><span className="font-semibold">{currentLead.name}</span></p>
+              ) : (
+                <p className="text-sm text-navy">Tildeles automatisk</p>
+              )}
+              <p className="mt-1 text-xs text-muted">Den ansvarlige rådgiver er jeres faste kontakt. Møderne holdes altid med hele boardet.</p>
+            </div>
 
             <div className="mt-space-4">
               <p className="label">Boardets kompetencer</p>
@@ -421,13 +458,14 @@ function Catalog({
             const delta = target ? a.priceDkk - target.priceDkk : null;
             return (
               <li key={a.id} className="flex gap-3 p-space-3 sm:px-space-4" data-testid="catalog-row" data-advisor={a.name}>
-                <Initials name={a.name} url={a.photoUrl} />
+                <AdvisorAvatar advisorId={a.id} name={a.name} photo={a.photo} />
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold leading-snug text-navy">
                     {a.name}
                     {hasNeeds && i === 0 && score > 0 && <span className="badge badge-gold ml-2 align-middle">Bedste match</span>}
                   </p>
                   <p className="text-sm text-muted">{a.title}</p>
+                  {a.leadEligible && <LeadEligibleMarker />}
                   <ul className="mt-2 flex flex-wrap gap-1">
                     {a.tags.map((t) => (
                       <li key={t.id} className={`badge ${(needs[t.id] ?? 0) > 0 ? "badge-navy" : "badge-muted"}`}>{t.name}</li>

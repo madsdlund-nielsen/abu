@@ -57,7 +57,8 @@ export async function saveNotificationSettings(s: NotificationSettings): Promise
     [KEYS.smsPerNumberCap, String(s.smsPerNumberCap)],
     [KEYS.smsDailyCap, String(s.smsDailyCap)],
   ];
-  await prisma.$transaction(
-    entries.map(([key, value]) => prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } })),
-  );
+  // Interaktiv transaktion (RLS: array-transaktioner understøttes ikke af databasekonteksten)
+  await prisma.$transaction(async (tx) => {
+    for (const [key, value] of entries) await tx.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  });
 }

@@ -46,3 +46,19 @@ export function detectMediaType(bytes: Uint8Array): MediaType | null {
 }
 
 export const ACCEPTED_FORMATS = "MP3, M4A, MP4, MOV, WebM, MKV, WAV, Ogg, FLAC, AAC";
+
+/**
+ * Billeder (rådgiverfoto): kun JPEG, PNG og WebP – genkendt ud fra filens første bytes, ligesom optagelserne. SVG (kan
+ * indeholde scripts), GIF, HEIC, TIFF og alt andet afvises, uanset filnavn og browserens påståede type.
+ */
+export const IMAGE_SNIFF_BYTES = 16;
+export const ACCEPTED_IMAGE_FORMATS = "JPEG, PNG eller WebP";
+
+export function detectImageType(bytes: Uint8Array): MediaType | null {
+  const b = bytes;
+  if (b.length < 12) return null;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: "image/jpeg", ext: "jpg", label: "JPEG" };
+  if ([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((v, i) => b[i] === v)) return { mime: "image/png", ext: "png", label: "PNG" };
+  if (ascii(b, 0, "RIFF") && ascii(b, 8, "WEBP")) return { mime: "image/webp", ext: "webp", label: "WebP" };
+  return null;
+}

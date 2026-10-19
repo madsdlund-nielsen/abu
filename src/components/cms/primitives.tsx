@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import type { ActionResult } from "@/lib/onboarding/cms-types";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -102,6 +102,8 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Unikt id: flere dialoger på samme side (fx én pr. række i en tabel)
+  const titleId = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -113,10 +115,10 @@ export function ConfirmDialog({
       ref={ref}
       onCancel={(e) => { e.preventDefault(); onCancel(); }}
       onClose={onCancel}
-      aria-labelledby="confirm-title"
+      aria-labelledby={titleId}
       className="w-[min(92vw,28rem)] border border-grey-bg bg-white p-space-4 text-ink shadow-panel backdrop:bg-overlay-navy"
     >
-      <h2 id="confirm-title" className="text-xl">{title}</h2>
+      <h2 id={titleId} className="text-xl">{title}</h2>
       <span className="rule-gold mt-3" aria-hidden="true" />
       <div className="mt-space-3 text-sm text-muted">{children}</div>
       <div className="mt-space-4 flex justify-end gap-2">

@@ -5,10 +5,13 @@ import { Flash, flashFrom, type SP } from "@/components/flash";
 import { SubStatusBadge } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Kunder" };
 
 export default async function AdminCustomers({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err, one, params } = await flashFrom(searchParams);
   const onlyUnverified = one(params.filter) === "ikke-verificeret";
   const customers = await prisma.customerProfile.findMany({

@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { audit } from "./audit";
 import { BookingError } from "./booking";
+import { ensureLead, leadEligibleIds, NO_LEAD_ELIGIBLE_ERROR } from "./lead";
 import { changeMeetingAdvisors } from "./meeting-admin";
 import { subscriptionEvents } from "./notifications/service";
 import { getPayments } from "./payments";
@@ -59,9 +60,12 @@ export async function changeBoardAsAdmin(opts: {
   if (profiles.length !== ids.length) return { ok: false, error: "En af rådgiverne findes ikke." };
   const inactiveNew = profiles.find((p) => diff.added.includes(p.userId) && !p.active);
   if (inactiveNew) return { ok: false, error: `${inactiveNew.user.name} er ikke aktiv og kan ikke tilføjes.` };
+  if ((await leadEligibleIds(ids)).size === 0) return { ok: false, error: `${NO_LEAD_ELIGIBLE_ERROR} Tilføj en rådgiver med tagget «Lead-kvalificeret».` };
 
   const frozen = new Map(sub.advisors.map((a) => [a.advisorId, a.pricePerMeetingDkk]));
-  const rows = ids.map((id) => ({ advisorId: id, pricePerMeetingDkk: frozen.get(id) ?? profiles.find((p) => p.userId === id)!.pricePerMeetingDkk }));
+  const prevLead = sub.advisors.find((a) => a.isLead)?.advisorId;
+  // Den ansvarlige beholder rollen, hvis vedkommende bliver i boardet (ellers tildeles en ny nedenfor)
+  const rows = ids.map((id) => ({ advisorId: id, isLead: id === prevLead, pricePerMeetingDkk: frozen.get(id) ?? profiles.find((p) => p.userId === id)!.pricePerMeetingDkk }));
   const monthly = opts.pricePolicy === "recalc" ? monthlyPriceForBoard(rows.map((r) => r.pricePerMeetingDkk), opts.weeks) : sub.monthlyPriceDkk;
 
   if ((monthly !== sub.monthlyPriceDkk || opts.weeks !== sub.frequencyWeeks) && (sub.status === "ACTIVE" || sub.status === "PAST_DUE")) {
@@ -74,13 +78,16 @@ export async function changeBoardAsAdmin(opts: {
     }
   }
 
-  await prisma.$transaction([
-    prisma.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } }),
-    prisma.subscription.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.subscriptionAdvisor.deleteMany({ where: { subscriptionId: sub.id } });
+    await tx.subscription.update({
       where: { id: sub.id },
       data: { advisorCount: ids.length, frequencyWeeks: opts.weeks, monthlyPriceDkk: monthly, advisors: { create: rows } },
-    }),
-  ]);
+    });
+  });
+
+  // Ansvarlig rådgiver: den nuværende bliver, hvis vedkommende stadig er i boardet og kvalificeret – ellers ny tildeling
+  const lead = await ensureLead(sub.id, "board_changed", opts.actorId);
 
   // Kommende møder
   const conflicts: string[] = [];
@@ -125,5 +132,6 @@ export async function changeBoardAsAdmin(opts: {
 
   const parts = ["Boardet er opdateret.", opts.pricePolicy === "recalc" ? `Ny månedspris: ${formatDkk(monthly)} (gælder fra næste betalingsperiode).` : "Prisen er uændret."];
   if (opts.updateUpcoming) parts.push(`${updated === 1 ? "1 kommende møde er" : `${updated} kommende møder er`} opdateret${conflicts.length ? `, ${conflicts.length} konflikt${conflicts.length === 1 ? "" : "er"}` : ""}.`);
+  if (lead.changed && lead.leadId) parts.push("Boardet har fået en ny ansvarlig rådgiver.");
   return { ok: true, message: parts.join(" "), conflicts, updatedMeetings: updated };
 }

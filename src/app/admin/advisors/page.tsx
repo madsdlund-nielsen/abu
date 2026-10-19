@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { savePriceBoundsAction, toggleAdvisorActiveAction } from "@/app/actions/admin";
+import { savePriceBoundsAction } from "@/app/actions/admin";
+import { AdvisorActivationControl } from "@/components/admin/advisor-activation";
+import { AdvisorAvatar } from "@/components/advisor-avatar";
 import { getPriceBounds } from "@/lib/advisor-price";
 import { ResendInviteButton } from "@/components/admin/advisor-invite";
 import { Flash, flashFrom, type SP } from "@/components/flash";
-import { ReadinessList } from "@/components/admin/readiness";
+import { AdvisorStatusBadge, ReadinessSummary } from "@/components/admin/readiness";
 import { loadReadiness, missingReadiness } from "@/lib/advisor-readiness";
+import { avatarVersion } from "@/lib/avatar-url";
 import { prisma } from "@/lib/db";
 import { formatDkk } from "@/lib/pricing";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Rådgivere" };
 
 export default async function AdminAdvisors({ searchParams }: { searchParams: SP }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { ok, err } = await flashFrom(searchParams);
   const advisors = await prisma.advisorProfile.findMany({ include: { user: true, tags: { include: { tag: true } } }, orderBy: { user: { name: "asc" } } });
   const bounds = await getPriceBounds();
@@ -27,7 +33,10 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h1>Rådgivere</h1>
-        <Link href="/admin/advisors/new" className="btn">Opret rådgiver</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/ansvarlige" className="btn-secondary">Ansvarlige rådgivere</Link>
+          <Link href="/admin/advisors/new" className="btn">Opret rådgiver</Link>
+        </div>
       </div>
       <Flash ok={ok} err={err} />
       <details className="card" data-testid="price-bounds">
@@ -56,40 +65,46 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
             {advisors.map((a) => (
               <tr key={a.userId}>
                 <td>
-                  <p className="font-medium">{a.user.name}</p>
-                  <p className="text-xs text-muted">{a.user.email}</p>
+                  <div className="flex items-center gap-3">
+                    <AdvisorAvatar advisorId={a.userId} name={a.user.name} photo={a.photoKey ? avatarVersion(a.photoUpdatedAt) : null} size="sm" />
+                    <div className="min-w-0">
+                      <p className="font-medium">{a.user.name}</p>
+                      <p className="text-xs text-muted">{a.user.email}</p>
+                    </div>
+                  </div>
                 </td>
                 <td>{a.title}</td>
                 <td className="max-w-[18rem]">
                   <ul className="flex flex-wrap gap-1">
-                    {a.tags.map((t) => (
+                    {a.tags.filter((t) => t.tag.kind === "COMPETENCE").map((t) => (
                       <li key={t.tagId} className={`badge ${t.tag.active ? "badge-muted" : "badge-outline opacity-60"}`}>{t.tag.name}</li>
                     ))}
-                    {a.tags.length === 0 && <li className="text-xs text-gold-ink">Ingen tags</li>}
+                    {!a.tags.some((t) => t.tag.kind === "COMPETENCE") && <li className="text-xs text-gold-ink">Ingen kompetence-tags</li>}
+                    {a.tags.filter((t) => t.tag.kind === "ADMIN").map((t) => (
+                      <li key={t.tagId} className="badge badge-gold" title="Internt tag (kun admin)" data-testid="internal-tag"><span className="sr-only">Internt tag: </span>{t.tag.name}</li>
+                    ))}
                   </ul>
                 </td>
                 <td className="text-right tabular-nums">{formatDkk(a.pricePerMeetingDkk)}</td>
-                <td className="min-w-[13rem]">
-                  <span className={`badge ${a.active ? "badge-navy" : "badge-muted"}`} data-testid="advisor-status">
-                    {a.active ? "Aktiv" : "Inaktiv"}
-                  </span>
-                  {!a.user.passwordHash && <span className="badge badge-gold ml-1">Ikke accepteret</span>}
-                  {!a.active && <ReadinessList items={readiness.get(a.userId) ?? []} compact />}
+                <td className="min-w-[13rem] max-w-[18rem]">
+                  <AdvisorStatusBadge active={a.active} missing={missingReadiness(readiness.get(a.userId) ?? [])} />
+                  <ReadinessSummary items={readiness.get(a.userId) ?? []} />
                   {a.active && boardsOf(a.userId).length > 0 && (
                     <p className="mt-1 text-xs text-muted">I boards hos {boardsOf(a.userId).join(", ")}</p>
                   )}
                 </td>
                 <td>
-                  <div className="flex flex-wrap justify-end gap-2">
+                  <div className="flex flex-wrap items-start justify-end gap-2">
                     <Link href={`/admin/advisors/${a.userId}`} className="btn-secondary btn-sm">Rediger</Link>
                     {!a.user.passwordHash && <ResendInviteButton userId={a.userId} />}
-                    <form
-                      action={toggleAdvisorActiveAction}
-                      data-confirm={toggleConfirm(a.user.name, a.active, boardsOf(a.userId), missingReadiness(readiness.get(a.userId) ?? []))}
-                    >
-                      <input type="hidden" name="userId" value={a.userId} />
-                      <button className={a.active ? "btn-secondary btn-sm" : "btn btn-sm"} type="submit">{a.active ? "Deaktivér" : "Aktivér"}</button>
-                    </form>
+                    <AdvisorActivationControl
+                      compact
+                      userId={a.userId}
+                      name={a.user.name}
+                      active={a.active}
+                      missing={missingReadiness(readiness.get(a.userId) ?? [])}
+                      boards={boardsOf(a.userId)}
+                    />
                   </div>
                 </td>
               </tr>
@@ -99,14 +114,4 @@ export default async function AdminAdvisors({ searchParams }: { searchParams: SP
       </div>
     </div>
   );
-}
-
-/** Bekræftelse før (de)aktivering: advarer om manglende punkter eller berørte kunder, men blokerer ikke. */
-function toggleConfirm(name: string, active: boolean, boards: string[], missing: string[]): string | undefined {
-  if (active) {
-    return boards.length
-      ? `${name} sidder i aktive boards hos: ${boards.join(", ")}. Kunderne kan ikke booke nye møder, før rådgiveren er erstattet. Deaktivér alligevel?`
-      : undefined;
-  }
-  return missing.length ? `${name} mangler: ${missing.join(", ")}. Kunder kan vælge rådgiveren, så snart den er aktiv. Aktivér alligevel?` : undefined;
 }

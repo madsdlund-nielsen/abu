@@ -66,21 +66,26 @@ describe("danske helligdage (plan #24)", () => {
   });
 });
 
-import { describeDb } from "../test/db";
+import { asAnon, asSystem, asUser, describeDb } from "../test/db";
 
 describeDb("overstyring af helligdage i AppSetting (plan #24)", () => {
   it("gemmer en ændring og fjerner den igen, når den svarer til standarden", async () => {
     const { prisma } = await import("./db");
     const { getHolidayOverrides, setHolidayBlocked, getBlockedDates } = await import("./holidays");
     const y = new Date().getFullYear() + 1;
-    await setHolidayBlocked(`${y}-12-24`, false);
-    expect((await getHolidayOverrides())[`${y}-12-24`]).toBe(false);
-    const blocked = await getBlockedDates(new Date(`${y}-12-20T12:00:00Z`), new Date(`${y}-12-31T12:00:00Z`));
+    // Admin ændrer (Admin → Helligdage); bookingen læser spærringen som kunde (og før login er den heller ikke hemmelig)
+    const admin = { id: "test-admin", role: "ADMIN" as const };
+    await asUser(admin, () => setHolidayBlocked(`${y}-12-24`, false));
+    expect((await asUser(admin, () => getHolidayOverrides()))[`${y}-12-24`]).toBe(false);
+    const blocked = await asUser({ id: "test-kunde", role: "CUSTOMER" }, () => getBlockedDates(new Date(`${y}-12-20T12:00:00Z`), new Date(`${y}-12-31T12:00:00Z`)));
     expect(blocked.has(`${y}-12-24`)).toBe(false);
     expect(blocked.has(`${y}-12-25`)).toBe(true);
-    await setHolidayBlocked(`${y}-12-24`, true);
-    expect(`${y}-12-24` in (await getHolidayOverrides())).toBe(false);
-    await expect(setHolidayBlocked(`${y}-03-03`, true)).rejects.toThrow(/helligdag/);
-    await prisma.appSetting.deleteMany({ where: { key: "holidays.overrides" } });
+    expect((await asAnon(() => getHolidayOverrides()))[`${y}-12-24`]).toBe(false);
+    // Kun admin må ændre (RLS: AppSetting skrives kun af admin/system)
+    await expect(asUser({ id: "test-kunde", role: "CUSTOMER" }, () => setHolidayBlocked(`${y}-12-24`, true))).rejects.toThrow();
+    await asUser(admin, () => setHolidayBlocked(`${y}-12-24`, true));
+    expect(`${y}-12-24` in (await asUser(admin, () => getHolidayOverrides()))).toBe(false);
+    await expect(asUser(admin, () => setHolidayBlocked(`${y}-03-03`, true))).rejects.toThrow(/helligdag/);
+    await asSystem(() => prisma.appSetting.deleteMany({ where: { key: "holidays.overrides" } }));
   });
 });

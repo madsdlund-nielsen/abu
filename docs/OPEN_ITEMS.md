@@ -10,7 +10,7 @@ Appen kører fuldt lokalt i mock-tilstand (betaling, video, transskribering, e-m
 | 2 | **Whereby Embedded** – whereby.com | NO (EØS) | Videomøder med cloud-optagelse | Embedded-abonnement (et abonnement der inkluderer optagelse). Konfigurér optagelse til egen S3-bucket og webhook til `https://<domæne>/api/webhooks/video`. Indgå databehandleraftale. | `VIDEO_PROVIDER=whereby`, `WHEREBY_API_KEY`, `WHEREBY_WEBHOOK_SECRET` |
 | 3 | **Mistral AI** – console.mistral.ai | FR | Transskribering (Voxtral) + mødereferat | API-konto. Vælg EU-hosting og slå træning på data fra. Indgå databehandleraftale. | `TRANSCRIPTION_PROVIDER=mistral`, `MISTRAL_API_KEY` |
 | 4 | **Hetzner Cloud** – hetzner.com (alternativt Simply.com VPS) | DE / DK | Server til app + PostgreSQL | En server, f.eks. CX32 i Falkenstein/Nürnberg, med Docker. Daglig backup af Postgres. | `DATABASE_URL`, `APP_URL` |
-| 5 | **Hetzner Object Storage** | DE | Midlertidig lagring af optagelser | Bucket + adgangsnøgler | `STORAGE_PROVIDER=s3`, `S3_*` |
+| 5 | **Hetzner Object Storage** | DE / FI | Midlertidig lagring af optagelser og rådgiverfotos | **Privat** bucket (fsn1/nbg1/hel1), S3-nøgler, CORS-regel, livscyklusregler, versionering og databehandleraftale – trin for trin i **`docs/HETZNER-S3.md`**. Tjek med `npm run storage:check`. | `STORAGE_PROVIDER=s3`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (`S3_FORCE_PATH_STYLE`) |
 | 6 | **E-mail og SMS – inMobile** – inmobile.dk | DK | SMS og e-mail: bekræftelser, påmindelser, ufærdig tilmelding, invitation, nulstilling | **Ny konto at oprette (ejerens valg).** Opret API-nøgle, godkend afsendernavn (≤ 11 tegn, fx `ABUnlimited`) og afsenderdomæne til e-mail (SPF/DKIM/DMARC). Indgå databehandleraftale. Peg status-webhook til `{APP_URL}/api/webhooks/inmobile?secret=<INMOBILE_WEBHOOK_SECRET>`. Afklar, om en alfanumerisk afsender kan modtage «STOP»-svar (ellers: afmeldingslink / svarnummer). | `EMAIL_PROVIDER=inmobile`, `SMS_PROVIDER=inmobile`, `INMOBILE_API_KEY`, `INMOBILE_WEBHOOK_SECRET`, `SMS_SENDER` |
 | 6b | E-mail via SMTP (alternativ til inMobile e-mail) – Simply.com mail eller Brevo | DK / FR | Samme beskeder som ovenfor | Afsenderadresse, f.eks. `noreply@<domæne>`, med SPF/DKIM/DMARC | `EMAIL_PROVIDER=smtp`, `SMTP_*` |
 | 7 | **CVR-opslag** – **cvrapi.dk er standard i produktion (ejerens valg: gratis og nemt)**; Erhvervsstyrelsens virk.dk-adapter er bevaret som alternativ | DK | Slå virksomhedsdata op i onboarding (navn, adresse, branche, ansatte, status) | Ingen ansøgning til cvrapi.dk. Sæt `CVR_PROVIDER=cvrapi` i produktion og en beskrivende `CVR_USER_AGENT` med kontaktadresse. Vær opmærksom på den gratis dagskvote: ved overskridelse vises en pæn besked, og kunden kan fortsætte manuelt. | `CVR_PROVIDER=cvrapi` + `CVR_USER_AGENT` (alternativt `virk` + `CVR_VIRK_*`) |
@@ -28,9 +28,13 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 6. E-mail og SMS via inMobile. Tekster, frekvenser og udløsere styres i CMS'en (Admin → Notifikationer).
 7. Onboarding trin 1 er en standard lead-boks med generelt markedsføringssamtykke (ikke forudkrydset), gemt som samtykkepost med tekst og version. Leads vises i Admin → Leads.
 8. Alle tekster i onboarding redigeres i CMS'en (Admin → Onboarding → Tekster).
-9. **Aktivering af rådgivere (18.10.2026):** rådgivere aktiveres manuelt af admin, når de er klar – ingen automatisk aktivering. Nye rådgivere oprettes inaktive og kan ikke vælges nogen steder (katalog, forslag, board-builder, booking, erstatning). Ved «Aktivér» vises en tjekliste (invitation accepteret, tags, ugentlig tilgængelighed, bio, pris); manglende punkter giver en advarsel, ikke en blokering. Deaktivering af en rådgiver i aktive boards advarer og viser de berørte kunder.
+9. **Aktivering af rådgivere (18.10.2026, skærpet samme dag):** rådgivere aktiveres manuelt af admin – ingen automatisk aktivering. Nye rådgivere oprettes inaktive og kan ikke vælges nogen steder (katalog, forslag, board-builder, booking, erstatning). **Aktivering er blokeret, indtil tjeklisten er opfyldt** (invitation accepteret, mindst ét kompetence-tag, ugentlig tilgængelighed, bio, pris inden for intervallet); serveren afviser også forfalskede requests. Status ændres kun med den dedikerede knap «Aktivér/Deaktivér rådgiver» (bekræftelse, audit-log); badget viser altid den gemte status. Deaktivering er altid tilladt og viser de berørte kunder. En aktiv rådgiver, der senere ikke er klar, deaktiveres ikke automatisk, men markeres «Aktiv – mangler: …». Admin kan rette rådgiverens titel, bio, mobilnummer og profilbillede.
 10. **Kontrast (18.10.2026):** forslaget er afprøvet og beholdt (charcoal på guldknapper, navy eyebrows). Endelig godkendelse af udtrykket mangler – se `docs/screens/kontrast/`.
 11. **Betalingsudbyder er stadig uafklaret (Frisbii eller Alunta).** Webhook-signaturen er bygget generisk (rå body + tidsstempel); der er ikke bygget en Alunta-adapter.
+12. **Møder holdes altid med hele boardet (18.10.2026)** – aldrig 1:1 eller med et reduceret board. Admin kan udskifte en rådgiver i et møde og tilføje ekstra deltagere, men ikke fjerne en, så mødet kommer under boardets størrelse. Slettes en rådgiver, markeres de berørte møder for admin.
+13. **Ansvarlig rådgiver (18.10.2026):** hvert board har præcis én ansvarlig rådgiver blandt rådgivere med det interne tag «Lead-kvalificeret»; rollerne fordeles automatisk efter belastning, og eksisterende boards omfordeles kun efter admins bekræftelse (`/admin/ansvarlige`).
+
+14. **Platform-administratorer og totrinsbekræftelse (19.10.2026):** ejerens admin er `mads@qlim8.com` og oprettes med `npm run create-admin` (ingen adgangskode i kode eller docs; ejerens foreslåede adgangskode på 8 tegn er under minimum på 10 tegn, og politikken er bevaret uden undtagelse). Administratorer inviterer andre administratorer i appen og skal bruge totrinsbekræftelse (TOTP); for rådgivere og kunder er det valgfrit. «Husk denne enhed» gælder højst 30 dage og forlænges ikke ved brug. Seed-admin bruger en dokumenteret, kun-lokal TOTP-hemmelighed.
 
 ## 2b. Beslutninger du stadig skal tage
 
@@ -49,6 +53,15 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 5. **Afbud.** Afbud senere end 48 timer før mødet tæller som brugt møde. Er det rigtigt?
 6. **Opbevaring.** Optagelser slettes efter transskribering. Hvor længe skal transskriptioner gemmes?
 7. **Honorering af rådgivere.** Der er ingen afregning eller rapport over afholdte møder pr. rådgiver endnu.
+8. **Den ansvarlige rådgivers rolle.** Får den ansvarlige rådgiver ekstra opgaver eller honorar – fx et højere mødehonorar, rollen som vært i mødet, eller at modtage resuméet først? I dag er rollen kun en markering (kundens faste kontakt), og alle i boardet behandles ens.
+9. **Tekster om ansvarlig rådgiver i onboardingen.** «Kan være ansvarlig», «Ansvarlig rådgiver: Tildeles automatisk» og blokeringsbeskeden er faste tekster i board-builderen; skal de kunne redigeres i Admin → Onboarding → Tekster?
+10. **Nye notifikationsregler efter deploy.** Udløseren «Ansvarlig rådgiver ændret» får standardregler ved seed; i en eksisterende database oprettes de med «Indlæs standarder» under Admin → Notifikationer.
+
+11. **Totrinsbekræftelse – åbne spørgsmål.**
+    - Skal MFA også være påkrævet for rådgivere (de ser kundernes transskriptioner)? I dag er det valgfrit.
+    - Skal admin kunne nulstille MFA for en rådgiver eller kunde, der har mistet telefon og gendannelseskoder? I dag kan kun en administrators MFA nulstilles af en anden administrator (og via `create-admin --reset-mfa` på serveren); andre må slå MFA fra med en gendannelseskode.
+    - WebAuthn/passkeys som alternativ til TOTP er ikke bygget.
+    - `MFA_ENCRYPTION_KEY` skal genereres og opbevares sikkert før lancering (mistes den, skal alle opsætte MFA igen).
 
 ## 3. Juridisk / GDPR
 
@@ -67,14 +80,14 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 - Mistral: feltnavne i transskriberings-API'et og grænser for filstørrelse/varighed. Filen sendes nu som en disk-baseret Blob (ikke i RAM), men Mistrals maksimale filstørrelse skal afklares.
 
 **Docker og test:**
-- Docker-imaget er bygget og kørt lokalt 18.10.2026 (mock-konfiguration nægter at starte, dev-konfiguration svarer; `migrate`, `create-admin` og seed-afvisning testet i build-imaget). I sandkassen krævede `npm ci` i imaget proxyens CA (kun en lokal variant af Dockerfilen); CI kører et almindeligt `docker build .`. `docker compose` som helhed er ikke kørt.
+- Docker-imaget er bygget og kørt lokalt 18.10.2026 (mock-konfiguration nægter at starte, dev-konfiguration svarer; `migrate`, `create-admin` og seed-afvisning testet i build-imaget). I sandkassen krævede `npm ci` i imaget proxyens CA (kun en lokal variant af Dockerfilen); CI kører et almindeligt `docker build .`. `docker compose up` som helhed er kørt 18.10.2026 med det nye rolleforløb (init-script → migrate som `abu_owner` → app som `abu_app`, seed/create-admin via `migrate`, `db-roles` igen, ingen hemmeligheder i loggene) – stadig med sandkassens CA-variant af Dockerfilen.
 - Lib-niveauet har nu DB-integrationstests (kører med `TEST_DATABASE_URL`, i CI mod en Postgres-service). Server actions og HTTP-ruter testes stadig kun end-to-end med Playwright (scripts uden for repoet): onboarding → testbetaling → booking → møde/upload/transskription, admin, CMS, notifikationer, leads.
 
 **Onboarding og CMS (nyt):**
 - Matching-vægtene i seed-testen er et kvalificeret bud og bør justeres af ejeren i CMS'et (`/admin/onboarding`) sammen med rådgivernes tags.
 - En ophørt virksomhed blokerer tilmelding; ved mislykket opslag eller opbrugt kvote kan kunden indtaste navn og adresse manuelt (markeres «ikke verificeret» under Admin → Kunder; ingen godkendelse kræves).
 - Genoptagelse af en ufærdig tilmelding fungerer kun i samme browser (cookie). Links i «tilmelding ikke færdig»-beskeder går til /kom-i-gang; et personligt genoptagelseslink kunne tilføjes.
-- Rådgiverfoto er stadig en ekstern URL; kataloget viser initialer uden foto.
+- Rådgiverfotos uploades nu (18.10.2026): JPEG/PNG/WebP ≤ 5 MB, behandlet med sharp (EXIF/GPS fjernet, 512 + 96 px WebP), privat lager, serveret af `/api/avatar`. Foto-URL-feltet er fjernet; eventuelle gamle URL'er blev droppet i migrationen (før lancering). Rådgivere uden foto vises med initialer.
 - CMS-ændringer er ikke versioneret ud over audit-loggen; der er ingen «fortryd».
 - Rate limits og CVR-cache ligger i Postgres (`RateLimit`, `CvrLookupCache`) og deles mellem instanser.
 
@@ -96,7 +109,6 @@ Alunta (dansk abonnementsstyring) skal undersøges som mulig afløser/supplement
 - Notifikationer sendes inline i den handling, der udløser dem (ingen kø med genforsøg ud over «Send igen» i loggen).
 - Ingen e-mail-skabelon-tests mod rigtige klienter (Outlook/Gmail); SVG-logoet vises ikke i alle klienter (alt-tekst er reserve). Overvej et PNG-logo.
 - Ingen admin-UI til at oprette flere admins eller redigere kunder. Admins oprettes med `npm run create-admin` (engangslink); seed afvises i produktion.
-- Rådgiverfotos er eksterne URL'er; der er ingen upload.
 - Møder der er afholdt uden optagelse markeres ikke automatisk som afholdt.
 
 ## 5. Leverandører der bevidst er fravalgt (amerikanske)
@@ -108,11 +120,46 @@ Stripe, Zoom/Teams/Daily, OpenAI/Deepgram/AssemblyAI, Vercel/AWS, Auth0/Clerk, S
 - **Betalingswebhook (H-4):** headerformat, nøgler og det signerede indhold er samlet i `PAYMENT_WEBHOOK_SCHEME` (`src/lib/payments/frisbii-signature.ts`) og skal rettes til den valgte udbyders dokumentation. Signerer udbyderen ikke selve body'en (Reepays gamle skema: `timestamp + id`), må body'en ikke stoles på – hent da begivenheden via udbyderens API ud fra id'et.
 - **inMobile-webhook (M-7):** afklar om inMobile kan signere webhooks eller sende en custom header (`x-webhook-secret`); ellers bruges `?secret=` i URL'en (hold den ude af proxy-logs, rotér med `INMOBILE_WEBHOOK_SECRET_PREVIOUS`).
 - **Whereby og CSP:** `frame-src https://*.whereby.com` og Permissions-Policy med samme wildcard skal verificeres mod jeres faktiske Whereby-subdomæne (kan låses til ét domæne).
-- **S3 direkte upload (H-5):** bucketten skal have CORS for `POST` fra `APP_URL`, og presigned POST med `content-length-range` skal verificeres mod Hetzner Object Storage. Hvis POST-policies ikke understøttes: presigned PUT med efterfølgende størrelsestjek (finalize tjekker allerede størrelse og magic bytes).
+- **S3 direkte upload (H-5):** bucketten skal have CORS for `POST` fra `APP_URL` (JSON i `docs/HETZNER-S3.md`), og presigned POST med `content-length-range` skal verificeres mod Hetzner Object Storage. Hvis POST-policies ikke understøttes: presigned PUT med efterfølgende størrelsestjek (finalize tjekker allerede størrelse og magic bytes).
+- **Hetzner-bucket (ejeren, ca. 24.10.2026):** opret bucket og nøgler efter `docs/HETZNER-S3.md`, kør `npm run storage:check` på serveren, og afprøv upload af et profilbillede og en optagelse. Verificér samtidig: region-værdien (`fsn1`), at path-style virker, CORS via S3-API'et, livscyklusreglerne (især `AbortIncompleteMultipartUpload` og `NoncurrentVersionExpiration`) og versionering. Indgå Hetzners databehandleraftale.
+- **Rådgiverfotos – åbne valg:** aktive rådgiveres fotos er offentlige (de vises i onboarding-kataloget før login); inaktive kun for admin og rådgiveren selv. Skal fotos kunne beskæres manuelt (i dag centreret beskæring)? Skal et foto være påkrævet for aktivering (i dag valgfrit, vises som «Profilbillede (valgfrit)» på tjeklisten)? Med versionering i bucketten er et slettet foto først helt væk efter 30 dage – nævn det i privatlivspolitikken.
 - **Onboarding trin 6 (M-1, rest):** trin 1 afslører ikke længere, om en e-mail har en konto, men i trin 6 kan man stadig skelne (ny konto → betaling; eksisterende → «tjek din e-mail»). En fuld løsning kræver e-mailbekræftelse, før kontoen oprettes.
 - **Login-spærring:** en angriber, der kender en e-mail, kan spærre kontoen i 15 min (og eskalerende). Indbygget i pr.-konto-spærring; nulstilling af adgangskoden ophæver spærringen. Overvåg `auth.lockout` i audit-loggen.
-- **CSP:** `style-src` tillader `'unsafe-inline'` (inline style-attributter, fx bredden på fremdriftslinjer); scripts er nonce-låst. Kan strammes ved at erstatte style-attributter med CSS-variabler. Alle sider renderes dynamisk pga. noncen.
+- **CSP:** `img-src` er strammet til `'self' data: blob:` (ingen eksterne billedværter, efter at foto-URL'er er erstattet af upload). `style-src` tillader `'unsafe-inline'` (inline style-attributter, fx bredden på fremdriftslinjer); scripts er nonce-låst. Kan strammes ved at erstatte style-attributter med CSS-variabler. Alle sider renderes dynamisk pga. noncen.
 - **npm audit (kun udviklingsværktøjer):** `braces`/`micromatch`/`fast-glob` og `postcss-selector-parser` via Tailwind 3 og ESLint-plugins (bruges kun ved build/lint, ikke i produktionsbundlen). Rettes ved migrering til Tailwind 4. `npm audit --omit=dev` er ren.
-- **Renovate og GitHub:** installér Renovate-appen på repoet, slå branch-beskyttelse til på `main` (kræv CI grøn) og secret scanning.
+- **Renovate og GitHub:** installér Renovate-appen på repoet, slå branch-beskyttelse til på `main` og secret scanning. **Gør ikke** CI-jobbene til påkrævede checks, så længe `ci.yml` har `paths-ignore` for docs (D-6): en ren docs-PR ville vente for evigt. Vil du kræve grøn CI, så fjern `paths-ignore` (eller tilføj et lille altid-kørende job, der gøres påkrævet).
 - **Konsol-adaptere (kun udvikling):** loggen maskerer alle 8-cifrede tal (også CVR-numre i firmanavne) – bevidst konservativt.
 - **Kontrast:** endelig godkendelse af ejeren; mellemvej beskrevet i `docs/screens/kontrast/README.md`.
+
+## 7. Databaseroller og RLS (delta-audit, 18.10.2026)
+
+- **Fase 0 er udført** (se `docs/SECURITY-AUDIT-DELTA.md` → «Remediation status»): `abu_owner`/`abu_app`/`abu_jobs`, ingen standardadgangskoder, TLS-krav, timeouts, opstartstjek og CI som `abu_app`.
+- **Ejeren skal (før lancering):** generere `POSTGRES_PASSWORD`, `ABU_OWNER_PASSWORD`, `ABU_APP_PASSWORD` (`openssl rand -hex 32`) og følge README → *Database og roller*. En compose-volumen fra før fase 0 (superbruger `abu`) skal have rollerne kørt én gang (`POSTGRES_SUPERUSER=abu` + `docker compose run --rm db-roles`) – eller slettes, hvis der ingen data er.
+- **Ekstern/administreret Postgres:** `npm run db:roles` kræver en superbruger (`ALTER DATABASE … OWNER`, ejerskifte af tabeller). Har udbyderen ingen superbruger, skal `prisma/roles.sql` tilpasses (fx opret databasen direkte med `abu_owner` som ejer).
+- **`prisma migrate dev`** (nye migrationer lokalt) kræver, at `abu_owner` må oprette Prismas skyggedatabase: lokalt `ALTER ROLE abu_owner CREATEDB` (aldrig i produktion).
+- **RLS fase 1–3 er udført** (`docs/SECURITY-AUDIT-DELTA.md` → «Part B — RLS Phases 1–3», README → *Row-Level Security*). Tilbage:
+  - **Efter udrulning:** tjek `[db] … RLS=ja` i opstartsloggen (migrationen `20261020090000_rls_policies` giver selv rettighederne; `npm run db:roles` genanvender dem, hvis rollerne oprettes senere).
+  - **Kendte rester (accepteret):** definer-funktionerne kan kaldes af al SQL som `abu_app` (de tjekker selv den signerede kontekst og returnerer kun det nødvendige); ca. tre ekstra korte sætninger pr. operation (hold databasen tæt på appen); afhængighed af Next' interne `workAsyncStorage` til memo pr. request (låst til next@16, testet og fail-closed – genbekræft ved hver Next-major); kunder kan læse fritekst-årsagen på deres rådgiveres fraværsblokke.
+  - **`abu_jobs`** er provisioneret, men bruges ikke. Får et job brug for mere end 15 s pr. sætning, så `SET LOCAL statement_timeout` i jobbets transaktion eller en separat klient som `abu_jobs` (politikkerne afhænger af `app.role`, ikke af rollen).
+  - **Ny tabel:** tjeklisten i README (rettigheder, `ENABLE`/`FORCE`, politikker med `COMMENT`, tests i `src/lib/rls.test.ts`); `rls.test.ts` og opstartstjekket fejler for en tabel uden RLS.
+- **D-5 (beslutning):** board-builderen viser «Kan være ansvarlig» (afledt `leadEligible`) også før login. Bevidst; skal det skjules for besøgende, ændres `loadCatalog()`.
+- **D-7:** når `deploy.yml` får et rigtigt deploy-trin (ssh/docker), behold `permissions: contents: read`, `environment: production` med påkrævede reviewers, ingen utroværdige værdier i `run:`, og hemmeligheder kun via `production`-miljøet.
+- **Rådgiverfotos og cache (D-1):** et fjernet eller slettet foto kan stå i en browser-/proxy-cache i højst 5 minutter (derefter 404). Nævn det sammen med bucket-versioneringen (30 dage) i privatlivspolitikken.
+
+## 8. Sikkerhedsgennemgang af MFA, roller og RLS (19.10.2026)
+
+Alle fund i `docs/SECURITY-AUDIT-MFA-RLS.md` er rettet (se «Remediation status» med commits). Tilbage:
+
+- **Ejeren skal (før lancering):** sætte `DB_CONTEXT_SECRET` (`openssl rand -base64 48`) i serverens `.env` (app og `migrate`), gemme den i
+  password-manageren og tjekke `[db] … signeret kontekst=ja` i opstartsloggen. Rotation: README → *Row-Level Security* → «Signeret
+  kontekst» (installér ny → genstart → `npm run db:context-key -- --prune`).
+- **Beslutning – dobbelt opt-in:** markedsføringssamtykke fra onboarding trin 1 bekræftes ikke på e-mail. Efter M-1 kan ingen læse eller
+  trække en andens samtykke tilbage, men en besøgende kan stadig tilføje et samtykke for en e-mail, hen har skrevet. Overvej en
+  bekræftelsesmail før første markedsføringsudsendelse (juragennemgang).
+- **GDPR-indsigt:** selvbetjent dataeksport indeholder kun leads/samtykker/tilmeldinger, der er knyttet til kontoen. Øvrige leads med samme
+  e-mail (fx ufuldendte tilmeldinger før kontoen) udleveres efter en manuel anmodning (admin → Leads, søg på e-mailen).
+- **Kendte rester (accepteret):** en SQL-injektion kører stadig med den signerede kontekst for den request, den rammer (kun den principals
+  rækker), og kan genbruge den signatur i op til 5 minutter; kode-eksekvering i app-processen giver nøglen. `rls.advisor_busy` viser stadig
+  start/slut for en delt rådgivers andre møder inden for bookingvinduet (nødvendigt for ledige tider).
+- **Nye migrationer/politikker:** skriv kontekstfunktionerne som `(SELECT rls.app_…())` (testen fejler ellers) og bind bruger-kolonner i
+  WITH CHECK til den indloggede bruger – tjeklisten i README er opdateret.

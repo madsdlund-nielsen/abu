@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { SubStatusBadge } from "@/components/ui";
+import { LeadLabel, SubStatusBadge } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import type { CompanyInfo } from "@/lib/cvr/types";
 import type { TestSnapshot } from "@/lib/onboarding/snapshot";
 import { formatDkk, frequencyLabel } from "@/lib/pricing";
 import { formatDate } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Kunde" };
 
 export default async function AdminCustomer({ params }: { params: Promise<{ id: string }> }) {
+  // Hver admin-side kræver selv ADMIN (N-1): layout og side renderes parallelt, så layoutets tjek alene beskytter ikke sidens forespørgsler
+  await requireRole("ADMIN");
   const { id } = await params;
   const c = await prisma.customerProfile.findUnique({
     where: { userId: id },
@@ -81,6 +84,7 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
                 <p className="text-muted">
                   {s.advisors.map((a) => `${a.advisor.user.name} (${formatDkk(a.pricePerMeetingDkk)})`).join(" · ")}
                 </p>
+                <p className="mt-1"><LeadLabel prefix name={s.advisors.find((a) => a.isLead)?.advisor.user.name ?? (s.status === "CANCELLED" ? "–" : "Ingen")} /></p>
               </li>
             ))}
           </ul>

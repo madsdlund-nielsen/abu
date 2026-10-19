@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeDb } from "../test/db";
+import { asSystem, asUser, describeDb } from "../test/db";
 import { DEFAULT_PRICE_BOUNDS, validateAdvisorPrice, validatePriceBounds } from "./advisor-price";
 
 describe("rådgiverpris (plan #20)", () => {
@@ -26,10 +26,12 @@ describeDb("prisgrænser i AppSetting (plan #20)", () => {
   it("gemmes og læses; ugyldige værdier falder tilbage til standard", async () => {
     const { prisma } = await import("./db");
     const { getPriceBounds, savePriceBounds } = await import("./advisor-price");
-    await savePriceBounds({ min: 600, max: 20000 });
-    expect(await getPriceBounds()).toEqual({ min: 600, max: 20000 });
-    await prisma.appSetting.update({ where: { key: "advisor.priceMinDkk" }, data: { value: "99999" } });
-    expect(await getPriceBounds()).toEqual(DEFAULT_PRICE_BOUNDS);
-    await prisma.appSetting.deleteMany({ where: { key: { startsWith: "advisor.price" } } });
+    // Prisgrænserne sættes og læses af admin (Admin → Rådgivere)
+    const admin = { id: "test-admin", role: "ADMIN" as const };
+    await asUser(admin, () => savePriceBounds({ min: 600, max: 20000 }));
+    expect(await asUser(admin, () => getPriceBounds())).toEqual({ min: 600, max: 20000 });
+    await asSystem(() => prisma.appSetting.update({ where: { key: "advisor.priceMinDkk" }, data: { value: "99999" } }));
+    expect(await asUser(admin, () => getPriceBounds())).toEqual(DEFAULT_PRICE_BOUNDS);
+    await asSystem(() => prisma.appSetting.deleteMany({ where: { key: { startsWith: "advisor.price" } } }));
   });
 });
