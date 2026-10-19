@@ -103,25 +103,28 @@ export async function buildDataExport(user: { id: string; email: string }) {
     withSystemContext("gdpr.export", () =>
       Promise.all([
         prisma.auditLog.findMany({ where: { userId: user.id }, select: { action: true, entity: true, entityId: true, detail: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
-        // Eventuelle ufuldendte tilmeldinger med samme e-mail (tokenHash udelades)
+        // Kun tilmeldinger, samtykker og leads, der er knyttet til kontoen (convertLead) – ikke alt med samme e-mail
+        // (M-1): kontoens e-mail er ikke bekræftet ved oprettelsen, så et e-mail-match beviser ikke, at det er samme
+        // person. Øvrige leads med e-mailen udleveres efter en manuel anmodning (README «Row-Level Security»).
         prisma.onboardingSession.findMany({
-          where: { data: { path: ["contact", "email"], equals: user.email } },
+          where: { lead: { userId: user.id } },
           select: { step: true, data: true, answers: true, suggestedBoard: true, createdAt: true, expiresAt: true },
         }),
         prisma.marketingConsent.findMany({
-          where: { OR: [{ userId: user.id }, { email: { equals: user.email, mode: "insensitive" } }] },
+          where: { OR: [{ userId: user.id }, { lead: { userId: user.id } }] },
           select: { email: true, phone: true, emailConsent: true, smsConsent: true, consentedAt: true, text: true, textVersion: true, source: true, ipAddress: true, userAgent: true, emailWithdrawnAt: true, smsWithdrawnAt: true },
           orderBy: { consentedAt: "asc" },
         }),
-        prisma.lead.findUnique({
-          where: { email: user.email.toLowerCase() },
+        prisma.lead.findMany({
+          where: { userId: user.id },
           select: { email: true, name: true, phone: true, step: true, source: true, createdAt: true, lastActivityAt: true, convertedAt: true },
+          orderBy: { createdAt: "asc" },
         }),
         prisma.advisorTag.findMany({ where: { advisorId: user.id }, select: { tag: { select: { name: true, kind: true } } } }),
       ]),
     ),
   ]);
-  const [auditLog, onboardingSessions, marketingConsents, lead, tags] = personal;
+  const [auditLog, onboardingSessions, marketingConsents, leads, tags] = personal;
   const subs = profile.customerProfile?.subscriptions ?? [];
   const names = await userDirectory([...subs.flatMap((s) => s.advisors.map((a) => a.advisorId)), ...rawMeetings.flatMap((m) => m.participants.map((p) => p.userId))]);
   const customerProfile = profile.customerProfile && {
@@ -138,7 +141,7 @@ export async function buildDataExport(user: { id: string; email: string }) {
   const advisorProfile = profile.advisorProfile && { ...profile.advisorProfile, tags };
   const { mfaEnabledAt, trustedDevices, ...rest } = { ...profile, customerProfile, advisorProfile };
   const twoFactor = { enabled: mfaEnabledAt !== null, enabledAt: mfaEnabledAt, trustedDevices };
-  return { exportedAt: new Date().toISOString(), user: rest, twoFactor, profilePhoto: profilePhotoInfo(user.id, profile.advisorProfile), meetings, onboardingSessions, lead, marketingConsents, notificationLog, auditLog };
+  return { exportedAt: new Date().toISOString(), user: rest, twoFactor, profilePhoto: profilePhotoInfo(user.id, profile.advisorProfile), meetings, onboardingSessions, leads, marketingConsents, notificationLog, auditLog };
 }
 
 /** Metadata om profilbilledet + hvordan selve billedet fås (det indgår ikke i JSON-filen). */

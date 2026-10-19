@@ -288,7 +288,8 @@ model OnboardingSession {
 /// trækkes tilbage eller opbevaringsperioden (LEAD_RETENTION_MONTHS) er gået.
 model Lead {
   id             String    @id @default(cuid())
-  email          String    @unique
+  /// Ikke unik (M-1): hver tilmelding har sit eget lead; admin samler dem pr. e-mail (src/lib/leads-admin.ts).
+  email          String
   name           String
   phone          String?
   /// Højeste trin nået (1-6)
@@ -303,6 +304,7 @@ model Lead {
   sessions OnboardingSession[]
   consents MarketingConsent[]
 
+  @@index([email])
   @@index([lastActivityAt])
 }
 

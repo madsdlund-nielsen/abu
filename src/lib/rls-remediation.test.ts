@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import { asSystem, describeDb, ownerDb, rawAsApp, uid } from "../test/db";
-import { cookieJar } from "../test/request";
+import { asSystem, asUser, describeDb, ownerDb, rawAsApp, uid } from "../test/db";
+import { cookieJar, formData, redirectOf } from "../test/request";
 import { contextParams, dbContextKey } from "./db-context";
 import { deriveContextKey, signContext } from "./db-context-sign";
 import { sha256 } from "./tokens";
@@ -64,6 +64,7 @@ async function seed() {
 }
 
 const as = (u: { id: string; role: "ADMIN" | "ADVISOR" | "CUSTOMER" }) => ({ userId: u.id, role: u.role });
+const attacker = (w: World) => ({ userId: null, role: "anon" as const, onboardingToken: sha256(w.attackerToken) });
 
 describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)", () => {
   let w: World;
@@ -81,6 +82,102 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
       await prisma.lead.deleteMany({ where: { email: { endsWith: "@rem.test" } } });
       await prisma.user.deleteMany({ where: { id: { in: users } } });
     });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------ M-1
+  it("M-1: rapportens bevis – trin 1 med offerets e-mail giver et NYT lead; offerets lead/samtykke kan hverken ses, ændres eller trækkes tilbage", async () => {
+    const { prisma } = await import("./db");
+    await rawAsApp(attacker(w), async (q) => {
+      const [{ id }] = (await q(`SELECT rls.capture_onboarding_lead($1, 'ATTACKER NAME') AS id`, [w.victimEmail])).rows;
+      expect(id).not.toBe(w.victimLead.id);
+      // Kun eget (nye) lead er synligt – ikke offerets e-mail, navn, telefon eller samtykke (IP/user-agent)
+      expect((await q(`SELECT id FROM "Lead"`)).rows.map((r) => r.id)).toEqual([id]);
+      expect((await q(`SELECT * FROM "Lead" WHERE id = $1`, [w.victimLead.id])).rows).toEqual([]);
+      expect((await q(`SELECT * FROM "MarketingConsent" WHERE "leadId" = $1`, [w.victimLead.id])).rows).toEqual([]);
+      // Ændringer af offerets data rammer intet
+      expect((await q(`UPDATE "Lead" SET phone = '+4599999999', "userId" = $2, "convertedAt" = now() WHERE id = $1`, [w.victimLead.id, w.cB.id])).rowCount).toBe(0);
+      expect((await q(`UPDATE "MarketingConsent" SET "emailWithdrawnAt" = now() WHERE "leadId" = $1`, [w.victimLead.id])).rowCount).toBe(0);
+      // Samtykke med en fremmed userId afvises – både på offerets og på eget lead
+      const ins = `INSERT INTO "MarketingConsent" (id, "leadId", "userId", email, text, "textVersion", source) VALUES ($1, $2, $3, 'x@rem.test', 't', 'v', 's')`;
+      await expect(q(ins, [uid("mc"), w.victimLead.id, w.cB.id])).rejects.toMatchObject({ code: "42501" });
+      await expect(q(ins, [uid("mc"), id, w.cB.id])).rejects.toMatchObject({ code: "42501" });
+      expect((await q(ins, [uid("mc"), id, null])).rowCount).toBe(1);
+      // Eget lead kan ikke knyttes til en fremmed bruger
+      await expect(q(`UPDATE "Lead" SET "userId" = $2 WHERE id = $1`, [id, w.cB.id])).rejects.toMatchObject({ code: "42501" });
+      // Tilmeldingen kan ikke selv pege på offerets lead (direkte UPDATE/INSERT) – kun via funktionen
+      await expect(q(`UPDATE "OnboardingSession" SET "leadId" = $1 WHERE "tokenHash" = $2`, [w.victimLead.id, sha256(w.attackerToken)])).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`INSERT INTO "OnboardingSession" (id, "tokenHash", "expiresAt", "leadId") VALUES ($1, $2, now() + interval '1 day', $3)`, [uid("o"), sha256(w.attackerToken), w.victimLead.id])).rejects.toMatchObject({ code: "42501" });
+    });
+    // Offerets lead og samtykke er uændrede
+    const lead = await asSystem(() => prisma.lead.findUniqueOrThrow({ where: { id: w.victimLead.id }, include: { consents: true, sessions: true } }));
+    expect(lead).toMatchObject({ name: "Rigtig Offer", phone: "+4511111111", userId: null, convertedAt: null });
+    expect(lead.consents.map((c) => [c.emailWithdrawnAt, c.userId])).toEqual([[null, null]]);
+    expect(lead.sessions.map((s) => s.id)).toEqual([w.victimSession.id]);
+  });
+
+  it("M-1: en konto-indehavers e-mail via rå SQL giver et isoleret lead – kontoen og andres leads røres ikke", async () => {
+    const { prisma } = await import("./db");
+    const accountEmail = (await asSystem(() => prisma.user.findUniqueOrThrow({ where: { id: w.cA.id } }))).email;
+    const id = await rawAsApp(attacker(w), async (q) => (await q(`SELECT rls.capture_onboarding_lead($1, 'X') AS id`, [accountEmail])).rows[0].id as string);
+    expect(id).toBeTruthy();
+    expect(await asSystem(() => prisma.lead.count({ where: { userId: w.cA.id } }))).toBe(0);
+    // Uden tilmelding (ingen onboarding-cookie) eller uden kontekst: afvist
+    await rawAsApp({ userId: null, role: "anon" }, async (q) => {
+      await expect(q(`SELECT rls.capture_onboarding_lead($1, 'X')`, [w.victimEmail])).rejects.toMatchObject({ code: "42501" });
+    });
+    await rawAsApp(null, async (q) => {
+      await expect(q(`SELECT rls.capture_onboarding_lead($1, 'X')`, [w.victimEmail])).rejects.toMatchObject({ code: "42501" });
+    });
+  });
+
+  it("M-1 over HTTP (saveContactAction): ny e-mail og en e-mail med et eksisterende lead giver identisk svar – intet samtykke-orakel, ingen tilbagetrækning", async () => {
+    const { saveContactAction } = await import("@/app/actions/onboarding");
+    const { getOnboardingSession } = await import("./onboarding/session");
+    const { prisma } = await import("./db");
+    const step1 = async (email: string, consent: boolean) => {
+      const target = await redirectOf(() => saveContactAction({}, formData({ name: "Angriber", email, ...(consent ? { contactConsent: "on" } : {}) })));
+      const s = await getOnboardingSession();
+      return { target, step: s?.step, marketingConsent: s?.marketingConsent, leadId: s?.leadId };
+    };
+    cookieJar.clear();
+    const fresh = await step1(`${uid("ny")}@rem.test`, false);
+    cookieJar.clear();
+    const existing = await step1(w.victimEmail, false);
+    // Samme omdirigering og samme forudfyldte samtykke (offerets samtykke afsløres ikke)
+    expect({ ...existing, leadId: undefined }).toEqual({ ...fresh, leadId: undefined });
+    expect(existing.marketingConsent).toBe(false);
+    expect(existing.leadId).not.toBe(w.victimLead.id);
+    // Samme tilmelding igen: beholder sit eget lead
+    expect((await step1(w.victimEmail, true)).leadId).toBe(existing.leadId);
+    expect((await step1(w.victimEmail, false)).marketingConsent).toBe(false);
+    // Offerets samtykke er stadig aktivt (blev ikke trukket tilbage af afkrydsningen)
+    const c = await asSystem(() => prisma.marketingConsent.findUniqueOrThrow({ where: { id: w.victimConsent.id } }));
+    expect(c.emailWithdrawnAt).toBeNull();
+    // Admin ser ét lead pr. e-mail (de-dup)
+    const { loadLeads } = await import("./leads-admin");
+    const rows = await asUser(w.admin, () => loadLeads({ q: w.victimEmail }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: "Rigtig Offer", consent: "ja" });
+    expect(rows[0].attempts).toBeGreaterThanOrEqual(2);
+  });
+
+  it("M-1: tilbagetrækning kun af den registrerede (egen tilmelding før konto, kontoen selv) eller admin", async () => {
+    const { prisma } = await import("./db");
+    const { convertLead } = await import("./leads");
+    // Offerets egen tilmelding (cookien) må trække sit eget samtykke tilbage
+    await rawAsApp({ userId: null, role: "anon", onboardingToken: sha256(w.victimToken) }, async (q) => {
+      expect((await q(`UPDATE "MarketingConsent" SET "emailWithdrawnAt" = now() WHERE id = $1`, [w.victimConsent.id])).rowCount).toBe(1);
+    });
+    // Konvertering til kontoen (som den nye kunde med tilmeldingens cookie) – derefter kun kontoen selv eller admin
+    await asUser(w.cA, () => convertLead(w.victimLead.id, w.cA.id), { onboardingToken: sha256(w.victimToken) });
+    const after = await asSystem(() => prisma.marketingConsent.findUniqueOrThrow({ where: { id: w.victimConsent.id } }));
+    expect(after.userId).toBe(w.cA.id);
+    await rawAsApp({ userId: null, role: "anon", onboardingToken: sha256(w.victimToken) }, async (q) => {
+      expect((await q(`UPDATE "MarketingConsent" SET "smsWithdrawnAt" = now() WHERE id = $1`, [w.victimConsent.id])).rowCount).toBe(0);
+    });
+    await rawAsApp(as(w.cB), async (q) => expect((await q(`UPDATE "MarketingConsent" SET "smsWithdrawnAt" = now() WHERE id = $1`, [w.victimConsent.id])).rowCount).toBe(0));
+    await rawAsApp(as(w.cA), async (q) => expect((await q(`UPDATE "MarketingConsent" SET "smsWithdrawnAt" = now() WHERE id = $1`, [w.victimConsent.id])).rowCount).toBe(1));
+    await rawAsApp(as(w.admin), async (q) => expect((await q(`UPDATE "MarketingConsent" SET "smsWithdrawnAt" = now() WHERE id = $1`, [w.victimConsent.id])).rowCount).toBe(1));
   });
 
   // ------------------------------------------------------------------------------------------------- Signeret kontekst

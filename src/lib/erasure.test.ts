@@ -54,7 +54,7 @@ describeDb("sletning mod databasen (M-3)", () => {
     expect(del).toHaveBeenCalledWith(`recordings/x/${u.id}`);
     await asSystem(async () => {
       expect(await prisma.user.findUnique({ where: { id: u.id } })).toBeNull();
-      expect(await prisma.lead.findUnique({ where: { email } })).toBeNull();
+      expect(await prisma.lead.findFirst({ where: { email } })).toBeNull();
       const left = await prisma.webhookEvent.findMany({ where: { OR: [{ payload: { path: ["subscription"], equals: `fsub-${u.id}` } }, { externalId: { startsWith: `video:wb-${u.id}` } }] } });
       expect(left).toHaveLength(0);
       expect(await prisma.webhookEvent.count({ where: { payload: { path: ["subscription"], equals: "en-anden" } } })).toBeGreaterThan(0);

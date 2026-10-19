@@ -450,10 +450,16 @@ async function scanAbandonedOnboardingAsSystem(now: Date): Promise<number> {
       sessions: { some: { expiresAt: { gt: now } } },
       consents: { some: { OR: [{ emailConsent: true, emailWithdrawnAt: null }, { smsConsent: true, smsWithdrawnAt: null }] } },
     },
+    orderBy: { lastActivityAt: "desc" },
     take: 200,
   });
   let created = 0;
+  // Én påmindelse pr. e-mail (M-1: hver tilmelding har sit eget lead – flere tilmeldinger må ikke give flere mails)
+  const seen = new Set<string>();
   for (const l of leads) {
+    const key = l.email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
     if (await prisma.user.findUnique({ where: { email: l.email }, select: { id: true } })) continue;
     const ids = await enqueue({
       trigger: "onboarding_abandoned",
