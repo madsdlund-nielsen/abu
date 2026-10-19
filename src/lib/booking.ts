@@ -1,4 +1,4 @@
-import type { MeetingStatus, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getEnv } from "./env";
 import { meetingEvents } from "./notifications/service";
@@ -8,7 +8,6 @@ import { getVideo } from "./video";
 import { getBlockedDates } from "./holidays";
 import { localDateKey } from "./time";
 import { audit } from "./audit";
-import { ADVISOR_BLOCKING_STATUSES } from "./meeting-status";
 import { cancellationFreesQuota } from "./quota";
 
 export class BookingError extends Error {}
@@ -18,7 +17,8 @@ type Tx = Prisma.TransactionClient | typeof prisma;
 /**
  * Regler, fravær og optagne tider for rådgiverne i perioden. RLS: en kunde ser kun regler/fravær for rådgiverne i sit
  * eget board, og rådgivernes øvrige møder (med andre kunder) kun som start/slut via `rls.advisor_busy` – uden mødeid'er,
- * kunder eller indhold. Admin ser alle.
+ * status, kunder eller indhold, kun møder der optager kalenderen (ADVISOR_BLOCKING_STATUSES) og kun i bookingvinduet
+ * (R-3). Admin ser alle.
  */
 export async function loadAvailability(tx: Tx, advisorIds: string[], from: Date, to: Date, excludeMeetingId?: string): Promise<AdvisorAvailability[]> {
   const margin = 24 * 3_600_000;
@@ -30,17 +30,16 @@ export async function loadAvailability(tx: Tx, advisorIds: string[], from: Date,
       where: { advisorId: { in: advisorIds }, endsAt: { gt: from }, startsAt: { lt: to } },
     }),
     advisorIds.length
-      ? tx.$queryRaw<{ advisor_id: string; starts_at: Date; ends_at: Date; status: MeetingStatus }[]>`
-          SELECT advisor_id, starts_at, ends_at, status::text AS status
+      ? tx.$queryRaw<{ advisor_id: string; starts_at: Date; ends_at: Date }[]>`
+          SELECT advisor_id, starts_at, ends_at
             FROM rls.advisor_busy(${advisorIds}::text[], ${busyFrom}::timestamp(3), ${busyTo}::timestamp(3), ${excludeMeetingId ?? null}::text)`
       : Promise.resolve([]),
   ]);
-  const meetings = busy.filter((m) => ADVISOR_BLOCKING_STATUSES.includes(m.status));
   return advisorIds.map((id) => ({
     id,
     rules: rules.filter((r) => r.advisorId === id),
     blocks: blocks.filter((b) => b.advisorId === id),
-    meetings: meetings.filter((m) => m.advisor_id === id).map((m) => ({ startsAt: m.starts_at, endsAt: m.ends_at })),
+    meetings: busy.filter((m) => m.advisor_id === id).map((m) => ({ startsAt: m.starts_at, endsAt: m.ends_at })),
   }));
 }
 

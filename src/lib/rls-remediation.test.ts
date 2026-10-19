@@ -244,6 +244,32 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
     });
   });
 
+  // ------------------------------------------------------------------------------------------------------------ R-3
+  it("R-3: rls.advisor_busy klipper kundens vindue til bookingvinduet, giver kun start/slut for optagende møder og validerer argumenterne", async () => {
+    await rawAsApp(as(w.cB), async (q) => {
+      // Rapportens bevis: 100-års-vindue → nu kun det kommende møde inden for ca. 16 uger (ikke aflyst, fjernt eller gammelt)
+      const rows = (await q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp - interval '100 years', now()::timestamp + interval '100 years', NULL)`, [[w.shared.id]])).rows;
+      expect(rows.map((r) => (r.starts_at as Date).toISOString())).toEqual([w.near.startsAt.toISOString()]);
+      expect(Object.keys(rows[0]).sort()).toEqual(["advisor_id", "ends_at", "starts_at"]);
+      await expect(q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp, now()::timestamp - interval '1 day', NULL)`, [[w.shared.id]])).rejects.toMatchObject({ code: "22023" });
+      await expect(q(`SELECT * FROM rls.advisor_busy(NULL, now()::timestamp, now()::timestamp + interval '1 day', NULL)`)).rejects.toMatchObject({ code: "22023" });
+      await expect(q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp, now()::timestamp + interval '1 day', NULL)`, [Array(21).fill(w.shared.id)])).rejects.toMatchObject({ code: "22023" });
+      await expect(q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp, now()::timestamp + interval '1 day', NULL)`, [[w.shared.id, null]])).rejects.toMatchObject({ code: "22023" });
+      // Uden for vinduet: tomt (ikke en fejl)
+      expect((await q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp + interval '1 year', now()::timestamp + interval '3 years', NULL)`, [[w.shared.id]])).rows).toEqual([]);
+    });
+    // Admin (flyt et konkret møde): ingen klipning, men højst 20 uger ad gangen
+    await rawAsApp(as(w.admin), async (q) => {
+      await expect(q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp - interval '100 years', now()::timestamp + interval '100 years', NULL)`, [[w.shared.id]])).rejects.toMatchObject({ code: "22023" });
+      const far = (await q(`SELECT * FROM rls.advisor_busy($1, $2::timestamp - interval '1 day', $2::timestamp + interval '1 day', NULL)`, [[w.shared.id], w.far.startsAt])).rows;
+      expect(far).toHaveLength(1);
+    });
+    // Statuslisten i SQL er den samme som appens (ADVISOR_BLOCKING_STATUSES)
+    const { ADVISOR_BLOCKING_STATUSES } = await import("./meeting-status");
+    const src = await rawAsApp(null, async (q) => (await q(`SELECT prosrc FROM pg_proc WHERE proname = 'advisor_busy' AND pronamespace = 'rls'::regnamespace`)).rows[0].prosrc as string);
+    expect(src).toContain(`m.status IN (${ADVISOR_BLOCKING_STATUSES.map((s) => `'${s}'`).join(", ")})`);
+  });
+
   // ------------------------------------------------------------------------------------------------- Signeret kontekst
   it("forfalsket kontekst: set_config('app.role','system') fra abu_app giver ingenting – kun appens signerede kontekst tæller", async () => {
     const count = `SELECT (SELECT count(*)::int FROM "User") AS users, (SELECT count(*)::int FROM "Subscription") AS subs, rls.app_role() AS role`;

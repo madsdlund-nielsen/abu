@@ -55,7 +55,10 @@ async function seedWorld() {
           recordings: { create: [{ source: "UPLOAD", status: "DONE", uploadedById: people[1] }] },
         },
       });
-    const start = new Date("2031-03-03T09:00:00Z");
+    // Inden for bookingvinduet (rls.advisor_busy klipper kundens vindue til ca. 16 uger frem – R-3): en mandag 09:00 UTC
+    const start = new Date(Date.now() + 21 * 86_400_000);
+    start.setUTCHours(9, 0, 0, 0);
+    start.setUTCDate(start.getUTCDate() + ((8 - start.getUTCDay()) % 7));
     const m1 = await meeting(s1.id, [c1.id, v1.id, v2.id], start);
     const m2 = await meeting(s2.id, [c2.id, v3.id], start);
     await prisma.availabilityRule.createMany({ data: [{ advisorId: v1.id, weekday: 1, startMinute: 480, endMinute: 960 }, { advisorId: v3.id, weekday: 1, startMinute: 480, endMinute: 960 }] });
@@ -124,6 +127,7 @@ async function rawAs<T>(ctx: Principal | null, fn: (q: (sql: string, params?: un
 }
 
 const ids = (rows: { id: string }[]) => rows.map((r) => r.id).sort();
+const days = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 
 describeDb("Row-Level Security: alle tabeller og politikker (abu_app)", () => {
   let w: World;
@@ -251,18 +255,19 @@ describeDb("Row-Level Security: alle tabeller og politikker (abu_app)", () => {
     const { prisma } = await import("./db");
     await asUser(who(w.c1), async () => {
       const { loadAvailability } = await import("./booking");
-      const [a] = await loadAvailability(prisma, [w.v1.id], new Date("2031-03-01T00:00:00Z"), new Date("2031-03-10T00:00:00Z"));
+      const [a] = await loadAvailability(prisma, [w.v1.id], days(w.m1.startsAt, -2), days(w.m1.startsAt, 7));
       expect(a.rules).toHaveLength(1);
       expect(a.meetings).toEqual([{ startsAt: w.m1.startsAt, endsAt: w.m1.endsAt }]);
-      await expect(loadAvailability(prisma, [w.v3.id], new Date("2031-03-01T00:00:00Z"), new Date("2031-03-10T00:00:00Z"))).rejects.toThrow(/kalender/);
+      await expect(loadAvailability(prisma, [w.v3.id], days(w.m1.startsAt, -2), days(w.m1.startsAt, 7))).rejects.toThrow(/kalender/);
       expect(await prisma.availabilityRule.count({ where: { advisorId: w.v3.id } })).toBe(0);
       expect(await prisma.availabilityBlock.count({ where: { advisorId: w.v3.id } })).toBe(0);
     });
     // Kunde 2 ser rådgiver 3's optagne tid (eget møde), men ikke andet om mødet
     await rawAs({ userId: w.c2.id, role: "CUSTOMER" }, async (q) => {
-      const busy = (await q(`SELECT * FROM rls.advisor_busy($1, '2031-03-01', '2031-03-10', NULL)`, [[w.v3.id]])).rows;
+      const busy = (await q(`SELECT * FROM rls.advisor_busy($1, $2, $3, NULL)`, [[w.v3.id], days(w.m2.startsAt, -2), days(w.m2.startsAt, 7)])).rows;
       expect(busy).toHaveLength(1);
-      expect(Object.keys(busy[0]).sort()).toEqual(["advisor_id", "ends_at", "starts_at", "status"]);
+      // R-3: kun det, beregningen af ledige tider bruger
+      expect(Object.keys(busy[0]).sort()).toEqual(["advisor_id", "ends_at", "starts_at"]);
     });
   });
 
@@ -299,7 +304,7 @@ describeDb("Row-Level Security: alle tabeller og politikker (abu_app)", () => {
     // Rådgiver 3 ser ikke møde 1 og kan ikke slå boardets rådgiveres kalender op
     await rawAs({ userId: w.v3.id, role: "ADVISOR" }, async (q) => {
       expect((await q(`SELECT id FROM "Meeting" WHERE id = $1`, [w.m1.id])).rows).toEqual([]);
-      await expect(q(`SELECT * FROM rls.advisor_busy($1, '2031-01-01', '2031-12-31', NULL)`, [[w.v1.id]])).rejects.toMatchObject({ code: "42501" });
+      await expect(q(`SELECT * FROM rls.advisor_busy($1, now()::timestamp, now()::timestamp + interval '10 weeks', NULL)`, [[w.v1.id]])).rejects.toMatchObject({ code: "42501" });
     });
   });
 
