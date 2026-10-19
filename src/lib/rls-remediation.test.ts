@@ -270,6 +270,27 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
     expect(src).toContain(`m.status IN (${ADVISOR_BLOCKING_STATUSES.map((s) => `'${s}'`).join(", ")})`);
   });
 
+  // ------------------------------------------------------------------------------------------------------------ R-4
+  it("R-4: et opsagt (CANCELLED) board giver ikke længere adgang til den anden parts profil, fravær og navn", async () => {
+    const { prisma } = await import("./db");
+    const { userDirectory } = await import("./user-directory");
+    const peek = () =>
+      asUser(w.cC, async () => ({
+        bio: (await prisma.advisorProfile.findUnique({ where: { userId: w.inactive.id } }))?.bio ?? null,
+        blocks: await prisma.availabilityBlock.count({ where: { advisorId: w.inactive.id } }),
+        names: [...(await userDirectory([w.inactive.id])).keys()],
+      }));
+    expect(await peek()).toEqual({ bio: null, blocks: 0, names: [] });
+    expect(await asUser(w.inactive, () => prisma.customerProfile.findUnique({ where: { userId: w.cC.id } }))).toBeNull();
+    // Positiv kontrol: det samme board, mens det er aktivt
+    await asSystem(() => prisma.subscription.update({ where: { id: w.sC.id }, data: { status: "ACTIVE" } }));
+    try {
+      expect(await peek()).toEqual({ bio: "SECRET-BIO-NIKOLAJ", blocks: 1, names: [w.inactive.id] });
+    } finally {
+      await asSystem(() => prisma.subscription.update({ where: { id: w.sC.id }, data: { status: "CANCELLED" } }));
+    }
+  });
+
   // ------------------------------------------------------------------------------------------------- Signeret kontekst
   it("forfalsket kontekst: set_config('app.role','system') fra abu_app giver ingenting – kun appens signerede kontekst tæller", async () => {
     const count = `SELECT (SELECT count(*)::int FROM "User") AS users, (SELECT count(*)::int FROM "Subscription") AS subs, rls.app_role() AS role`;
