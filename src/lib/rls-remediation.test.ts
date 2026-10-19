@@ -201,6 +201,25 @@ describeDb("Remediation af SECURITY-AUDIT-MFA-RLS.md (adversarialt, som abu_app)
     await (await ownerDb()).auditLog.deleteMany({ where: { action: { startsWith: tag } } });
   });
 
+  // ------------------------------------------------------------------------------------------------------------ R-1
+  it("R-1: kunden kan ikke sætte en inaktiv rådgiver (eller en anden pris / et ansvar uden lead-tag) i sit board", async () => {
+    const seat = `INSERT INTO "SubscriptionAdvisor" ("subscriptionId", "advisorId", "pricePerMeetingDkk", "isLead") VALUES ($1, $2, $3, $4)`;
+    await rawAsApp(as(w.cA), async (q) => {
+      await expect(q(seat, [w.sA.id, w.inactive.id, 1750, false])).rejects.toMatchObject({ code: "42501" }); // rapportens bevis
+      // … og dermed heller ingen hemmelig bio/fraværsgrund
+      expect((await q(`SELECT bio FROM "AdvisorProfile" WHERE "userId" = $1`, [w.inactive.id])).rows).toEqual([]);
+      expect((await q(`SELECT reason FROM "AvailabilityBlock" WHERE "advisorId" = $1`, [w.inactive.id])).rows).toEqual([]);
+      await expect(q(seat, [w.sA.id, w.shared.id, 1, false])).rejects.toMatchObject({ code: "42501" }); // pris ≠ rådgiverens
+      await expect(q(seat, [w.sA.id, w.shared.id, 1750, true])).rejects.toMatchObject({ code: "42501" }); // ansvarlig uden lead-tag
+      await expect(q(seat, [w.sB.id, w.shared.id, 1750, false])).rejects.toMatchObject({ code: "42501" }); // andens board
+      expect((await q(seat, [w.sA.id, w.shared.id, 1750, false])).rowCount).toBe(1); // aktiv, aktuel pris: ja
+      await expect(q(`UPDATE "SubscriptionAdvisor" SET "pricePerMeetingDkk" = 1 WHERE "subscriptionId" = $1`, [w.sA.id])).rejects.toMatchObject({ code: "42501" });
+      expect((await q(`UPDATE "SubscriptionAdvisor" SET "isLead" = true WHERE "subscriptionId" = $1 AND "advisorId" = $2`, [w.sA.id, w.leadAdv.id])).rowCount).toBe(1);
+    });
+    // Admin sammensætter frit (også en inaktiv rådgiver, fx før aktivering)
+    await rawAsApp(as(w.admin), async (q) => expect((await q(seat, [w.sA.id, w.inactive.id, 1, false])).rowCount).toBe(1));
+  });
+
   // ------------------------------------------------------------------------------------------------- Signeret kontekst
   it("forfalsket kontekst: set_config('app.role','system') fra abu_app giver ingenting – kun appens signerede kontekst tæller", async () => {
     const count = `SELECT (SELECT count(*)::int FROM "User") AS users, (SELECT count(*)::int FROM "Subscription") AS subs, rls.app_role() AS role`;

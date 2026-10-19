@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth";
 import { cancelMeeting } from "@/lib/booking";
-import { ensureLead } from "@/lib/lead";
+import { ensureLead, leadEligibleIds } from "@/lib/lead";
 import { prisma } from "@/lib/db";
 import { startCheckout } from "@/lib/checkout";
 import { resolveBoard } from "@/lib/onboarding/board";
@@ -51,7 +51,9 @@ export async function changePlanAction(formData: FormData) {
   if (!sub || (sub.status !== "ACTIVE" && sub.status !== "PAST_DUE")) {
     redirectWith(back, "err", "Du har intet aktivt abonnement at ændre.");
   }
-  const prevLead = sub.advisors.find((a) => a.isLead)?.advisorId;
+  // Den ansvarlige beholdes kun, hvis vedkommende stadig kan være ansvarlig (lead-tagget) – RLS håndhæver det samme (R-1)
+  const prevLeadId = sub.advisors.find((a) => a.isLead)?.advisorId;
+  const prevLead = prevLeadId && (await leadEligibleIds([prevLeadId])).has(prevLeadId) ? prevLeadId : undefined;
   try {
     await getPayments().changePlan(sub.providerSubscriptionId ?? sub.id, planHandle(board.weeks), board.monthlyPriceDkk);
   } catch (e) {
