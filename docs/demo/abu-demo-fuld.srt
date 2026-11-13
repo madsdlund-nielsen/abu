@@ -1,0 +1,319 @@
+1
+00:00:09,100 --> 00:00:12,367
+Forsiden: dit eget advisory board som abonnement.
+
+2
+00:00:12,367 --> 00:00:15,448
+Faste møder med to til fire erfarne rådgivere.
+
+3
+00:00:15,448 --> 00:00:18,582
+Tre skridt: fortæl om jer, book og få overblik.
+
+4
+00:00:18,582 --> 00:00:22,052
+Prisberegneren viser «fra»-priser pr. måned.
+
+5
+00:00:22,052 --> 00:00:28,261
+Prisen afhænger af boardets størrelse og frekvens.
+
+6
+00:00:28,261 --> 00:00:31,462
+Tryghed: kun europæiske leverandører, data i EU.
+
+7
+00:00:31,462 --> 00:00:35,417
+Optagelse sker kun med jeres viden.
+
+8
+00:00:39,433 --> 00:00:47,376
+Trin 1: navn og e-mail. Samtykke er ikke forudkrydset.
+
+9
+00:00:47,376 --> 00:00:53,358
+Trin 2: CVR-nummer og telefon.
+
+10
+00:00:53,358 --> 00:00:56,957
+Trin 3: virksomhedskortet hentes fra CVR-registret.
+
+11
+00:00:56,957 --> 00:01:12,384
+Trin 4: en kort test, ét spørgsmål ad gangen.
+
+12
+00:01:12,384 --> 00:01:22,418
+Nogle spørgsmål har flere svar. Svarene vægter tags.
+
+13
+00:01:22,418 --> 00:01:25,821
+Trin 5: et foreslået board, der supplerer hinanden.
+
+14
+00:01:25,821 --> 00:01:31,516
+Sidepanelet: dækning, kompetencer og ansvarlig rådgiver.
+
+15
+00:01:31,516 --> 00:01:35,352
+Prisen opdateres, når frekvensen ændres.
+
+16
+00:01:35,352 --> 00:01:38,605
+Kunden kan udskifte en rådgiver fra kataloget.
+
+17
+00:01:38,605 --> 00:01:42,505
+Kataloget viser kompetencer og pris pr. møde.
+
+18
+00:01:42,505 --> 00:01:45,994
+Boardet og prisen er opdateret med det samme.
+
+19
+00:01:45,994 --> 00:01:54,618
+Trin 6: adgangskode og vilkår.
+
+20
+00:01:54,618 --> 00:01:57,954
+Samtykke til optagelse og transskription af møder.
+
+21
+00:01:57,954 --> 00:02:04,131
+Resuméet viser prisen inklusive moms.
+
+22
+00:02:04,131 --> 00:02:06,631
+Betalingen er en mock i demoen.
+
+23
+00:02:06,631 --> 00:02:09,133
+Abonnementet er aktivt.
+
+24
+00:02:09,133 --> 00:02:13,696
+Overblikket viser boardet og «Ansvarlig rådgiver».
+
+25
+00:02:17,700 --> 00:02:24,347
+Kunden logger ind og ser sit board.
+
+26
+00:02:24,347 --> 00:02:27,819
+Mødet for perioden er afholdt. Næste kan bookes.
+
+27
+00:02:27,819 --> 00:02:31,419
+Ugevisningen viser tider, hvor hele boardet er ledigt.
+
+28
+00:02:31,419 --> 00:02:34,887
+Kvoteperioden: ét møde med hele boardet pr. periode.
+
+29
+00:02:34,887 --> 00:02:40,559
+Nytårsdag og nytårsaften er blokeret som helligdage.
+
+30
+00:02:40,559 --> 00:02:43,060
+Kunden vælger tirsdag kl. 10:00.
+
+31
+00:02:43,060 --> 00:02:48,695
+Mødet er booket. Siden viser en nedtælling.
+
+32
+00:02:48,695 --> 00:02:53,254
+Kort før start åbner kunden mødet igen.
+
+33
+00:02:53,254 --> 00:03:01,997
+Rummet åbner 15 minutter før start (mock-video).
+
+34
+00:03:01,997 --> 00:03:04,497
+Et afholdt møde åbnes fra mødelisten.
+
+35
+00:03:04,497 --> 00:03:08,166
+Resuméet er skrevet automatisk ud fra transskriptionen.
+
+36
+00:03:08,166 --> 00:03:11,626
+Beslutninger og handlingspunkter står klar.
+
+37
+00:03:11,626 --> 00:03:16,819
+Hele transskriptionen kan foldes ud.
+
+38
+00:03:21,167 --> 00:03:28,485
+Rådgiveren logger ind.
+
+39
+00:03:28,485 --> 00:03:37,248
+Overblikket: «Du er ansvarlig rådgiver».
+
+40
+00:03:37,248 --> 00:03:40,247
+Rådgiveren styrer selv sine faste tidsrum.
+
+41
+00:03:40,247 --> 00:03:48,581
+Fravær blokeres med danske datofelter.
+
+42
+00:03:48,581 --> 00:03:55,468
+Tiderne forsvinder straks fra kundernes booking.
+
+43
+00:03:55,468 --> 00:03:57,969
+Profilen med titel, tekst og billede.
+
+44
+00:03:57,969 --> 00:04:07,541
+Billedet ensrettes, og metadata fjernes automatisk.
+
+45
+00:04:07,541 --> 00:04:10,041
+Møder: kommende og afholdte møder.
+
+46
+00:04:14,100 --> 00:04:17,435
+Admin ser alle rådgivere med tags, pris og status.
+
+47
+00:04:17,435 --> 00:04:25,540
+Ny rådgiver inviteres med navn og e-mail.
+
+48
+00:04:25,540 --> 00:04:30,508
+Invitationslinket vises her, fordi e-mail er mock.
+
+49
+00:04:30,508 --> 00:04:37,949
+Tjeklisten blokerer aktivering, indtil alt er klart.
+
+50
+00:04:37,949 --> 00:04:43,716
+Rasmus har accepteret og lagt tilgængelighed ind.
+
+51
+00:04:43,716 --> 00:04:50,447
+Admin sætter kompetence-tags.
+
+52
+00:04:50,447 --> 00:05:04,079
+Så skrives præsentationen, og billedet uploades.
+
+53
+00:05:04,079 --> 00:05:10,176
+Tjeklisten er opfyldt, så Rasmus kan aktiveres.
+
+54
+00:05:10,176 --> 00:05:15,383
+Rasmus er aktiv og kan vælges af kunder.
+
+55
+00:05:15,383 --> 00:05:19,441
+Hvert board har én ansvarlig rådgiver.
+
+56
+00:05:19,441 --> 00:05:22,709
+«Foreslå udligning» fordeler rollerne mere jævnt.
+
+57
+00:05:22,710 --> 00:05:27,464
+Intet ændres, før admin bekræfter forslaget.
+
+58
+00:05:27,464 --> 00:05:31,658
+Pludseligt fravær: udskift én rådgiver i ét møde.
+
+59
+00:05:31,658 --> 00:05:38,371
+Kandidater vises med ledighed, match og pris.
+
+60
+00:05:38,371 --> 00:05:44,439
+Alle berørte får besked.
+
+61
+00:05:44,439 --> 00:05:47,441
+Notifikationsloggen viser de sendte beskeder.
+
+62
+00:05:52,633 --> 00:05:55,134
+Onboarding-testen redigeres af admin.
+
+63
+00:05:55,134 --> 00:05:59,258
+Spørgsmål sorteres ved at trække i grebet.
+
+64
+00:05:59,258 --> 00:06:05,405
+Hvert svar giver tags en vægt fra 1 til 5.
+
+65
+00:06:05,405 --> 00:06:15,035
+Forhåndsvisning af forslaget uden at gemme.
+
+66
+00:06:15,035 --> 00:06:24,888
+Tilmeldingens tekster kan redigeres med forhåndsvisning.
+
+67
+00:06:24,888 --> 00:06:30,457
+Regler styrer, hvornår og til hvem der sendes.
+
+68
+00:06:30,457 --> 00:06:42,781
+Live forhåndsvisning, og SMS-tegn tælles.
+
+69
+00:06:42,781 --> 00:06:54,140
+«Send test» sender til et nummer.
+
+70
+00:06:54,140 --> 00:06:59,289
+Testbeskeden står i loggen.
+
+71
+00:06:59,289 --> 00:07:04,931
+Leads vises med trin og samtykke.
+
+72
+00:07:08,967 --> 00:07:15,392
+Admins bruger altid totrinsbekræftelse.
+
+73
+00:07:15,392 --> 00:07:18,593
+Derefter indtastes koden fra godkendelses-appen.
+
+74
+00:07:18,594 --> 00:07:21,862
+«Husk denne enhed» springer koden over i 30 dage.
+
+75
+00:07:21,862 --> 00:07:26,770
+Koden er godkendt.
+
+76
+00:07:26,770 --> 00:07:33,313
+Konto: totrinsbekræftelse og betroede enheder.
+
+77
+00:07:33,314 --> 00:07:42,475
+Ny administrator inviteres. Kræver frisk kode.
+
+78
+00:07:42,475 --> 00:07:50,233
+Listen viser status, MFA og seneste login.
+
+79
+00:07:50,233 --> 00:07:55,005
+GDPR: hver bruger kan hente sine data.
+
+80
+00:07:55,005 --> 00:07:58,274
+Data i EU, og adgang håndhæves i databasen (RLS).
