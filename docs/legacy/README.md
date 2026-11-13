@@ -8,3 +8,4 @@
 | `v2-design/` | Designmanual + rettelser (PR #2) | Demo og skærmbilleder i brand-designet med tekstlogo |
 | `v3-onboarding/` | Onboarding-test og CMS (PR #3, første optagelse) | Demo og skærmbilleder af onboarding, board builder og CMS |
 | `v4-foer-produktion/` | Notifikationer, admin-styring og QA (PR #3–#5) | Demo og skærmbilleder før sikkerhedsrettelser, nyt kontrastdesign og manuel aktivering af rådgivere |
+| `v5-foer-mfa-rls/` | Demo efter fase 1+2 (PR #7) | Demo før aktivering, ansvarlig rådgiver, fotos, MFA og RLS |
